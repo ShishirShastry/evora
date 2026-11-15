@@ -17,6 +17,8 @@ import type { BooleanOperand } from '../vector/boolean';
 import { fitVectorNode } from '../vector/fit';
 import { mapNetwork } from '../vector/network';
 import { combineNetworks, hasOutline, shapeNetwork } from '../vector/shapes';
+import { strokeOutline } from '../vector/stroke';
+import { hasVisiblePaint } from '../scene/shapes';
 import { groupNodes, normalizeGroups } from './groups';
 import { insertionKeys } from './ordering';
 
@@ -180,6 +182,70 @@ function replaceWithVector(
   }
   // Groups that gave up everything they held go too.
   return { doc: normalizeGroups(setNodes(patchNodes(doc, rekeyed), changes)), id: vector.id };
+}
+
+/** The selected layers whose stroke can be turned into a shape: those with an outline and a stroke that shows. */
+function strokedLayers(doc: Document, ids: readonly NodeId[]): LayerNode[] {
+  const out: LayerNode[] = [];
+  for (const id of sortByPaintOrder(doc, topLevelIds(doc, ids))) {
+    const node = doc.nodes[id];
+    if (isLayer(node) && hasOutline(node) && node.strokeWeight > 0 && hasVisiblePaint(node.strokes)) out.push(node);
+  }
+  return out;
+}
+
+/** Can `outlineStrokes` do anything with this selection? */
+export function canOutlineStroke(doc: Document, ids: readonly NodeId[]): boolean {
+  return strokedLayers(doc, ids).length > 0;
+}
+
+/**
+ * Turns strokes into shapes. Each selected layer's stroke becomes a vector
+ * layer whose fill is what the stroke was painted with, and which looks the
+ * same. A layer that also has a fill keeps it, loses its stroke, and gets
+ * the new layer directly above it; a layer that was only a stroke is
+ * replaced. Returns the layers that hold the outlines, or null when no
+ * selected layer has a stroke to outline.
+ */
+export function outlineStrokes(doc: Document, ids: readonly NodeId[]): { doc: Document; ids: NodeId[] } | null {
+  let next = doc;
+  const made: NodeId[] = [];
+  for (const node of strokedLayers(doc, ids)) {
+    const network = strokeOutline(node);
+    if (!network) continue;
+    const filled = node.type !== 'LINE' && hasVisiblePaint(node.fills);
+    const shape: LayerPatch = {
+      visible: node.visible,
+      locked: node.locked,
+      opacity: node.opacity,
+      blendMode: node.blendMode,
+      constraints: node.constraints,
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+      rotation: node.rotation,
+      fills: node.strokes,
+      strokes: [],
+      network,
+      windingRule: 'NONZERO',
+    };
+    if (filled) {
+      // The fill stays where it is; the stroke becomes a layer of its own on top of it.
+      const index = getChildIds(next, node.parentId).indexOf(node.id) + 1;
+      const { keys, rekeyed } = insertionKeys(next, node.parentId, index, 1);
+      const vector = createLayer('VECTOR', node.parentId, keys[0] as string, { ...shape, name: `${node.name} stroke` }) as VectorNode;
+      next = setNodes(patchNodes(patchNodes(next, rekeyed), { [node.id]: { strokes: [] } }), { [vector.id]: fitVectorNode(vector) });
+      made.push(vector.id);
+    } else {
+      const vector = createLayer('VECTOR', node.parentId, node.order, { ...shape, name: node.name, effects: node.effects, isMask: node.isMask }) as VectorNode;
+      const changes: Record<NodeId, DesignNode | null> = { [node.id]: fitVectorNode({ ...vector, id: node.id }) };
+      for (const inside of getDescendantIds(next, node.id)) changes[inside] = null;
+      next = setNodes(next, changes);
+      made.push(node.id);
+    }
+  }
+  return made.length > 0 ? { doc: next, ids: made } : null;
 }
 
 export const BOOLEAN_NAMES: Record<BooleanOperation, string> = {

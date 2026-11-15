@@ -31,5 +31,6 @@ export * from './vector/fit';
 export * from './vector/fitCurve';
 export * from './vector/boolean';
 export * from './vector/arrows';
+export * from './vector/stroke';
 export * from './ops/booleans';
 export * from './ops/vector';

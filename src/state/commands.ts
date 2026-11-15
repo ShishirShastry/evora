@@ -12,10 +12,12 @@ import {
   invert,
   isVector,
   moveVertices,
+  outlineStrokes,
   removeVertices,
   setNetwork,
   smoothVertex,
   canFlatten,
+  canOutlineStroke,
   copyNodes,
   deleteNodes,
   deletePage,
@@ -167,6 +169,19 @@ export function flattenSelection(store: EditorStore): void {
     return out.doc;
   });
   if (created.length > 0) store.getState().setSelection(created);
+}
+
+/** Turns the strokes of the selected layers into filled shapes. */
+export function outlineStrokeSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  const made: NodeId[] = [];
+  apply('Outline stroke', (doc) => {
+    const out = outlineStrokes(doc, selection);
+    if (!out) return doc;
+    made.push(...out.ids);
+    return out.doc;
+  });
+  if (made.length > 0) store.getState().setSelection(made);
 }
 
 /** Combines the selected shapes into one vector layer by a boolean operation. */
@@ -889,6 +904,15 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyE', ctrl: true }],
     enabled: (state) => canFlatten(state.doc, state.selection),
     run: ({ store }) => flattenSelection(store),
+  },
+  {
+    id: 'object.outlineStroke',
+    label: 'Outline stroke',
+    group: 'Object',
+    shortcut: 'Ctrl+Shift+O',
+    keys: [{ code: 'KeyO', ctrl: true, shift: true }],
+    enabled: (state) => canOutlineStroke(state.doc, state.selection),
+    run: ({ store }) => outlineStrokeSelection(store),
   },
   {
     id: 'object.mask',
