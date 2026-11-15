@@ -24,7 +24,16 @@ export type IconName =
   | 'close'
   | 'file'
   | 'more'
-  | 'check';
+  | 'check'
+  | 'group'
+  | 'alignLeft'
+  | 'alignCenterX'
+  | 'alignRight'
+  | 'alignTop'
+  | 'alignCenterY'
+  | 'alignBottom'
+  | 'distributeH'
+  | 'distributeV';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -75,6 +84,15 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   check: <path {...s} d="M3.5 8.5l3 3 6-7" />,
+  group: <path {...s} strokeDasharray="2 2" d="M2.5 2.5h11v11h-11z" />,
+  alignLeft: <path {...s} d="M2.5 2v12M5 4.5h7v2.5H5zM5 9h4.5v2.5H5z" />,
+  alignCenterX: <path {...s} d="M8 2v12M4 4.5h8v2.5H4zM5.5 9h5v2.5h-5z" />,
+  alignRight: <path {...s} d="M13.5 2v12M4 4.5h7v2.5H4zM6.5 9H11v2.5H6.5z" />,
+  alignTop: <path {...s} d="M2 2.5h12M4.5 5v7H7V5zM9 5v4.5h2.5V5z" />,
+  alignCenterY: <path {...s} d="M2 8h12M4.5 4v8H7V4zM9 5.5v5h2.5v-5z" />,
+  alignBottom: <path {...s} d="M2 13.5h12M4.5 4v7H7V4zM9 6.5V11h2.5V6.5z" />,
+  distributeH: <path {...s} d="M2.5 2v12M13.5 2v12M6.5 4.5h3v7h-3z" />,
+  distributeV: <path {...s} d="M2 2.5h12M2 13.5h12M4.5 6.5h7v3h-7z" />,
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

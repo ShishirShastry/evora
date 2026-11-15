@@ -14,6 +14,8 @@ export * from './ops/ordering';
 export * from './ops/nodes';
 export * from './ops/transform';
 export * from './ops/arrange';
+export * from './ops/groups';
+export * from './ops/align';
 export * from './ops/pages';
 export * from './ops/clipboard';
 export * from './history/diff';

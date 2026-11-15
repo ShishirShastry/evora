@@ -5,6 +5,7 @@ import {
   deeperTargetAt,
   distance,
   duplicateNodes,
+  enclosingFrameOrPage,
   getLayer,
   getWorldMatrix,
   getWorldRotation,
@@ -22,6 +23,7 @@ import {
   resizeNodesInBounds,
   rotateNodesAround,
   selectionTargetAt,
+  setLayerBox,
   snapAngle,
   topLevelIds,
   TYPE_LABELS,
@@ -441,8 +443,12 @@ export class InteractionController {
     this.state.updateGesture(() => {
       let doc = moveNodesBy(mode.base, mode.ids, dx, dy, true);
       // Dropping onto a frame puts the layers inside it; dragging out takes them out.
+      // A layer inside a group stays in its group while it remains over the same frame.
       const container = containerAt(doc, pageId, world, new Set(mode.ids));
-      const outside = mode.ids.filter((id) => doc.nodes[id]?.parentId !== container);
+      const outside = mode.ids.filter((id) => {
+        const parentId = doc.nodes[id]?.parentId;
+        return parentId != null && enclosingFrameOrPage(doc, parentId) !== container;
+      });
       if (outside.length > 0) doc = reparentNodes(doc, outside, container);
       return doc;
     }, mode.ids);
@@ -460,7 +466,7 @@ export class InteractionController {
         fromCenter: e.altKey,
         snap: getWorldRotation(base, single.id) === 0,
       });
-      this.state.updateGesture(() => patchNode(base, single.id, box));
+      this.state.updateGesture(() => setLayerBox(base, single.id, box));
       return;
     }
     const from = frame.bounds;

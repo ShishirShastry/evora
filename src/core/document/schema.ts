@@ -1,21 +1,21 @@
 /**
- * OPEN DESIGN document schema, version 1.
+ * OPEN DESIGN document schema, version 2 (version 1 plus the GROUP layer type).
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
 export type NodeId = string;
 
-export type LayerType = 'FRAME' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR';
+export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR';
 export type NodeType = 'PAGE' | LayerType;
 
-export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR'];
+export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR'];
 export const NODE_TYPES: readonly NodeType[] = ['PAGE', ...LAYER_TYPES];
 /** Types that may have children. */
-export const CONTAINER_TYPES: readonly NodeType[] = ['PAGE', 'FRAME'];
+export const CONTAINER_TYPES: readonly NodeType[] = ['PAGE', 'FRAME', 'GROUP'];
 
 export interface RGB {
   r: number;
@@ -75,6 +75,14 @@ export interface FrameNode extends LayerBase {
   cornerRadius: number;
 }
 
+/**
+ * A group has no appearance of its own. Its box is always the bounding box of
+ * its children and is kept that way automatically (see `normalizeGroups`).
+ */
+export interface GroupNode extends LayerBase {
+  type: 'GROUP';
+}
+
 export interface RectangleNode extends LayerBase {
   type: 'RECTANGLE';
   cornerRadius: number;
@@ -100,7 +108,7 @@ export interface StarNode extends LayerBase {
   innerRadius: number;
 }
 
-export type LayerNode = FrameNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode;
+export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode;
 export type DesignNode = PageNode | LayerNode;
 
 export type NodeMap = Readonly<Record<NodeId, DesignNode>>;
@@ -136,8 +144,12 @@ export function isFrame(node: DesignNode | undefined): node is FrameNode {
   return node !== undefined && node.type === 'FRAME';
 }
 
-export function isContainer(node: DesignNode | undefined): node is PageNode | FrameNode {
-  return node !== undefined && (node.type === 'PAGE' || node.type === 'FRAME');
+export function isGroup(node: DesignNode | undefined): node is GroupNode {
+  return node !== undefined && node.type === 'GROUP';
+}
+
+export function isContainer(node: DesignNode | undefined): node is PageNode | FrameNode | GroupNode {
+  return node !== undefined && (node.type === 'PAGE' || node.type === 'FRAME' || node.type === 'GROUP');
 }
 
 export function hasCornerRadius(node: DesignNode | undefined): node is FrameNode | RectangleNode {

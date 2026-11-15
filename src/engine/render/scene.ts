@@ -59,7 +59,7 @@ export function getRenderBounds(doc: Document, id: NodeId): Rect {
   let bounds = getWorldBounds(doc, id);
   if (isLayer(node)) {
     if (node.strokeWeight > 0 && node.strokes.length > 0) bounds = expandRect(bounds, node.strokeWeight);
-    if (node.type === 'FRAME' && !node.clipsContent) {
+    if ((node.type === 'FRAME' && !node.clipsContent) || node.type === 'GROUP') {
       const parts = [bounds];
       for (const childId of getChildIds(doc, id)) {
         const child = doc.nodes[childId];
@@ -159,10 +159,10 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
   const paintLayer = (target: Ctx, id: NodeId, node: LayerNode): void => {
     setLayerTransform(target, id);
     fill(target, node);
-    if (node.type === 'FRAME') {
+    if (node.type === 'FRAME' || node.type === 'GROUP') {
       if (getChildIds(doc, id).length > 0) {
         target.save();
-        if (node.clipsContent) {
+        if (node.type === 'FRAME' && node.clipsContent) {
           traceLayerPath(target, node);
           target.clip();
         }
@@ -192,7 +192,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     const paintCount =
       (node.type !== 'LINE' && hasVisiblePaint(node.fills) ? node.fills.length : 0) +
       (node.strokeWeight > 0 ? node.strokes.length : 0);
-    const isGroup = node.type === 'FRAME' && getChildIds(doc, id).length > 0;
+    const isGroup = (node.type === 'FRAME' || node.type === 'GROUP') && getChildIds(doc, id).length > 0;
     if ((!isGroup && paintCount <= 1) || !options.createCanvas) {
       const previous = target.globalAlpha;
       target.globalAlpha = previous * node.opacity;

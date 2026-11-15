@@ -7,6 +7,9 @@ import { PopupMenu, type MenuItem } from '../components/Menu';
 import { useEditorContext } from './EditorContext';
 import { canvasMenu, layerMenu } from './menus';
 
+const DOUBLE_CLICK_MS = 400;
+const DOUBLE_CLICK_DISTANCE = 6;
+
 function toPointer(event: PointerEvent | MouseEvent, rect: DOMRect): PointerInput {
   return {
     x: event.clientX - rect.left,
@@ -136,13 +139,25 @@ export function CanvasView() {
 
     const rectOf = (): DOMRect => overlay.getBoundingClientRect();
 
+    // Pointer events do not carry a click count (their `detail` is always 0),
+    // so double-clicks are recognised here: a second press of the same button
+    // soon after the first and in nearly the same place.
+    let lastPress = { time: -Infinity, x: 0, y: 0, button: -1, count: 0 };
+
     const onPointerDown = (event: PointerEvent): void => {
       if (event.button === 2) return;
       // Leave any focused text field so its value is committed before the edit.
       (document.activeElement as HTMLElement | null)?.blur?.();
       overlay.setPointerCapture(event.pointerId);
       if (event.button === 1) event.preventDefault();
-      controller.pointerDown(toPointer(event, rectOf()));
+      const input = toPointer(event, rectOf());
+      const repeat =
+        event.button === lastPress.button &&
+        event.timeStamp - lastPress.time < DOUBLE_CLICK_MS &&
+        Math.hypot(input.x - lastPress.x, input.y - lastPress.y) < DOUBLE_CLICK_DISTANCE;
+      input.detail = repeat ? lastPress.count + 1 : 1;
+      lastPress = { time: event.timeStamp, x: input.x, y: input.y, button: event.button, count: input.detail };
+      controller.pointerDown(input);
     };
     const onPointerMove = (event: PointerEvent): void => controller.pointerMove(toPointer(event, rectOf()));
     const onPointerUp = (event: PointerEvent): void => {

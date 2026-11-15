@@ -10,6 +10,7 @@ import {
   lineEndpoints,
   patchNodes,
   resizeFromTopLeft,
+  setLayerBox,
   solidPaint,
   TYPE_LABELS,
   type Document,
@@ -20,11 +21,11 @@ import {
   type RGB,
   type StrokeAlign,
 } from '../../core';
-import { updateLayers } from '../../state/commands';
+import { getCommand, updateLayers, type Command } from '../../state/commands';
 import type { EditorStore } from '../../state/editorStore';
 import { ColorField, MIXED, NumberField, type Mixed } from '../components/Fields';
-import { Icon } from '../components/Icon';
-import { useEditor, useEditorContext } from '../editor/EditorContext';
+import { Icon, type IconName } from '../components/Icon';
+import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 
 function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -161,6 +162,44 @@ function PaintList({ title, paintKey, layers, defaultColor, children }: PaintLis
   );
 }
 
+const ARRANGE_BUTTONS: { id: string; icon: IconName }[] = [
+  { id: 'arrange.align.left', icon: 'alignLeft' },
+  { id: 'arrange.align.centerX', icon: 'alignCenterX' },
+  { id: 'arrange.align.right', icon: 'alignRight' },
+  { id: 'arrange.align.top', icon: 'alignTop' },
+  { id: 'arrange.align.centerY', icon: 'alignCenterY' },
+  { id: 'arrange.align.bottom', icon: 'alignBottom' },
+  { id: 'arrange.distribute.horizontal', icon: 'distributeH' },
+  { id: 'arrange.distribute.vertical', icon: 'distributeV' },
+];
+
+/** Align and distribute buttons. They run the same commands as the Arrange menu and its shortcuts. */
+function ArrangeBar() {
+  const run = useRunCommand();
+  // Re-render when anything that affects availability changes.
+  const state = useEditor((s) => s);
+  return (
+    <div role="toolbar" aria-label="Align and distribute" className="flex h-10 items-center justify-between border-b border-line px-2">
+      {ARRANGE_BUTTONS.map(({ id, icon }) => {
+        const command = getCommand(id) as Command;
+        return (
+          <button
+            key={id}
+            type="button"
+            className="od-icon-button !h-7 !w-7"
+            aria-label={command.label}
+            title={`${command.label} (${command.shortcut})`}
+            disabled={command.enabled ? !command.enabled(state) : false}
+            onClick={() => run(command)}
+          >
+            <Icon name={icon} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PageProperties() {
   const { store } = useEditorContext();
   const doc = useEditor((s) => s.doc);
@@ -210,6 +249,8 @@ export function DesignPanel() {
   const radiusLayers = layers.filter(hasCornerRadius);
   const frames = layers.filter((layer) => layer.type === 'FRAME');
   const pointLayers = layers.filter((layer) => layer.type === 'POLYGON' || layer.type === 'STAR');
+  // Groups have no appearance of their own, so they are left out of fills and strokes.
+  const paintable = layers.filter((layer) => layer.type !== 'GROUP');
   const stars = layers.filter((layer) => layer.type === 'STAR');
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
 
@@ -228,7 +269,12 @@ export function DesignPanel() {
       }
       patches[layer.id] = resizeFromTopLeft(layer, size.width ?? layer.width, size.height ?? layer.height);
     }
-    store.getState().apply(label, (d) => patchNodes(d, patches));
+    // setLayerBox scales the contents of groups along with their box.
+    store.getState().apply(label, (d) => {
+      let next = d;
+      for (const id in patches) next = setLayerBox(next, id, patches[id] as LayerPatch);
+      return next;
+    });
   };
 
   const title = layers.length === 1 ? TYPE_LABELS[first.type] : `${layers.length} layers`;
@@ -236,6 +282,7 @@ export function DesignPanel() {
   return (
     <aside aria-label="Design properties" className="h-full overflow-y-auto">
       <div className="flex h-9 items-center border-b border-line px-3 font-medium">{title}</div>
+      <ArrangeBar />
 
       <Section title="Position and size">
         <Row>
@@ -333,9 +380,12 @@ export function DesignPanel() {
         </Row>
       </Section>
 
-      {!allLines && <PaintList title="Fill" paintKey="fills" layers={layers.filter((l) => l.type !== 'LINE')} defaultColor={DEFAULT_SHAPE_FILL} />}
+      {paintable.some((l) => l.type !== 'LINE') && (
+        <PaintList title="Fill" paintKey="fills" layers={paintable.filter((l) => l.type !== 'LINE')} defaultColor={DEFAULT_SHAPE_FILL} />
+      )}
 
-      <PaintList title="Stroke" paintKey="strokes" layers={layers} defaultColor={BLACK}>
+      {paintable.length > 0 && (
+      <PaintList title="Stroke" paintKey="strokes" layers={paintable} defaultColor={BLACK}>
         <Row>
           <NumberField
             label="Stroke weight"
@@ -359,6 +409,7 @@ export function DesignPanel() {
           )}
         </Row>
       </PaintList>
+      )}
     </aside>
   );
 }

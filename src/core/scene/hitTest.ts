@@ -33,6 +33,9 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
   switch (node.type) {
     case 'FRAME':
       return inBox(p, width, height, 0);
+    case 'GROUP':
+      // A group is hit only through its children.
+      return false;
     case 'RECTANGLE':
       if (solid) return inBox(p, width, height, 0);
       return inBox(p, width, height, edge) && !inBox({ x: p.x - edge * 2, y: p.y - edge * 2 }, width - edge * 4, height - edge * 4, 0);
@@ -82,6 +85,11 @@ export function hitTestDeepest(doc: Document, pageId: NodeId, point: Point, tole
         const child = search(id);
         if (child) return child;
         if (inside) return id;
+        continue;
+      }
+      if (node.type === 'GROUP') {
+        const child = search(id);
+        if (child) return child;
         continue;
       }
       if (hitsShape(node, local, tolerance)) return id;
@@ -190,6 +198,23 @@ export function nodesInRect(doc: Document, pageId: NodeId, rect: Rect): NodeId[]
     } else if (boxIntersectsRect(doc, id, rect)) out.push(id);
   }
   return out;
+}
+
+/**
+ * The frame or page a container ultimately sits in, looking through groups.
+ * A layer inside a group "lives" in the frame around that group: dragging it
+ * about within that frame must not take it out of its group.
+ */
+export function enclosingFrameOrPage(doc: Document, containerId: NodeId): NodeId {
+  let current = containerId;
+  const seen = new Set<NodeId>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    const node = doc.nodes[current];
+    if (!isLayer(node) || node.type !== 'GROUP') break;
+    current = node.parentId;
+  }
+  return current;
 }
 
 /**

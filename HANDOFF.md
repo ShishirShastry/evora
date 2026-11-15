@@ -1,6 +1,6 @@
 # OPEN DESIGN — Handoff note
 
-Last updated: 2026-11-15, end of Phase 1.
+Last updated: 2026-11-15, after the first slice of Phase 2 (groups and arranging).
 
 ## Where the project stands
 
@@ -8,7 +8,8 @@ Last updated: 2026-11-15, end of Phase 1.
 |---|---|
 | 0 — Planning | Partly done, then stopped at the owner's request. `PROJECT_ARCHITECTURE.md` and `DOCUMENT_SCHEMA.md` exist. The other four planning documents were **not written**. |
 | 1 — Editor foundation | **Implemented and tested.** Acceptance criterion met (see below). |
-| 2 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
+| 2 — Design functionality | **Started.** Done and tested: groups, align, distribute, flip. Everything else in Phase 2 is **not started** (see "Next actions"). The Phase 2 acceptance criterion is **not** met. |
+| 3 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
 
 How to run and check the project: [README.md](README.md).
 
@@ -28,11 +29,13 @@ All of this is wired to the real document model, is undoable, and is saved autom
 - **Properties panel.** X, Y, W, H, rotation, corner radius, polygon points, star ratio, clip content, layer opacity, fills and strokes (colour, opacity, visibility, add/remove), stroke weight and position, page background. Multi-selection shows "Mixed".
 - **Undo / redo** for every document change, one step per gesture, restoring selection and page.
 - **Edit commands.** Cut, copy, paste, duplicate, delete, select all, bring to front / forward / backward / to back.
+- **Groups (Phase 2).** Group (Ctrl+G) and ungroup (Ctrl+Shift+G, also dissolves frames). A group's box always fits its children; resizing a group scales its contents; an emptied group disappears. Click selects the group, double-click goes inside; a layer dragged about inside a group stays in it.
+- **Arrange (Phase 2).** Align left / centre / right / top / middle / bottom (to the selection, or to the parent frame for a single layer), distribute horizontal and vertical spacing, flip horizontal and vertical. Available from the properties panel, the Arrange and Object menus and shortcuts.
 - **Menus and shortcuts.** Main menu (File, Edit, View, Object, Help), context menus and a shortcut reference, all generated from one command table, so a menu item and its shortcut cannot disagree.
 
 ## What is tested
 
-Run on 2026-11-15: TypeScript clean; **137 unit tests** and **4 browser acceptance tests** pass; production build succeeds.
+Run on 2026-11-15: TypeScript clean; **160 unit tests** and **5 browser acceptance tests** pass; production build succeeds.
 
 - `src/core/core.test.ts`, `src/core/document/validate.test.ts` — document operations, transforms, ordering, hit testing, selection rules, history diff, validation and repair, file format and version handling.
 - `src/state/editor.test.ts` — the real store and the real tools driven with pointer sequences: drawing, selecting, moving, nesting, resizing, rotating, pan and zoom, commands, pages, history.
@@ -40,14 +43,18 @@ Run on 2026-11-15: TypeScript clean; **137 unit tests** and **4 browser acceptan
 - `src/engine/render/render.test.ts` — culling, hidden layers, a 10,000-layer page.
 - `src/architecture.test.ts` — module boundaries (the core imports nothing outside itself).
 - `e2e/phase1.spec.ts` — the Phase 1 acceptance criterion end to end in Microsoft Edge with real mouse and keyboard, including a reload and reopening from the file browser.
+- `src/core/ops/arrange.test.ts`, `src/state/arrange.test.ts` — groups (fit, nesting, scaling, removal when empty), align, distribute, flip, and opening a version 1 file in the version 2 format.
+- `e2e/phase2.spec.ts` — group, ungroup, align, distribute and flip in the browser, including a reload.
 - `e2e/rendering.spec.ts` — reads real pixels from the canvas: fills, clipping, ellipse shape, strokes, hidden layers, undo.
 
 Not covered by automated tests: the native save/open file dialogs (`src/persistence/diskIO.ts`), drag-and-drop reordering in the layers panel, context menus, the colour picker's live preview, and any browser other than Edge. These were written to work but have not been exercised by a test.
 
 ## Known limitations and rough edges
 
-- No text, images, groups, gradients, effects, snapping, guides, rulers, alignment, constraints or Auto Layout yet: those are Phase 2 and later.
-- Dragging a resize handle past the opposite edge flips the box but does not mirror its content (there is no flip property yet).
+- No text, images, gradients, effects, snapping, guides, rulers, constraints or Auto Layout yet: those are the rest of Phase 2 and later.
+- Dragging a resize handle past the opposite edge flips the box but does not mirror its content. (The Flip commands do mirror correctly.)
+- Flip is exact for today's shapes because they are all symmetric; text, images and vector paths will need a real flip property (noted in DOCUMENT_SCHEMA.md §6).
+- Alt+D (align right) is also the browser's "focus address bar" shortcut and the browser may take it first; the button and the menu item always work.
 - Resizing a multi-selection that contains rotated layers scales their boxes approximately; it cannot skew.
 - Copy and paste work inside the application only, not through the system clipboard.
 - Clicking a rounded rectangle is tested against its square box, not its rounded outline.
@@ -68,11 +75,11 @@ Not covered by automated tests: the native save/open file dialogs (`src/persiste
 
 Phase 2 (static design), suggested order, each to be finished with tests before the next:
 
-1. Groups (Ctrl+G / Ctrl+Shift+G), alignment and distribution, flip.
+1. ~~Groups, alignment and distribution, flip.~~ Done.
 2. Snapping to pixels, objects and frame edges with smart guides; rulers and draggable guides.
 3. Appearance: gradients, multiple strokes with dash/cap/join, independent corner radii, shadows and blurs, blend modes.
 4. Text layers with inline editing and font properties.
 5. Images: import (file, drag-and-drop, paste), fill modes, crop; this needs the asset store and schema version 2 (zip container).
 6. Constraints and layout grids.
 
-Each schema addition needs a version bump and a migration with a fixture test (see `MIGRATIONS` in `src/core/document/serialize.ts`).
+Each schema addition needs a version bump and a migration with a fixture test (see `MIGRATIONS` in `src/core/document/serialize.ts`). The schema is currently at version 2.

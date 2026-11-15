@@ -24,6 +24,7 @@ interface Row {
 
 const TYPE_ICONS: Record<LayerNode['type'], IconName> = {
   FRAME: 'frame',
+  GROUP: 'group',
   RECTANGLE: 'rectangle',
   ELLIPSE: 'ellipse',
   LINE: 'line',

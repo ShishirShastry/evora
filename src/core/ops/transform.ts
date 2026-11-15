@@ -2,7 +2,7 @@ import { patchNodes } from '../document/mutate';
 import { isLayer, type Document, type LayerPatch, type NodeId } from '../document/schema';
 import { normalizeAngle, rotatePoint, type Point, type Rect } from '../math/geometry';
 import { applyToPoint, applyToVector, invert } from '../math/matrix';
-import { getWorldMatrix, getWorldRotation, topLevelIds } from '../scene/tree';
+import { getChildIds, getWorldMatrix, getWorldRotation, topLevelIds } from '../scene/tree';
 
 export const MIN_SIZE = 1;
 
@@ -190,6 +190,49 @@ export function resizeFromTopLeft(box: Box, width: number, height: number): Box 
 }
 
 /**
+ * Scales everything inside a group by `sx, sy` along the group's own axes,
+ * about the group's origin. Nested groups are scaled recursively.
+ */
+function scaleChildren(doc: Document, groupId: NodeId, sx: number, sy: number): Document {
+  if (sx === 1 && sy === 1) return doc;
+  const patches: Record<NodeId, LayerPatch> = {};
+  const nested: [NodeId, number, number][] = [];
+  for (const childId of getChildIds(doc, groupId)) {
+    const child = doc.nodes[childId];
+    if (!isLayer(child)) continue;
+    const r = (child.rotation * Math.PI) / 180;
+    const width = child.width * Math.hypot(sx * Math.cos(r), sy * Math.sin(r));
+    const height = child.height * Math.hypot(sx * Math.sin(r), sy * Math.cos(r));
+    const cx = (child.x + child.width / 2) * sx;
+    const cy = (child.y + child.height / 2) * sy;
+    patches[childId] = { x: clean(cx - width / 2), y: clean(cy - height / 2), width: clean(width), height: clean(height) };
+    if (child.type === 'GROUP') {
+      nested.push([childId, child.width > 0 ? width / child.width : 1, child.height > 0 ? height / child.height : 1]);
+    }
+  }
+  let next = patchNodes(doc, patches);
+  for (const [childId, cx, cy] of nested) next = scaleChildren(next, childId, cx, cy);
+  return next;
+}
+
+/**
+ * Gives a layer a new box. For a group this scales its contents to match,
+ * because a group's size is defined by what is inside it; for every other
+ * layer it is a plain property change.
+ */
+export function setLayerBox(doc: Document, id: NodeId, box: Partial<Box>): Document {
+  const node = doc.nodes[id];
+  if (!isLayer(node)) return doc;
+  let next = patchNodes(doc, { [id]: box });
+  if (node.type === 'GROUP') {
+    const sx = box.width !== undefined && node.width > 0 ? box.width / node.width : 1;
+    const sy = box.height !== undefined && node.height > 0 ? box.height / node.height : 1;
+    next = scaleChildren(next, id, sx, sy);
+  }
+  return next;
+}
+
+/**
  * Scales layers so that what occupied the page-space rectangle `from` now
  * occupies `to`. Used for resizing a multi-selection. Children of a resized
  * frame keep their positions inside it.
@@ -203,7 +246,7 @@ export function resizeNodesInBounds(
 ): Document {
   const sx = from.width > 0 ? to.width / from.width : 1;
   const sy = from.height > 0 ? to.height / from.height : 1;
-  const patches: Record<NodeId, LayerPatch> = {};
+  const boxes: [NodeId, Partial<Box>][] = [];
   for (const id of topLevelIds(doc, ids)) {
     const node = doc.nodes[id];
     if (!isLayer(node)) continue;
@@ -226,14 +269,19 @@ export function resizeNodesInBounds(
       height = Math.max(node.height >= MIN_SIZE ? MIN_SIZE : 0, Math.round(height));
     }
     const placed = placementInParent(doc, node.parentId, newCenter, width, height, worldRotation);
-    patches[id] = {
-      x: exact ? Math.round(placed.x) : placed.x,
-      y: exact ? Math.round(placed.y) : placed.y,
-      width: clean(width),
-      height: clean(height),
-    };
+    boxes.push([
+      id,
+      {
+        x: exact ? Math.round(placed.x) : placed.x,
+        y: exact ? Math.round(placed.y) : placed.y,
+        width: clean(width),
+        height: clean(height),
+      },
+    ]);
   }
-  return patchNodes(doc, patches);
+  let next = doc;
+  for (const [id, box] of boxes) next = setLayerBox(next, id, box);
+  return next;
 }
 
 /** Rotates layers by `delta` degrees about a pivot given in page space. */

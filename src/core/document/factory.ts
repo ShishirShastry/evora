@@ -18,6 +18,7 @@ export const BLACK: RGB = { r: 0, g: 0, b: 0 };
 
 export const TYPE_LABELS: Record<LayerType, string> = {
   FRAME: 'Frame',
+  GROUP: 'Group',
   RECTANGLE: 'Rectangle',
   ELLIPSE: 'Ellipse',
   LINE: 'Line',
@@ -78,6 +79,9 @@ export function createLayer(
   switch (type) {
     case 'FRAME':
       node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0 };
+      break;
+    case 'GROUP':
+      node = { ...base, type, fills: [] };
       break;
     case 'RECTANGLE':
       node = { ...base, type, cornerRadius: 0 };

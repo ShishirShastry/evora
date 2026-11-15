@@ -5,6 +5,7 @@ import {
   getPageIdOf,
   getPages,
   isLayer,
+  normalizeGroups,
   type Document,
   type DocumentPatch,
   type NodeId,
@@ -173,7 +174,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       apply(label, fn, options) {
         if (get().gesture) get().commitGesture('Edit');
         const state = get();
-        const next = fn(state.doc);
+        const next = normalizeGroups(fn(state.doc));
         const patch = diffDocuments(state.doc, next);
         if (!patch) {
           const selection = sanitizeSelection(state.doc, state.pageId, options?.select ?? state.selection);
@@ -204,7 +205,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       updateGesture(fn, select) {
         const state = get();
         if (!state.gesture) return;
-        const next = fn(state.gesture.doc);
+        const next = normalizeGroups(fn(state.gesture.doc));
         const selection = select ? sanitizeSelection(next, state.pageId, select) : sanitizeSelection(next, state.pageId, state.selection);
         if (next === state.doc && sameIds(selection, state.selection)) return;
         set({ doc: next, selection });

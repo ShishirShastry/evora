@@ -27,7 +27,9 @@ function isObject(value: unknown): value is Raw {
  * must be pure, and each needs a unit test with a stored fixture.
  */
 export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
-  // 1: (file) => ({ ...file, schemaVersion: 2, ... }),
+  // Version 2 adds the GROUP layer type. A version 1 file contains no groups,
+  // so its content is already valid version 2 content.
+  1: (file) => ({ ...file, schemaVersion: 2 }),
 };
 
 /**

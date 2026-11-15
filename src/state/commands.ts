@@ -1,13 +1,19 @@
 import {
   addPage,
+  alignNodes,
   copyNodes,
   deleteNodes,
   deletePage,
+  distributeNodes,
   duplicateNodes,
   duplicatePage,
+  flipNodes,
   getChildIds,
   getPages,
   getWorldBounds,
+  groupNodes,
+  isContainer,
+  isFrame,
   isLayer,
   moveNodesBy,
   pasteNodes,
@@ -15,8 +21,12 @@ import {
   rectCenter,
   rectsIntersect,
   reorderNodes,
+  ungroupNodes,
   unionRects,
+  type AlignMode,
   type ClipboardPayload,
+  type DistributeAxis,
+  type FlipAxis,
   type LayerPatch,
   type NodeId,
   type Rect,
@@ -163,6 +173,72 @@ export function updateLayers(store: EditorStore, label: string, ids: readonly No
   store.getState().apply(label, (doc) => patchNodes(doc, patches));
 }
 
+// ------------------------------------------------------------------ arrange
+
+export function groupSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  if (selection.length === 0) return;
+  let created: NodeId | null = null;
+  apply('Group', (doc) => {
+    const out = groupNodes(doc, selection);
+    if (!out) return doc;
+    created = out.id;
+    return out.doc;
+  });
+  if (created) store.getState().setSelection([created]);
+}
+
+export function ungroupSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  let released: NodeId[] = [];
+  apply('Ungroup', (doc) => {
+    const out = ungroupNodes(doc, selection);
+    released = out.ids;
+    return out.doc;
+  });
+  if (released.length > 0) store.getState().setSelection(released);
+}
+
+const ALIGN_LABELS: Record<AlignMode, string> = {
+  left: 'Align left',
+  centerX: 'Align horizontal centres',
+  right: 'Align right',
+  top: 'Align top',
+  centerY: 'Align vertical centres',
+  bottom: 'Align bottom',
+};
+
+export function alignSelection(store: EditorStore, mode: AlignMode): void {
+  const { selection, apply } = store.getState();
+  apply(ALIGN_LABELS[mode], (doc) => alignNodes(doc, selection, mode));
+}
+
+export function distributeSelection(store: EditorStore, axis: DistributeAxis): void {
+  const { selection, apply } = store.getState();
+  apply(axis === 'horizontal' ? 'Distribute horizontal spacing' : 'Distribute vertical spacing', (doc) =>
+    distributeNodes(doc, selection, axis),
+  );
+}
+
+export function flipSelection(store: EditorStore, axis: FlipAxis): void {
+  const { selection, apply } = store.getState();
+  apply(axis === 'horizontal' ? 'Flip horizontal' : 'Flip vertical', (doc) => flipNodes(doc, selection, axis));
+}
+
+/** Aligning needs something to align to: other selected layers, or the frame a single layer is in. */
+export function canAlign(state: EditorState): boolean {
+  if (state.selection.length > 1) return true;
+  const only = state.selection[0] !== undefined ? state.doc.nodes[state.selection[0]] : undefined;
+  return isLayer(only) && isFrame(state.doc.nodes[only.parentId]);
+}
+
+export function canUngroup(state: EditorState): boolean {
+  return state.selection.some((id) => {
+    const node = state.doc.nodes[id];
+    return isLayer(node) && isContainer(node) && getChildIds(state.doc, id).length > 0;
+  });
+}
+
 // -------------------------------------------------------------------- pages
 
 export function createPage(store: EditorStore): void {
@@ -279,7 +355,7 @@ export interface KeyBinding {
   alt?: boolean;
 }
 
-export type CommandGroup = 'Tools' | 'File' | 'Edit' | 'View' | 'Object' | 'Help';
+export type CommandGroup = 'Tools' | 'File' | 'Edit' | 'View' | 'Object' | 'Arrange' | 'Help';
 
 export interface Command {
   id: string;
@@ -293,6 +369,18 @@ export interface Command {
 }
 
 const hasSelection = (state: EditorState): boolean => state.selection.length > 0;
+
+function alignCommand(mode: AlignMode, code: string): Command {
+  return {
+    id: `arrange.align.${mode}`,
+    label: ALIGN_LABELS[mode],
+    group: 'Arrange',
+    shortcut: `Alt+${code.replace('Key', '')}`,
+    keys: [{ code, alt: true }],
+    enabled: canAlign,
+    run: ({ store }) => alignSelection(store, mode),
+  };
+}
 
 function toolCommand(tool: ToolId, label: string, code?: string): Command {
   return {
@@ -540,6 +628,42 @@ export const COMMANDS: readonly Command[] = [
     run: ({ store }) => reorderSelection(store, 'back'),
   },
   {
+    id: 'object.group',
+    label: 'Group selection',
+    group: 'Object',
+    shortcut: 'Ctrl+G',
+    keys: [{ code: 'KeyG', ctrl: true }],
+    enabled: hasSelection,
+    run: ({ store }) => groupSelection(store),
+  },
+  {
+    id: 'object.ungroup',
+    label: 'Ungroup',
+    group: 'Object',
+    shortcut: 'Ctrl+Shift+G',
+    keys: [{ code: 'KeyG', ctrl: true, shift: true }],
+    enabled: canUngroup,
+    run: ({ store }) => ungroupSelection(store),
+  },
+  {
+    id: 'object.flipHorizontal',
+    label: 'Flip horizontal',
+    group: 'Object',
+    shortcut: 'Shift+H',
+    keys: [{ code: 'KeyH', shift: true }],
+    enabled: hasSelection,
+    run: ({ store }) => flipSelection(store, 'horizontal'),
+  },
+  {
+    id: 'object.flipVertical',
+    label: 'Flip vertical',
+    group: 'Object',
+    shortcut: 'Shift+V',
+    keys: [{ code: 'KeyV', shift: true }],
+    enabled: hasSelection,
+    run: ({ store }) => flipSelection(store, 'vertical'),
+  },
+  {
     id: 'object.rename',
     label: 'Rename',
     group: 'Object',
@@ -568,6 +692,31 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyL', ctrl: true, shift: true }],
     enabled: hasSelection,
     run: ({ store }) => toggleLocked(store),
+  },
+
+  alignCommand('left', 'KeyA'),
+  alignCommand('centerX', 'KeyH'),
+  alignCommand('right', 'KeyD'),
+  alignCommand('top', 'KeyW'),
+  alignCommand('centerY', 'KeyV'),
+  alignCommand('bottom', 'KeyS'),
+  {
+    id: 'arrange.distribute.horizontal',
+    label: 'Distribute horizontal spacing',
+    group: 'Arrange',
+    shortcut: 'Ctrl+Alt+H',
+    keys: [{ code: 'KeyH', ctrl: true, alt: true }],
+    enabled: (state) => state.selection.length >= 3,
+    run: ({ store }) => distributeSelection(store, 'horizontal'),
+  },
+  {
+    id: 'arrange.distribute.vertical',
+    label: 'Distribute vertical spacing',
+    group: 'Arrange',
+    shortcut: 'Ctrl+Alt+V',
+    keys: [{ code: 'KeyV', ctrl: true, alt: true }],
+    enabled: (state) => state.selection.length >= 3,
+    run: ({ store }) => distributeSelection(store, 'vertical'),
   },
 
   {

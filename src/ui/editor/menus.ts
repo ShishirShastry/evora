@@ -25,10 +25,16 @@ export function layerMenu(env: CommandEnv, state: EditorState): MenuItem[] {
     item('edit.paste'),
     item('edit.duplicate'),
     separator,
+    item('object.group'),
+    item('object.ungroup'),
+    separator,
     item('object.front'),
     item('object.forward'),
     item('object.backward'),
     item('object.back'),
+    separator,
+    item('object.flipHorizontal'),
+    item('object.flipVertical'),
     separator,
     item('object.rename'),
     item('object.toggleVisible'),
@@ -71,6 +77,12 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
   ],
   View: ['view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100'],
   Object: [
+    'object.group',
+    'object.ungroup',
+    '-',
+    'object.flipHorizontal',
+    'object.flipVertical',
+    '-',
     'object.front',
     'object.forward',
     'object.backward',
@@ -80,10 +92,22 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
     'object.toggleVisible',
     'object.toggleLocked',
   ],
+  Arrange: [
+    'arrange.align.left',
+    'arrange.align.centerX',
+    'arrange.align.right',
+    '-',
+    'arrange.align.top',
+    'arrange.align.centerY',
+    'arrange.align.bottom',
+    '-',
+    'arrange.distribute.horizontal',
+    'arrange.distribute.vertical',
+  ],
   Help: ['help.shortcuts'],
 };
 
-/** The application's main menu: File, Edit, View, Object, Help. */
+/** The application's main menu: File, Edit, View, Object, Arrange, Help. */
 export function mainMenu(env: CommandEnv, state: EditorState, extra: { renameFile: () => void }): MenuItem[] {
   const build = (ids: string[]): MenuItem[] => ids.map((id) => (id === '-' ? separator : commandItem(id, env, state)));
   const file = build(MENU_ORDER.File);
@@ -93,13 +117,14 @@ export function mainMenu(env: CommandEnv, state: EditorState, extra: { renameFil
     { type: 'submenu', label: 'Edit', items: build(MENU_ORDER.Edit) },
     { type: 'submenu', label: 'View', items: build(MENU_ORDER.View) },
     { type: 'submenu', label: 'Object', items: build(MENU_ORDER.Object) },
+    { type: 'submenu', label: 'Arrange', items: build(MENU_ORDER.Arrange) },
     { type: 'submenu', label: 'Help', items: build(MENU_ORDER.Help) },
   ];
 }
 
 /** Commands grouped for the keyboard shortcut reference. Only commands that have a shortcut are listed. */
 export function shortcutGroups(): { group: CommandGroup; commands: Command[] }[] {
-  const order: CommandGroup[] = ['Tools', 'Edit', 'View', 'Object', 'File', 'Help'];
+  const order: CommandGroup[] = ['Tools', 'Edit', 'Object', 'Arrange', 'View', 'File', 'Help'];
   return order
     .map((group) => ({ group, commands: COMMANDS.filter((c) => c.group === group && c.shortcut) }))
     .filter((entry) => entry.commands.length > 0);
