@@ -6,6 +6,7 @@ import {
   getWorldRotation,
   isFrame,
   isLayer,
+  isPage,
   rectToPolygon,
   type Document,
   type NodeId,
@@ -17,6 +18,7 @@ import {
 import { getSelectionFrame } from '../input/selectionFrame';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
 import { traceLayerPath } from './paint';
+import { drawGuides, drawRulers } from './rulers';
 
 export const ACCENT = '#19c2b3';
 const ACCENT_FILL = 'rgba(25, 194, 179, 0.12)';
@@ -53,6 +55,8 @@ export interface OverlayInput {
   guides?: readonly SnapGuide[];
   /** Draw the layout grids of frames. On by default. */
   showLayoutGrids?: boolean;
+  /** Draw the rulers and the page's ruler guides. Off by default. */
+  showRulers?: boolean;
 }
 
 const gridFrameCache = new WeakMap<NodeMap, Map<NodeId, NodeId[]>>();
@@ -263,6 +267,14 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     ctx.strokeStyle = ACCENT;
     ctx.lineWidth = 1;
     ctx.stroke();
+  }
+
+  // Ruler guides run across everything; the rulers themselves sit on top of it all.
+  if (input.showRulers) {
+    const page = doc.nodes[pageId];
+    const guides = isPage(page) ? page.guides : [];
+    drawGuides(ctx, { viewport, size, guides });
+    drawRulers(ctx, { viewport, size, guides, selection: frame ? frame.bounds : null });
   }
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -35,7 +35,7 @@ export function duplicatePage(doc: Document, pageId: NodeId): { doc: Document; i
     });
   }
   const next = patchNodes(setNodes(added.doc, changes), {
-    [added.id]: { backgroundColor: { ...source.backgroundColor } },
+    [added.id]: { backgroundColor: { ...source.backgroundColor }, guides: source.guides.map((guide) => ({ ...guide })) },
   });
   return { doc: next, id: added.id };
 }

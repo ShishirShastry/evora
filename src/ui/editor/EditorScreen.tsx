@@ -170,8 +170,12 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     let sessionTimer: ReturnType<typeof setTimeout> | null = null;
     const writeSession = (): void => saveSession(docId, getSession(store.getState()));
     const unsubscribe = store.subscribe((state, previous) => {
-      if (state.snapping !== previous.snapping || state.showLayoutGrids !== previous.showLayoutGrids) {
-        savePreferences({ snapping: state.snapping, showLayoutGrids: state.showLayoutGrids });
+      if (
+        state.snapping !== previous.snapping ||
+        state.showLayoutGrids !== previous.showLayoutGrids ||
+        state.showRulers !== previous.showRulers
+      ) {
+        savePreferences({ snapping: state.snapping, showLayoutGrids: state.showLayoutGrids, showRulers: state.showRulers });
       }
       if (state.viewport === previous.viewport && state.pageId === previous.pageId) return;
       if (sessionTimer !== null) clearTimeout(sessionTimer);

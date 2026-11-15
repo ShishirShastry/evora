@@ -24,6 +24,7 @@ import {
   type Effect,
   type GradientStop,
   type GradientType,
+  type Guide,
   type LayerNode,
   type LayerType,
   type LayoutGrid,
@@ -194,6 +195,17 @@ function layoutGrids(value: unknown): LayoutGrid[] {
   return out;
 }
 
+function guides(value: unknown): Guide[] {
+  if (!Array.isArray(value)) return [];
+  const out: Guide[] = [];
+  for (const item of value) {
+    if (!isObject(item) || (item.axis !== 'X' && item.axis !== 'Y')) continue;
+    if (typeof item.position !== 'number' || !Number.isFinite(item.position)) continue;
+    out.push({ axis: item.axis, position: item.position });
+  }
+  return out;
+}
+
 function cornerRadii(value: unknown): CornerRadii | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   return value.map((item) => finite(item, 0, 0)) as CornerRadii;
@@ -215,6 +227,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       parentId: null,
       order,
       backgroundColor: rgb(raw.backgroundColor, DEFAULT_PAGE_BACKGROUND),
+      guides: guides(raw.guides),
     };
     return page;
   }

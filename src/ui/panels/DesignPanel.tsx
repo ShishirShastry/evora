@@ -307,6 +307,20 @@ function PageProperties() {
           }
         />
       </Row>
+      {page.guides.length > 0 && (
+        <Row>
+          <span className="flex-1 text-dim">
+            {page.guides.length} {page.guides.length === 1 ? 'ruler guide' : 'ruler guides'}
+          </span>
+          <button
+            type="button"
+            className="od-button !h-[26px] flex-none !px-2"
+            onClick={() => store.getState().apply('Remove all guides', (d) => patchNodes(d, { [pageId]: { guides: [] } }))}
+          >
+            Remove all
+          </button>
+        </Row>
+      )}
       <p className="m-0 mt-1 text-faint">Select a layer to see its properties.</p>
     </Section>
   );

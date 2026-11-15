@@ -63,6 +63,8 @@ export interface EditorState {
   snapping: boolean;
   /** Whether frames' layout grids are drawn (and snapped to). A user preference. */
   showLayoutGrids: boolean;
+  /** Whether the rulers, and with them the page's guides, are shown. A user preference. */
+  showRulers: boolean;
 
   // History.
   undoStack: HistoryEntry[];
@@ -110,6 +112,7 @@ export interface EditorActions {
   setEditingText(id: NodeId | null): void;
   setSnapping(snapping: boolean): void;
   setShowLayoutGrids(show: boolean): void;
+  setShowRulers(show: boolean): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
   /**
@@ -157,6 +160,8 @@ export interface EditorOptions {
   snapping?: boolean;
   /** Initial value of the "show layout grids" preference. On unless told otherwise. */
   showLayoutGrids?: boolean;
+  /** Initial value of the "show rulers" preference. Off unless told otherwise. */
+  showRulers?: boolean;
 }
 
 export function createEditorStore(doc: Document, session?: Partial<SessionState>, options: EditorOptions = {}): EditorStore {
@@ -203,6 +208,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       editingTextId: null,
       snapping: options.snapping ?? true,
       showLayoutGrids: options.showLayoutGrids ?? true,
+      showRulers: options.showRulers ?? false,
       undoStack: [],
       redoStack: [],
       gesture: null,
@@ -359,6 +365,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setShowLayoutGrids(show) {
         if (get().showLayoutGrids !== show) set({ showLayoutGrids: show });
+      },
+
+      setShowRulers(show) {
+        if (get().showRulers !== show) set({ showRulers: show });
       },
 
       setEditingText(id) {

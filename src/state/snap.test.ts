@@ -213,17 +213,19 @@ describe('preferences', () => {
 
   it('remembers each preference, defaults to on, and ignores damaged values', () => {
     const storage = fakeStorage();
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true });
-    savePreferences({ snapping: false, showLayoutGrids: true }, storage);
-    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true });
-    savePreferences({ snapping: true, showLayoutGrids: false }, storage);
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false });
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true, showRulers: false });
+    savePreferences({ snapping: false, showLayoutGrids: true, showRulers: false }, storage);
+    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true, showRulers: false });
+    savePreferences({ snapping: true, showLayoutGrids: false, showRulers: false }, storage);
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false, showRulers: false });
+    savePreferences({ snapping: true, showLayoutGrids: true, showRulers: true }, storage);
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true, showRulers: true });
     storage.setItem('open-design:preferences', 'broken');
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true });
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true, showRulers: false });
     // A value of the wrong type falls back to its default; values saved by an older version are kept.
     storage.setItem('open-design:preferences', '{"snapping":"yes","showLayoutGrids":false}');
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false });
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false, showRulers: false });
     storage.setItem('open-design:preferences', '{"snapping":false}');
-    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true });
+    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true, showRulers: false });
   });
 });

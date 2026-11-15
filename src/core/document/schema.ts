@@ -1,12 +1,12 @@
 /**
- * OPEN DESIGN document schema, version 6 (adds constraints and layout grids).
+ * OPEN DESIGN document schema, version 7 (adds ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
  * modes, and version 5 image paints with the document's asset table.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -226,10 +226,18 @@ interface NodeBase {
   order: string;
 }
 
+/** A ruler guide: a vertical line at an x position ('X') or a horizontal line at a y position ('Y'), in page space. */
+export interface Guide {
+  axis: 'X' | 'Y';
+  position: number;
+}
+
 export interface PageNode extends NodeBase {
   type: 'PAGE';
   parentId: null;
   backgroundColor: RGB;
+  /** Ruler guides. Like layout grids they help while designing and are never exported. */
+  guides: Guide[];
 }
 
 interface LayerBase extends NodeBase {
@@ -411,6 +419,6 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   innerRadius?: number;
 } & Partial<Omit<TextNode, keyof LayerBase>>;
 
-export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor'>>;
+export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides'>>;
 
 export type NodePatch = LayerPatch | PagePatch;

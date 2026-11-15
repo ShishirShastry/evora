@@ -8,6 +8,10 @@ import {
   duplicateNodes,
   enclosingFrameOrPage,
   getLayer,
+  guideSnapTargets,
+  hitGuide,
+  isPage,
+  setGuide,
   getWorldBounds,
   getWorldMatrix,
   getWorldRotation,
@@ -35,6 +39,7 @@ import {
   TYPE_LABELS,
   unionRects,
   type Document,
+  type Guide,
   type Handle,
   type LayerPatch,
   type LayerType,
@@ -47,6 +52,7 @@ import {
 } from '../../core';
 import type { EditorStore, ToolId } from '../../state/editorStore';
 import { hitFrameLabel, type FrameLabel } from '../render/overlay';
+import { RULER_SIZE } from '../render/rulers';
 import { panBy, screenToWorld, zoomAt } from '../viewport';
 import { getSelectionFrame, handleCursor, hitHandle, pointInSelectionFrame, type SelectionFrame } from './selectionFrame';
 
@@ -79,6 +85,8 @@ const ROTATION_SNAP = 15;
 /** How close, in screen pixels, an edge must come to a line to snap to it. */
 const SNAP_DISTANCE_PX = 6;
 const DEFAULT_SHAPE_SIZE = 100;
+/** How close, in screen pixels, the pointer must be to a ruler guide to grab it. */
+const GUIDE_HIT_PX = 4;
 
 const SHAPE_TOOLS: Partial<Record<ToolId, LayerType>> = {
   frame: 'FRAME',
@@ -126,7 +134,9 @@ type Mode =
   | { kind: 'rotate'; pivot: Point; startAngle: number; base: Document; ids: NodeId[] }
   | { kind: 'draw'; type: LayerType; id: NodeId; parentId: NodeId; base: Document; startScreen: Point; startWorld: Point }
   /** Text tool: a click places auto-width text, a drag sets the width of a text box. */
-  | { kind: 'text'; startScreen: Point; startWorld: Point };
+  | { kind: 'text'; startScreen: Point; startWorld: Point }
+  /** A ruler guide being pulled out of a ruler (`index` null) or moved (its index in the page's guides). */
+  | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document };
 
 export interface ControllerHost {
   /** Called when the overlay (marquee, handles) needs repainting without a store change. */
@@ -189,6 +199,12 @@ export class InteractionController {
       targets.xs.push(...part.xs);
       targets.ys.push(...part.ys);
     }
+    // The page's ruler guides, while the rulers are shown.
+    if (this.state.showRulers) {
+      const guides = guideSnapTargets(this.pageGuides(doc));
+      targets.xs.push(...guides.xs);
+      targets.ys.push(...guides.ys);
+    }
     this.snapCache = { doc, key, targets };
     return targets;
   }
@@ -200,6 +216,43 @@ export class InteractionController {
     const snapped = snapPoint(point, this.snapTargets(doc, containerIds, exclude), SNAP_DISTANCE_PX / this.state.viewport.zoom, axes);
     this.guides = snapped.guides;
     return snapped.point;
+  }
+
+  private pageGuides(doc: Document): readonly Guide[] {
+    const page = doc.nodes[this.state.pageId];
+    return isPage(page) ? page.guides : [];
+  }
+
+  /** Which ruler a canvas point is on: 'Y' for the top ruler (it makes horizontal guides), 'X' for the left one. */
+  private rulerAt(p: Point): Guide['axis'] | 'corner' | null {
+    if (!this.state.showRulers) return null;
+    const top = p.y < RULER_SIZE;
+    const left = p.x < RULER_SIZE;
+    if (top && left) return 'corner';
+    return top ? 'Y' : left ? 'X' : null;
+  }
+
+  /** The index of the ruler guide under a page-space point, while guides are shown. */
+  private guideAt(world: Point): number | null {
+    if (!this.state.showRulers) return null;
+    return hitGuide(this.pageGuides(this.state.doc), world, GUIDE_HIT_PX / this.state.viewport.zoom);
+  }
+
+  private beginGuide(axis: Guide['axis'], index: number | null): void {
+    const state = this.state;
+    state.beginGesture();
+    state.setHovered(null);
+    this.mode = { kind: 'guide', axis, index, base: state.doc };
+    this.host.setCursor(axis === 'X' ? 'col-resize' : 'row-resize');
+  }
+
+  /** Follows the pointer with the guide. Over its own ruler the guide is removed, so dragging it back there deletes it. */
+  private updateGuide(mode: Extract<Mode, { kind: 'guide' }>, e: PointerInput): void {
+    const world = this.toWorld(e);
+    const overRuler = mode.axis === 'X' ? e.x < RULER_SIZE : e.y < RULER_SIZE;
+    const position = Math.round(mode.axis === 'X' ? world.x : world.y);
+    const pageId = this.state.pageId;
+    this.state.updateGesture(() => setGuide(mode.base, pageId, mode.index, overRuler ? null : { axis: mode.axis, position }));
   }
 
   private endSnapping(): void {
@@ -223,6 +276,12 @@ export class InteractionController {
       return;
     }
     if (e.button !== 0) return;
+    // The rulers are not canvas: pressing one with the move tool pulls out a guide, and does nothing otherwise.
+    const ruler = this.rulerAt(e);
+    if (ruler) {
+      if (tool === 'move' && ruler !== 'corner') this.beginGuide(ruler, null);
+      return;
+    }
     const shape = SHAPE_TOOLS[tool];
     if (shape) this.beginDraw(shape, e);
     else if (tool === 'text') {
@@ -271,6 +330,9 @@ export class InteractionController {
       case 'draw':
         this.updateDraw(mode, e);
         return;
+      case 'guide':
+        this.updateGuide(mode, e);
+        return;
       case 'text':
         // Show the box being dragged out.
         this.marquee = distance(e, mode.startScreen) > DRAG_THRESHOLD_PX ? rectFromPoints(mode.startWorld, world) : null;
@@ -313,6 +375,11 @@ export class InteractionController {
       case 'draw':
         this.finishDraw(mode, e);
         break;
+      case 'guide': {
+        const removed = this.pageGuides(state.doc).length < this.pageGuides(mode.base).length;
+        state.commitGesture(mode.index === null ? 'Add guide' : removed ? 'Remove guide' : 'Move guide');
+        break;
+      }
       case 'text':
         this.marquee = null;
         this.createText(mode, e);
@@ -408,6 +475,17 @@ export class InteractionController {
       return;
     }
     const world = this.toWorld(e);
+    if (this.rulerAt(e)) {
+      state.setHovered(null);
+      this.host.setCursor('default');
+      return;
+    }
+    const guideIndex = this.guideAt(world);
+    if (guideIndex !== null) {
+      state.setHovered(null);
+      this.host.setCursor(this.pageGuides(state.doc)[guideIndex]?.axis === 'X' ? 'col-resize' : 'row-resize');
+      return;
+    }
     const target =
       hitFrameLabel(this.labels, e) ??
       selectionTargetAt(state.doc, state.pageId, world, state.selection, {
@@ -450,6 +528,14 @@ export class InteractionController {
           this.mode = { kind: 'line-end', id: frame.single, base: state.doc, fixed: ends[handle.end === 0 ? 1 : 0] };
         }
       }
+      return;
+    }
+
+    // A ruler guide: dragging moves it, and dragging it onto its ruler removes it.
+    const guideIndex = this.guideAt(world);
+    const guide = guideIndex === null ? undefined : this.pageGuides(state.doc)[guideIndex];
+    if (guide && guideIndex !== null) {
+      this.beginGuide(guide.axis, guideIndex);
       return;
     }
 

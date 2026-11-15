@@ -114,6 +114,7 @@ export function createPage(name: string, order: string): PageNode {
     parentId: null,
     order,
     backgroundColor: { ...DEFAULT_PAGE_BACKGROUND },
+    guides: [],
   };
 }
 

@@ -615,6 +615,15 @@ export const COMMANDS: readonly Command[] = [
   },
 
   {
+    id: 'view.rulers',
+    label: 'Rulers and guides',
+    group: 'View',
+    shortcut: 'Shift+R',
+    keys: [{ code: 'KeyR', shift: true }],
+    checked: (state) => state.showRulers,
+    run: ({ store }) => store.getState().setShowRulers(!store.getState().showRulers),
+  },
+  {
     id: 'view.layoutGrids',
     label: 'Show layout grids',
     group: 'View',

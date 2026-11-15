@@ -73,6 +73,17 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 6, document: { ...body, nodes: upgraded } };
   },
+  // Version 7 adds ruler guides to pages. Older pages have none.
+  6: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type === 'PAGE' && !('guides' in node) ? { ...node, guides: [] } : node;
+    }
+    return { ...file, schemaVersion: 7, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**
