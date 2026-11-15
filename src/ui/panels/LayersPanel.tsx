@@ -31,6 +31,7 @@ const TYPE_ICONS: Record<LayerNode['type'], IconName> = {
   POLYGON: 'polygon',
   STAR: 'star',
   TEXT: 'text',
+  VECTOR: 'vector',
 };
 
 /** Flattens the page's tree into the rows shown in the panel: top-most layer first. */

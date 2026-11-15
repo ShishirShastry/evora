@@ -2,6 +2,7 @@ import { patchNodes } from '../document/mutate';
 import { isContainer, isFrame, isLayer, type Document, type LayerPatch, type NodeId } from '../document/schema';
 import { normalizeAngle, transformedBounds, unionRects, type Rect } from '../math/geometry';
 import { getChildIds, getLocalMatrix, getWorldBounds, sortByPaintOrder, topLevelIds } from '../scene/tree';
+import { mirrorNetwork } from '../vector/shapes';
 import { clean, moveNodesBy } from './transform';
 
 export type AlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
@@ -77,11 +78,12 @@ export function distributeNodes(doc: Document, ids: readonly NodeId[], axis: Dis
 export type FlipAxis = 'horizontal' | 'vertical';
 
 /**
- * Mirrors the contents of a container inside its own box, recursively. Every
- * shape that exists today is symmetric about its own vertical axis, so a
- * mirror image is exactly "position mirrored, rotation negated" (plus a half
- * turn for a vertical flip of shapes that have a top, such as triangles and
- * stars). No flip flag is needed until asymmetric content exists.
+ * Mirrors the contents of a container inside its own box, recursively. The
+ * basic shapes are symmetric about their own vertical axis, so their mirror
+ * image is exactly "position mirrored, rotation negated" (plus a half turn
+ * for a vertical flip of shapes that have a top, such as triangles and
+ * stars). A vector's curves are mirrored themselves. Text and image fills
+ * are not mirrored.
  */
 function flipInside(doc: Document, containerId: NodeId, axis: FlipAxis, patches: Record<NodeId, LayerPatch>): void {
   const container = doc.nodes[containerId];
@@ -96,6 +98,7 @@ function flipInside(doc: Document, containerId: NodeId, axis: FlipAxis, patches:
       y: clean(mirrored.y - child.height / 2),
       rotation: mirroredRotation(child.type, child.rotation, axis),
     };
+    if (child.type === 'VECTOR') (patches[childId] as LayerPatch).network = mirrorNetwork(child.network, child.width, child.height, axis);
     if (isContainer(child)) flipInside(doc, childId, axis, patches);
   }
 }
@@ -143,6 +146,7 @@ export function flipNodes(doc: Document, ids: readonly NodeId[], axis: FlipAxis)
         y: clean(mirrored.y - node.height / 2),
         rotation: mirroredRotation(node.type, node.rotation, axis),
       };
+      if (node.type === 'VECTOR') (patches[id] as LayerPatch).network = mirrorNetwork(node.network, node.width, node.height, axis);
       if (isContainer(node)) flipInside(doc, id, axis, patches);
     }
   }

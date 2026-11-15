@@ -3,6 +3,7 @@ import { isLayer, type ConstraintType, type Document, type LayerPatch, type Node
 import { normalizeAngle, rotatePoint, type Point, type Rect } from '../math/geometry';
 import { applyToPoint, applyToVector, invert } from '../math/matrix';
 import { getChildIds, getWorldMatrix, getWorldRotation, topLevelIds } from '../scene/tree';
+import { scaleNetwork } from '../vector/network';
 
 export const MIN_SIZE = 1;
 
@@ -206,6 +207,10 @@ function scaleChildren(doc: Document, groupId: NodeId, sx: number, sy: number): 
     const cx = (child.x + child.width / 2) * sx;
     const cy = (child.y + child.height / 2) * sy;
     patches[childId] = { x: clean(cx - width / 2), y: clean(cy - height / 2), width: clean(width), height: clean(height) };
+    if (child.type === 'VECTOR') {
+      const scaled = scaleNetwork(child.network, child.width > 0 ? width / child.width : 1, child.height > 0 ? height / child.height : 1);
+      (patches[childId] as LayerPatch).network = scaled;
+    }
     if (child.type === 'GROUP') {
       nested.push([childId, child.width > 0 ? width / child.width : 1, child.height > 0 ? height / child.height : 1]);
     }
@@ -217,12 +222,23 @@ function scaleChildren(doc: Document, groupId: NodeId, sx: number, sy: number): 
 
 /**
  * Gives a layer a new box. For a group this scales its contents to match,
- * because a group's size is defined by what is inside it; for every other
- * layer it is a plain property change.
+ * because a group's size is defined by what is inside it, and for a vector
+ * it scales the curves, for the same reason; a frame's children follow their
+ * constraints; for every other layer it is a plain property change.
  */
 export function setLayerBox(doc: Document, id: NodeId, box: Partial<Box>): Document {
   const node = doc.nodes[id];
   if (!isLayer(node)) return doc;
+  if (node.type === 'VECTOR') {
+    // A vector that is flat in one direction (a straight line) cannot be stretched in it.
+    const patch: LayerPatch = { ...box };
+    if (node.width <= 0) delete patch.width;
+    if (node.height <= 0) delete patch.height;
+    const sx = patch.width !== undefined ? patch.width / node.width : 1;
+    const sy = patch.height !== undefined ? patch.height / node.height : 1;
+    if (sx !== 1 || sy !== 1) patch.network = scaleNetwork(node.network, sx, sy);
+    return patchNodes(doc, { [id]: patch });
+  }
   let next = patchNodes(doc, { [id]: box });
   if (node.type === 'GROUP') {
     const sx = box.width !== undefined && node.width > 0 ? box.width / node.width : 1;

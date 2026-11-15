@@ -1,4 +1,5 @@
 import { createId } from '../ids';
+import { fitVectorNode } from '../vector/fit';
 import { freshKeys } from '../order';
 import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
 import {
@@ -17,6 +18,7 @@ import {
   TEXT_CASES,
   TEXT_DECORATIONS,
   VERTICAL_ALIGNS,
+  WINDING_RULES,
   type AssetInfo,
   type CornerRadii,
   type DesignNode,
@@ -33,6 +35,8 @@ import {
   type Paint,
   type RGB,
   type StrokeAlign,
+  type VectorNetwork,
+  type VectorSegment,
 } from './schema';
 
 type Raw = Record<string, unknown>;
@@ -206,6 +210,30 @@ function guides(value: unknown): Guide[] {
   return out;
 }
 
+function networkPoint(value: unknown): { x: number; y: number } {
+  if (!isObject(value)) return { x: 0, y: 0 };
+  return { x: finite(value.x, 0, -1e7, 1e7), y: finite(value.y, 0, -1e7, 1e7) };
+}
+
+/** A vector network: points with finite coordinates, and only segments whose ends exist. */
+function vectorNetwork(value: unknown): VectorNetwork {
+  const source = isObject(value) ? value : {};
+  const vertices = Array.isArray(source.vertices) ? source.vertices.map(networkPoint) : [];
+  const segments: VectorSegment[] = [];
+  const index = (item: unknown): number | null =>
+    typeof item === 'number' && Number.isInteger(item) && item >= 0 && item < vertices.length ? item : null;
+  if (Array.isArray(source.segments)) {
+    for (const item of source.segments) {
+      if (!isObject(item)) continue;
+      const start = index(item.start);
+      const end = index(item.end);
+      if (start === null || end === null) continue;
+      segments.push({ start, end, tangentStart: networkPoint(item.tangentStart), tangentEnd: networkPoint(item.tangentEnd) });
+    }
+  }
+  return { vertices, segments };
+}
+
 function cornerRadii(value: unknown): CornerRadii | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   return value.map((item) => finite(item, 0, 0)) as CornerRadii;
@@ -289,6 +317,11 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.textAutoResize = oneOf(raw.textAutoResize, TEXT_AUTO_RESIZES, 'WIDTH_AND_HEIGHT');
     layer.textDecoration = oneOf(raw.textDecoration, TEXT_DECORATIONS, 'NONE');
     layer.textCase = oneOf(raw.textCase, TEXT_CASES, 'ORIGINAL');
+  } else if (layer.type === 'VECTOR') {
+    layer.network = vectorNetwork(raw.network);
+    layer.windingRule = oneOf(raw.windingRule, WINDING_RULES, 'NONZERO');
+    // The box of a vector is the bounding box of its curves.
+    return fitVectorNode(layer);
   }
   return layer;
 }

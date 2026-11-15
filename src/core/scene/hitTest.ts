@@ -10,6 +10,7 @@ import {
   type Rect,
 } from '../math/geometry';
 import { applyToPoint, invert } from '../math/matrix';
+import { distanceToNetwork, pointInNetworkFill } from '../vector/network';
 import { hasVisiblePaint, outlinePoints } from './shapes';
 import { getAncestorIds, getChildIds, getWorldBounds, getWorldCorners, getWorldMatrix } from './tree';
 
@@ -66,6 +67,9 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
       if (solid && pointInPolygon(p, points)) return true;
       return distanceToPolygonEdge(p, points) <= edge;
     }
+    case 'VECTOR':
+      if (solid && pointInNetworkFill(node.network, p, node.windingRule)) return true;
+      return distanceToNetwork(node.network, p) <= edge;
   }
 }
 

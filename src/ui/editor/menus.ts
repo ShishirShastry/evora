@@ -28,6 +28,7 @@ export function layerMenu(env: CommandEnv, state: EditorState): MenuItem[] {
     separator,
     item('object.group'),
     item('object.ungroup'),
+    item('object.flatten'),
     separator,
     item('object.front'),
     item('object.forward'),
@@ -80,6 +81,7 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
   Object: [
     'object.group',
     'object.ungroup',
+    'object.flatten',
     '-',
     'object.flipHorizontal',
     'object.flipVertical',

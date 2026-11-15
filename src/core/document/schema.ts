@@ -1,21 +1,21 @@
 /**
- * OPEN DESIGN document schema, version 7 (adds ruler guides on pages).
+ * OPEN DESIGN document schema, version 8 (adds the VECTOR layer type; version 7 added ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
  * modes, and version 5 image paints with the document's asset table.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
 export type NodeId = string;
 
-export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT';
+export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT' | 'VECTOR';
 export type NodeType = 'PAGE' | LayerType;
 
-export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT'];
+export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT', 'VECTOR'];
 export const NODE_TYPES: readonly NodeType[] = ['PAGE', ...LAYER_TYPES];
 /** Types that may have children. */
 export const CONTAINER_TYPES: readonly NodeType[] = ['PAGE', 'FRAME', 'GROUP'];
@@ -349,7 +349,49 @@ export interface TextNode extends LayerBase {
   textCase: TextCase;
 }
 
-export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode | TextNode;
+/** A point of a vector layer, in the layer's own space: (0, 0) is the top-left corner of its box. */
+export interface VectorVertex {
+  x: number;
+  y: number;
+}
+
+/**
+ * A curve between two points of a vector layer. The tangents are its Bézier
+ * control handles, each given relative to its own end point; when both are
+ * zero the segment is a straight line.
+ */
+export interface VectorSegment {
+  /** Indices into the network's `vertices`. */
+  start: number;
+  end: number;
+  tangentStart: { x: number; y: number };
+  tangentEnd: { x: number; y: number };
+}
+
+/**
+ * Points and the curves between them. A point may have any number of
+ * segments, so a network can branch and share edges, which a path cannot.
+ */
+export interface VectorNetwork {
+  vertices: VectorVertex[];
+  segments: VectorSegment[];
+}
+
+/** Which overlapping regions a fill covers: everything enclosed, or every other nesting level (which makes holes). */
+export type WindingRule = 'NONZERO' | 'EVENODD';
+export const WINDING_RULES: readonly WindingRule[] = ['NONZERO', 'EVENODD'];
+
+/**
+ * A freely drawn shape. Its box is always the bounding box of its curves and
+ * is kept that way automatically (see `fitVectors`).
+ */
+export interface VectorNode extends LayerBase {
+  type: 'VECTOR';
+  network: VectorNetwork;
+  windingRule: WindingRule;
+}
+
+export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode | TextNode | VectorNode;
 export type DesignNode = PageNode | LayerNode;
 
 export type NodeMap = Readonly<Record<NodeId, DesignNode>>;
@@ -401,6 +443,10 @@ export function isText(node: DesignNode | undefined): node is TextNode {
   return node !== undefined && node.type === 'TEXT';
 }
 
+export function isVector(node: DesignNode | undefined): node is VectorNode {
+  return node !== undefined && node.type === 'VECTOR';
+}
+
 export function isContainer(node: DesignNode | undefined): node is PageNode | FrameNode | GroupNode {
   return node !== undefined && (node.type === 'PAGE' || node.type === 'FRAME' || node.type === 'GROUP');
 }
@@ -417,6 +463,8 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   layoutGrids?: LayoutGrid[];
   pointCount?: number;
   innerRadius?: number;
+  network?: VectorNetwork;
+  windingRule?: WindingRule;
 } & Partial<Omit<TextNode, keyof LayerBase>>;
 
 export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides'>>;

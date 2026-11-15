@@ -84,6 +84,8 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 7, document: { ...body, nodes: upgraded } };
   },
+  // Version 8 adds the VECTOR layer type. Older files contain no vector layers.
+  7: (file) => ({ ...file, schemaVersion: 8 }),
 };
 
 /**

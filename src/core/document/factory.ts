@@ -32,6 +32,7 @@ export const TYPE_LABELS: Record<LayerType, string> = {
   POLYGON: 'Polygon',
   STAR: 'Star',
   TEXT: 'Text',
+  VECTOR: 'Vector',
 };
 
 export const DEFAULT_FONT_FAMILY = 'Arial';
@@ -207,6 +208,20 @@ export function createLayer(
         textAutoResize: 'WIDTH_AND_HEIGHT',
         textDecoration: 'NONE',
         textCase: 'ORIGINAL',
+      };
+      break;
+    case 'VECTOR':
+      // A new path is an outline: a hairline stroke and no fill.
+      node = {
+        ...base,
+        type,
+        width: 0,
+        height: 0,
+        fills: [],
+        strokes: [solidPaint(BLACK)],
+        strokeAlign: 'CENTER',
+        network: { vertices: [], segments: [] },
+        windingRule: 'NONZERO',
       };
       break;
   }

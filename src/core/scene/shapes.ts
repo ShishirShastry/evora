@@ -1,4 +1,4 @@
-import type { LayerNode } from '../document/schema';
+import type { CornerRadii, LayerNode } from '../document/schema';
 import type { Point } from '../math/geometry';
 
 /** Vertices of a regular polygon inscribed in the box, first vertex at top centre. */
@@ -36,6 +36,26 @@ export function outlinePoints(node: LayerNode): Point[] | null {
   if (node.type === 'POLYGON') return polygonPoints(node.width, node.height, node.pointCount);
   if (node.type === 'STAR') return starPoints(node.width, node.height, node.pointCount, node.innerRadius);
   return null;
+}
+
+/**
+ * The radii actually used for a box's corners, in the order top-left,
+ * top-right, bottom-right, bottom-left. When neighbouring radii do not fit
+ * along a side they are all scaled down together, as CSS does, so the outline
+ * stays smooth instead of overlapping.
+ */
+export function effectiveRadii(width: number, height: number, radius: number, radii: CornerRadii | null, inset = 0): CornerRadii {
+  // A rounded corner grows or shrinks with the outline; a sharp corner stays sharp.
+  const [tl, tr, br, bl] = (radii ?? [radius, radius, radius, radius]).map((r) => (r <= 0 ? 0 : Math.max(0, r - inset))) as CornerRadii;
+  if (width <= 0 || height <= 0) return [0, 0, 0, 0];
+  const factor = Math.min(
+    1,
+    tl + tr > 0 ? width / (tl + tr) : 1,
+    bl + br > 0 ? width / (bl + br) : 1,
+    tl + bl > 0 ? height / (tl + bl) : 1,
+    tr + br > 0 ? height / (tr + br) : 1,
+  );
+  return [tl * factor, tr * factor, br * factor, bl * factor];
 }
 
 export function hasVisiblePaint(paints: readonly { visible: boolean; opacity: number }[]): boolean {

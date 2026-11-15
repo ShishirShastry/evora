@@ -41,7 +41,10 @@ export type IconName =
   | 'textTop'
   | 'textMiddle'
   | 'textBottom'
-  | 'corners';
+  | 'corners'
+  | 'vector'
+  | 'pen'
+  | 'pencil';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -109,6 +112,15 @@ const PATHS: Record<IconName, ReactNode> = {
   textMiddle: <path {...s} d="M2.5 8h11M8 2v3.5M6.3 4L8 5.5 9.7 4M8 14v-3.5M6.3 12L8 10.5 9.7 12" />,
   textBottom: <path {...s} d="M2.5 13.5h11M8 2.5V10M5.5 7.5L8 10l2.5-2.5" />,
   corners: <path {...s} d="M2.5 6V4.5a2 2 0 0 1 2-2H6M10 2.5h1.5a2 2 0 0 1 2 2V6M13.5 10v1.5a2 2 0 0 1-2 2H10M6 13.5H4.5a2 2 0 0 1-2-2V10" />,
+  vector: (
+    <>
+      <path {...s} d="M3.5 11C3.5 5.5 12.5 10.5 12.5 5" />
+      <rect {...s} x="2" y="11" width="3" height="3" />
+      <rect {...s} x="11" y="2" width="3" height="3" />
+    </>
+  ),
+  pen: <path {...s} d="M8 2l3.4 6.6-1.6 3.4H6.2L4.6 8.6zM8 2v5.6M5.5 14h5" />,
+  pencil: <path {...s} d="M2.8 13.2l.8-3.2 7.2-7.2 2.4 2.4L6 12.4zM9.4 4.2l2.4 2.4" />,
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

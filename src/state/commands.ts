@@ -1,12 +1,14 @@
 import {
   addPage,
   alignNodes,
+  canFlatten,
   copyNodes,
   deleteNodes,
   deletePage,
   distributeNodes,
   duplicateNodes,
   duplicatePage,
+  flattenNodes,
   flipNodes,
   getChildIds,
   getPages,
@@ -121,6 +123,19 @@ export function selectAll(store: EditorStore): void {
       return isLayer(node) && node.visible && !node.locked;
     }),
   );
+}
+
+/** Turns the selected shapes into one editable vector layer. */
+export function flattenSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  const created: NodeId[] = [];
+  apply('Flatten', (doc) => {
+    const out = flattenNodes(doc, selection);
+    if (!out) return doc;
+    created.push(out.id);
+    return out.doc;
+  });
+  if (created.length > 0) store.getState().setSelection(created);
 }
 
 export function nudgeSelection(store: EditorStore, dx: number, dy: number): void {
@@ -686,6 +701,15 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyG', ctrl: true, shift: true }],
     enabled: canUngroup,
     run: ({ store }) => ungroupSelection(store),
+  },
+  {
+    id: 'object.flatten',
+    label: 'Flatten to vector',
+    group: 'Object',
+    shortcut: 'Ctrl+E',
+    keys: [{ code: 'KeyE', ctrl: true }],
+    enabled: (state) => canFlatten(state.doc, state.selection),
+    run: ({ store }) => flattenSelection(store),
   },
   {
     id: 'object.flipHorizontal',

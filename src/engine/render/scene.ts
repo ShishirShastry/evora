@@ -9,6 +9,7 @@ import {
   isLayer,
   isPage,
   layoutText,
+  networkGeometry,
   rectsIntersect,
   unionRects,
   type BlendMode,
@@ -19,6 +20,7 @@ import {
   type NodeMap,
   type Rect,
   type ShadowEffect,
+  type StrokeAlign,
   type StrokeCap,
   type StrokeJoin,
   type TextMeasurer,
@@ -27,7 +29,7 @@ import {
 import type { ImageSource } from '../images/imageCache';
 import { applyTextStyle } from '../text/measure';
 import { visibleRect, type Size, type Viewport } from '../viewport';
-import { fillWithPaint, paintStyle, rgbToCss, traceLayerPath } from './paint';
+import { clipPath, fillPath, fillRuleOf, fillWithPaint, paintStyle, rgbToCss, traceLayerPath } from './paint';
 
 export interface RenderStats {
   /** Layers actually painted. */
@@ -84,6 +86,17 @@ const BLENDS: Record<BlendMode, GlobalCompositeOperation> = {
   LUMINOSITY: 'luminosity',
 };
 
+/**
+ * Where a layer's stroke actually goes. A line has no inside, and neither has
+ * a vector with a loose end or a branch, so those are always stroked along
+ * their centre.
+ */
+export function strokeAlignOf(node: LayerNode): StrokeAlign {
+  if (node.type === 'LINE') return 'CENTER';
+  if (node.type === 'VECTOR' && !networkGeometry(node.network).closed) return 'CENTER';
+  return node.strokeAlign;
+}
+
 const renderBoundsCache = new WeakMap<NodeMap, Map<NodeId, Rect>>();
 
 /**
@@ -102,7 +115,11 @@ export function getRenderBounds(doc: Document, id: NodeId): Rect {
   const node = doc.nodes[id];
   let bounds = getWorldBounds(doc, id);
   if (isLayer(node)) {
-    if (node.strokeWeight > 0 && node.strokes.length > 0) bounds = expandRect(bounds, node.strokeWeight);
+    if (node.strokeWeight > 0 && node.strokes.length > 0) {
+      // The mitred tip of a sharp corner of a vector reaches well beyond the corner itself.
+      const sharp = node.type === 'VECTOR' && node.strokeJoin === 'MITER';
+      bounds = expandRect(bounds, node.strokeWeight * (sharp ? (strokeAlignOf(node) === 'OUTSIDE' ? 10 : 5) : 1));
+    }
     if ((node.type === 'FRAME' && !node.clipsContent) || node.type === 'GROUP') {
       const parts = [bounds];
       for (const childId of getChildIds(doc, id)) {
@@ -215,13 +232,14 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     for (const paint of node.fills) {
       if (!paint.visible || paint.opacity <= 0) continue;
       traceLayerPath(target, node);
-      fillWithPaint(target, paint, node.width, node.height, options.images);
+      fillWithPaint(target, paint, node.width, node.height, options.images, fillRuleOf(node));
     }
   };
 
   const stroke = (target: Ctx, node: LayerNode): void => {
     if (node.strokeWeight <= 0 || node.type === 'TEXT') return;
-    const align = node.type === 'LINE' ? 'CENTER' : node.strokeAlign;
+    const align = strokeAlignOf(node);
+    const rule = fillRuleOf(node);
     const alpha = target.globalAlpha;
     target.lineCap = CAPS[node.strokeCap];
     target.lineJoin = JOINS[node.strokeJoin];
@@ -231,7 +249,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
       target.globalAlpha = alpha * paint.opacity;
       target.strokeStyle = paintStyle(target, paint, node.width, node.height);
       if (align === 'CENTER') {
-        traceLayerPath(target, node);
+        traceLayerPath(target, node, 0, 'stroke');
         target.lineWidth = node.strokeWeight;
         target.stroke();
         continue;
@@ -240,13 +258,13 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
       // the half on the wanted side of the outline.
       target.save();
       traceLayerPath(target, node);
-      if (align === 'INSIDE') target.clip();
+      if (align === 'INSIDE') clipPath(target, rule);
       else {
         const pad = node.strokeWeight * 2 + 2;
         target.rect(-pad, -pad, node.width + pad * 2, node.height + pad * 2);
         target.clip('evenodd');
       }
-      traceLayerPath(target, node);
+      traceLayerPath(target, node, 0, 'stroke');
       target.lineWidth = node.strokeWeight * 2;
       target.stroke();
       target.restore();
@@ -268,17 +286,18 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
       const filled = node.type !== 'LINE' && hasVisiblePaint(node.fills);
       const stroked = node.strokeWeight > 0 && hasVisiblePaint(node.strokes);
       const boxLike = node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'FRAME';
+      const align = strokeAlignOf(node);
       if (filled) {
         traceLayerPath(target, node, boxLike ? -shadow.spread : 0);
-        target.fill();
+        fillPath(target, fillRuleOf(node));
       }
       // An inside stroke lies within the fill, which already cast the shadow.
-      if (stroked && !(filled && node.strokeAlign === 'INSIDE')) {
-        traceLayerPath(target, node);
+      if (stroked && !(filled && align === 'INSIDE')) {
+        traceLayerPath(target, node, 0, 'stroke');
         target.lineCap = CAPS[node.strokeCap];
         target.lineJoin = JOINS[node.strokeJoin];
         target.setLineDash(node.dashPattern);
-        target.lineWidth = node.strokeAlign === 'OUTSIDE' && node.type !== 'LINE' ? node.strokeWeight * 2 : node.strokeWeight;
+        target.lineWidth = align === 'OUTSIDE' ? node.strokeWeight * 2 : node.strokeWeight;
         target.stroke();
       }
     }
@@ -290,7 +309,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.save();
     setLayerTransform(target, id);
     traceLayerPath(target, node);
-    target.clip();
+    clipPath(target, fillRuleOf(node));
     setLayerTransform(target, id, -away);
     setShadow(target, id, shadow, away);
     const boxLike = node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'FRAME';
@@ -308,7 +327,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.save();
     setLayerTransform(target, id);
     traceLayerPath(target, node);
-    target.clip();
+    clipPath(target, fillRuleOf(node));
     target.setTransform(1, 0, 0, 1, 0, 0);
     target.filter = `blur(${radius * scale}px)`;
     target.drawImage(target.canvas, 0, 0);

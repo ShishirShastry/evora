@@ -1,6 +1,6 @@
 # OPEN DESIGN — Handoff note
 
-Last updated: 2026-11-15, after seven slices of Phase 2. Every item in the specification's Phase 2 list now has a tested implementation except masks.
+Last updated: 2026-11-16, during Phase 3. Phase 2: every item in the specification's list has a tested implementation except masks. Phase 3 (vector editing) has started: see the table.
 
 ## Where the project stands
 
@@ -9,7 +9,8 @@ Last updated: 2026-11-15, after seven slices of Phase 2. Every item in the speci
 | 0 — Planning | Partly done, then stopped at the owner's request. `PROJECT_ARCHITECTURE.md` and `DOCUMENT_SCHEMA.md` exist. The other four planning documents were **not written**. |
 | 1 — Editor foundation | **Implemented and tested.** Acceptance criterion met (see below). |
 | 2 — Design functionality | **Implemented, with gaps.** Done and tested: shape properties, fills (solid, gradients, images), strokes, effects, blend modes, typography, image import and cropping, alignment, distribution, grouping, frame clipping, rulers, guides, snapping, layout grids, constraints. **Missing from the Phase 2 list:** using a layer as a mask. Other gaps are listed under "Known limitations". Whether the acceptance criterion ("a complete static UI design without another application") is met is a judgement for the owner: ordinary screens can be designed, but text has one style per layer, there are no vector tools yet (Phase 3) and nothing can be exported yet (Phase 7). |
-| 3 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
+| 3 — Vector editing | **In progress.** Done and tested: the vector layer itself (a vector network of points and Bézier segments, drawn, selected, moved, resized, flipped, styled, saved), and "Flatten to vector" for shapes. **Not done yet:** the Pen and Pencil tools, editing points and handles on the canvas, boolean operations, arcs, arrowheads and outlining a stroke. The acceptance criterion ("a designer can create and edit vector illustrations and icons") is **not met** until those exist. |
+| 4 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
 
 How to run and check the project: [README.md](README.md).
 
@@ -38,11 +39,12 @@ All of this is wired to the real document model, is undoable, and is saved autom
 - **Constraints (Phase 2).** A layer directly inside a frame can keep to the left, right or centre, stretch between both edges, or scale, and the same vertically. Resizing the frame — by its handles, in the properties panel, or as part of a larger resize — moves and resizes its children accordingly, in the same undo step; nested frames and groups pass it on.
 - **Layout grids (Phase 2).** Frames can carry any number of uniform grids, columns and rows (count, gutter, margin or offset, stretched or aligned with a fixed size, colour and opacity). They are drawn over the design as guides, never into it; layers snap to their lines; View → Show layout grids (Shift+G) hides and shows them all.
 - **Rulers and guides (Phase 2).** View → Rulers and guides (Shift+R) shows rulers along the top and left with page coordinates that follow pan and zoom, and marks the selection's extent on them. Drag out of a ruler to make a guide, drag a guide to move it, drag it back onto its ruler to remove it, or "Remove all" on the page's properties. Layers snap to guides. Guides are stored per page and, like layout grids, are never part of the design. Whether rulers are shown is remembered on this device.
+- **Vector layers (Phase 3, first part).** Object → Flatten to vector (Ctrl+E) turns the selected rectangles, ellipses, lines, polygons and stars into a vector layer: one shape is converted where it is, several become a single vector that holds all their outlines, looks like the bottom-most of them and replaces them (shapes inside selected groups included). A vector is drawn with fills, gradients, images, strokes (all caps, joins, dashes; inside and outside only when it is closed), effects and blend modes like any other shape; it is selected by what it paints (a hole is not part of it); resizing it scales its curves, flipping it mirrors them, and its box always fits its curves. There is no way to draw or edit a path by hand yet.
 - **Menus and shortcuts.** Main menu (File, Edit, View, Object, Arrange, Help), context menus and a shortcut reference, all generated from one command table, so a menu item and its shortcut cannot disagree.
 
 ## What is tested
 
-Run on 2026-11-15: TypeScript clean; **278 unit tests** and **16 browser acceptance tests** pass; production build succeeds.
+Run on 2026-11-16: TypeScript clean; **315 unit tests** pass. The 16 browser acceptance tests and the production build were last run on 2026-11-15, before Phase 3 started, and passed then.
 
 - `src/core/core.test.ts`, `src/core/document/validate.test.ts` — document operations, transforms, ordering, hit testing, selection rules, history diff, validation and repair, file format and version handling.
 - `src/state/editor.test.ts` — the real store and the real tools driven with pointer sequences: drawing, selecting, moving, nesting, resizing, rotating, pan and zoom, commands, pages, history.
@@ -52,6 +54,7 @@ Run on 2026-11-15: TypeScript clean; **278 unit tests** and **16 browser accepta
 - `e2e/phase1.spec.ts` — the Phase 1 acceptance criterion end to end in Microsoft Edge with real mouse and keyboard, including a reload and reopening from the file browser.
 - `src/core/ops/arrange.test.ts`, `src/state/arrange.test.ts` — groups (fit, nesting, scaling, removal when empty), align, distribute, flip, and opening a version 1 file in the version 2 format.
 - `src/core/text/layout.test.ts`, `src/state/text.test.ts` — line breaking, alignment, auto-sizing with the anchored edge, the text tool, editing, resizing rules, validation of text properties, and opening a version 2 file in the version 3 format.
+- `src/vector.test.ts` — Bézier maths (evaluation, exact bounds, splitting, flattening, nearest point), vector networks (runs for strokes, regions for fills including branching networks and loose ends, winding rules), point operations (add on a segment, remove with healing, handles and mirroring, smooth and corner, join, merge), shapes as networks (rounded rectangles, pills, ellipses, polygons, stars, lines), flattening one shape and several without moving them, the box following the curves in a rotated layer, resizing and group scaling, flipping, hit testing with holes and outlines, validation and repair, what the renderer traces and which fill rule and stroke position it uses, Ctrl+E with undo, and opening a version 7 file in version 8.
 - `src/guides.test.ts` — ruler tick spacing at different zooms, adding / moving / removing guides, hit testing, pulling guides out of the rulers and dragging them back, other tools leaving the rulers alone, snapping to guides, validation, and opening a version 6 file in version 7.
 - `e2e/guides.spec.ts` — rulers and guides checked on the overlay's pixels: show, pull out, snap a layer, move, undo, remove, hide, reload, remove all.
 - `src/layout.test.ts` — every constraint on both axes, nested frames, groups, resizing by handle with undo, layout grid geometry for each alignment, grid lines as snap targets, validation and repair, and opening a version 5 file in version 6.
@@ -79,7 +82,8 @@ Not covered by automated tests: the native save/open file dialogs for `.opendesi
 - Text has one style per layer: no bold word inside a sentence, no lists, no text on a path, no justified alignment. No fonts are bundled, so the font menu offers what the machine has (default Arial) and a file opened on a machine without a font shows a fallback. Text strokes are always centred on the outline.
 - While text is being edited, the in-place editor ignores vertical alignment and may sit a fraction of a pixel off the painted text.
 - Dragging a resize handle past the opposite edge flips the box but does not mirror its content. (The Flip commands do mirror correctly.)
-- Flip is exact for today's shapes because they are all symmetric; text, images and vector paths will need a real flip property (noted in DOCUMENT_SCHEMA.md §6).
+- Flip is exact for the basic shapes because they are symmetric, and mirrors a vector's curves; text and image fills are not mirrored (noted in DOCUMENT_SCHEMA.md §6).
+- Vectors: regions of a branching network are found on the assumption that its segments do not cross each other; where they do, the fill can be wrong. Stroke joins are not drawn where three or more segments meet. Shadow spread does not apply. An inner shadow on a vector whose outlines overlap under the non-zero rule is cast inside the overlap too. Text cannot be flattened to a vector.
 - Alt+D (align right) is also the browser's "focus address bar" shortcut and the browser may take it first; the button and the menu item always work.
 - Resizing a multi-selection that contains rotated layers scales their boxes approximately; it cannot skew.
 - Copying and pasting layers works inside the application only (within and between files in the same tab); layers are not put on the system clipboard. Images on the system clipboard can be pasted in.
@@ -108,10 +112,10 @@ Not covered by automated tests: the native save/open file dialogs for `.opendesi
 5. Canvas: equal-spacing snapping with distance read-outs, a switch for pixel snapping, guides relative to a frame, arrowheads on lines.
 6. Housekeeping: resizable sidebars, a light theme, virtualised layers list, flip that mirrors asymmetric content (a real flip property).
 
-**Then Phase 3** (vector editing): pen and pencil tools, Bézier nodes and handles, vector networks, boolean operations, arcs. The schema needs a `VECTOR` node; the renderer already paints by path, so a vector path is a new case in `traceLayerPath`, and hit testing needs a point-in-path test.
+**Phase 3 (vector editing), in progress.** Done: the `VECTOR` layer and its maths (`src/core/vector/`, `src/core/ops/vector.ts`), rendering, hit testing, flatten. Still to do, in this order: (1) the Pen tool and a point-editing mode (select and move points, drag handles, add and delete points, close and join paths), with the overlay drawing points and handles; (2) the Pencil tool with curve fitting; (3) boolean operations (union, subtract, intersect, exclude); (4) arcs on ellipses, arrowheads, outline stroke.
 
 Rules that have held so far and should keep holding:
 
-- Every schema addition bumps `CURRENT_SCHEMA_VERSION`, adds a migration in `MIGRATIONS` (`src/core/document/serialize.ts`) and a test that opens a file of the previous version. The schema is at version 7.
+- Every schema addition bumps `CURRENT_SCHEMA_VERSION`, adds a migration in `MIGRATIONS` (`src/core/document/serialize.ts`) and a test that opens a file of the previous version. The schema is at version 8.
 - Every feature gets a unit test at the level of the real operation and, where it is visible, a browser test that reads the result back (panel values or canvas pixels).
 - `DOCUMENT_SCHEMA.md` and this note are updated in the same commit as the change.

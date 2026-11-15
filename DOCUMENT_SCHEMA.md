@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **6**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **8**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -102,7 +102,7 @@ A node may be a parent only if its type is a container type. The container types
 ## 5. Node types
 
 ```ts
-type NodeType = 'PAGE' | 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT';
+type NodeType = 'PAGE' | 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT' | 'VECTOR';
 ```
 
 `GROUP` exists from version 2 and `TEXT` from version 3; everything else from version 1.
@@ -220,6 +220,35 @@ interface TextNode extends LayerBase {
 
 **Text.** One style applies to the whole layer; styling a range of characters differently is not part of version 3. `textAutoResize` says which dimensions follow the content: both (auto width, never wraps), the height only (wraps at the layer's width), or neither (fixed box). The editor refits those dimensions after every edit (`fitTextLayers`), keeping the edge the text is aligned to in place, so the stored `width` and `height` are always the laid-out size as measured on the machine that last edited the text. A machine without the font falls back to another and may lay the text out differently until it is next edited.
 
+```ts
+interface VectorNode extends LayerBase {
+  type: 'VECTOR';            // version 8
+  network: VectorNetwork;
+  windingRule: 'NONZERO' | 'EVENODD';
+}
+
+interface VectorNetwork {
+  vertices: { x: number; y: number }[];   // in the layer's own space: (0, 0) is the top-left corner of its box
+  segments: VectorSegment[];
+}
+
+interface VectorSegment {
+  start: number;             // index into vertices
+  end: number;               // index into vertices
+  tangentStart: { x: number; y: number };  // Bézier control handle, relative to the start point
+  tangentEnd: { x: number; y: number };    // Bézier control handle, relative to the end point
+}
+```
+
+**Vectors.** A vector layer holds a *vector network*: points, and segments between them. A segment whose two tangents are zero is a straight line; otherwise it is a cubic Bézier curve. Unlike a path, a point may have any number of segments, so shapes can branch and share edges. What is derived from a network is not stored:
+
+- *Strokes* follow every segment. Runs of segments through points that have exactly two segments are stroked as one line, so they get proper joins; a run ends at a loose end or at a branch.
+- *Fills* cover closed regions. A plain path (no branches) is filled as it is, an open one as if a straight line closed it. The parts of a network that branch are filled region by region; the regions are found by walking round each point in order, which assumes segments do not cross each other. `windingRule` decides what happens where outlines overlap or nest: `NONZERO` fills everything enclosed, `EVENODD` makes a shape inside a shape a hole.
+- A stroke can be inside or outside only when every run is closed; otherwise it is centred whatever `strokeAlign` says.
+- Whether a point is smooth is read from its handles (two handles in a straight line through the point); no flag is stored.
+
+A vector's box is always the bounding box of its curves (the curves themselves, not their handles), in the layer's own, possibly rotated, frame of reference. The editor restores this after every edit (`fitVectors`) without moving anything on the page, and removes a vector that has no points left. Resizing a vector scales its points and handles; a vector that is flat in one direction (a straight line) cannot be resized in that direction. "Flatten to vector" turns rectangles, ellipses, lines, polygons and stars into vectors (text cannot be converted: the application has no access to glyph outlines).
+
 **Groups.** A group's box is always the bounding box of its children, in the group's own (possibly rotated) frame of reference. This is an invariant the editor restores after every edit (`normalizeGroups`): the box is refitted when children move or resize, and a group whose last child is removed is deleted. Resizing a group scales its children; resizing a frame does not. A group is never hit directly on the canvas, only through its children.
 
 ### 5.4 Paint
@@ -329,7 +358,7 @@ Opacity, blend mode, layer blur and drop shadows apply to a layer as a whole, ch
 
 This is the convention CSS uses (`left/top/width/height` plus `transform: rotate()` about the centre), which keeps Developer Mode output direct (ADR-005).
 
-Skew is not representable. There is no flip flag either: every shape that exists so far is symmetric about its own vertical axis, so "Flip horizontal / vertical" is implemented as an exact geometric operation (mirror the position, negate the rotation, add a half turn for a vertical flip of polygons and stars, and recurse into containers). A `flipX` / `flipY` property becomes necessary, and will be added, with the first asymmetric content (text, images, vector paths).
+Skew is not representable. There is no flip flag either: the basic shapes are symmetric about their own vertical axis, so "Flip horizontal / vertical" is implemented as an exact geometric operation (mirror the position, negate the rotation, add a half turn for a vertical flip of polygons and stars, and recurse into containers), and a vector's curves are mirrored themselves. Text and image fills are not mirrored; they would need a `flipX` / `flipY` property.
 
 ---
 
@@ -347,6 +376,8 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 6 | Numbers are finite. `width`, `height`, `strokeWeight`, `cornerRadius` ≥ 0. `opacity` values are within 0..1. Colour channels are within 0..1. | Clamp, or reset non-finite values to defaults. |
 | 7 | `type` is a known node type for this schema version. | Drop the node and its subtree, and report it. |
 | 8 | `pointCount` is an integer ≥ 3; `innerRadius` is within 0..1. | Clamp. |
+| 9 | Every segment of a vector network starts and ends at an existing point of that network; coordinates and tangents are finite. | Drop segments that point nowhere; reset bad numbers to 0. |
+| 10 | A vector layer's box is the bounding box of its curves. | Refit the box, without moving the curves on the page. |
 
 Repair never silently discards user content except under rule 7, and every repair is surfaced to the user when a file is opened.
 
@@ -355,7 +386,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 8;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -371,6 +402,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   5: addVersion6Defaults,
   // 6 -> 7: pages get guides [].
   6: addEmptyGuides,
+  // 7 -> 8: adds the VECTOR type. Older files have no vector layers.
+  7: (file) => ({ ...file, schemaVersion: 8 }),
 };
 ```
 
@@ -382,6 +415,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 4 | 5 | Image paints; `Document.assets`; `assetData` in exported files | `src/images.test.ts` ("opens a version 4 file") |
 | 5 | 6 | Constraints on every layer; layout grids on frames | `src/layout.test.ts` ("version 5 files") |
 | 6 | 7 | Ruler guides on pages | `src/guides.test.ts` ("opens a version 6 file") |
+| 7 | 8 | `VECTOR` layer type added | `src/vector.test.ts` ("opens a version 7 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -411,7 +445,7 @@ These are reserved so that later versions extend the schema without restructurin
 | Phase | Addition |
 |---|---|
 | 2 | Per-range text styles, `flipX/flipY`, masks. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7.) |
-| 3 | `VECTOR` (vector network: vertices, segments with Bézier handles, regions), `BOOLEAN_OPERATION`, arc data on ellipses. |
+| 3 | `BOOLEAN_OPERATION`, arc data on ellipses, arrowheads. (Done: `VECTOR` in version 8.) |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |

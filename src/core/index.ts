@@ -24,3 +24,8 @@ export * from './ops/clipboard';
 export * from './history/diff';
 export * from './text/layout';
 export * from './layout/grids';
+export * from './vector/bezier';
+export * from './vector/network';
+export * from './vector/shapes';
+export * from './vector/fit';
+export * from './ops/vector';

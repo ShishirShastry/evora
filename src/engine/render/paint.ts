@@ -1,5 +1,5 @@
-import type { CornerRadii, GradientPaint, ImagePaint, LayerNode, Paint, RGB, SolidPaint } from '../../core';
-import { imagePlacement, outlinePoints } from '../../core';
+import type { CornerRadii, GradientPaint, ImagePaint, LayerNode, Paint, PathStep, RGB, SolidPaint, VectorNetwork } from '../../core';
+import { effectiveRadii, imagePlacement, isStraight, networkGeometry, outlinePoints, stepCubic } from '../../core';
 import type { ImageSource } from '../images/imageCache';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -7,8 +7,13 @@ type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 /** The subset of the 2D canvas API used to build paths; lets tests pass a recording stub. */
 export type PathContext = Pick<
   CanvasRenderingContext2D,
-  'beginPath' | 'moveTo' | 'lineTo' | 'arcTo' | 'ellipse' | 'closePath' | 'rect'
+  'beginPath' | 'moveTo' | 'lineTo' | 'arcTo' | 'ellipse' | 'closePath' | 'rect' | 'bezierCurveTo'
 >;
+
+/** Which of a layer's outlines to trace: what a fill covers, or what a stroke follows. They differ for vectors only. */
+export type PathPart = 'fill' | 'stroke';
+
+export { effectiveRadii };
 
 export function rgbToCss(color: RGB, alpha = 1): string {
   const r = Math.round(color.r * 255);
@@ -21,24 +26,27 @@ export function solidToCss(paint: SolidPaint): string {
   return rgbToCss(paint.color, paint.opacity);
 }
 
-/**
- * The radii actually used for a box's corners, in the order top-left,
- * top-right, bottom-right, bottom-left. When neighbouring radii do not fit
- * along a side they are all scaled down together, as CSS does, so the outline
- * stays smooth instead of overlapping.
- */
-export function effectiveRadii(width: number, height: number, radius: number, radii: CornerRadii | null, inset = 0): CornerRadii {
-  // A rounded corner grows or shrinks with the outline; a sharp corner stays sharp.
-  const [tl, tr, br, bl] = (radii ?? [radius, radius, radius, radius]).map((r) => (r <= 0 ? 0 : Math.max(0, r - inset))) as CornerRadii;
-  if (width <= 0 || height <= 0) return [0, 0, 0, 0];
-  const factor = Math.min(
-    1,
-    tl + tr > 0 ? width / (tl + tr) : 1,
-    bl + br > 0 ? width / (bl + br) : 1,
-    tl + bl > 0 ? height / (tl + bl) : 1,
-    tr + br > 0 ? height / (tr + br) : 1,
-  );
-  return [tl * factor, tr * factor, br * factor, bl * factor];
+/** The canvas fill rule for a layer's outline. Only vectors can ask for even-odd. */
+export function fillRuleOf(node: LayerNode): CanvasFillRule {
+  return node.type === 'VECTOR' && node.windingRule === 'EVENODD' ? 'evenodd' : 'nonzero';
+}
+
+/** Adds a run of segments to the current path as one sub-path. */
+function traceSteps(ctx: PathContext, network: VectorNetwork, steps: readonly PathStep[], close: boolean): void {
+  steps.forEach((step, i) => {
+    const c = stepCubic(network, step);
+    if (i === 0) ctx.moveTo(c.p0.x, c.p0.y);
+    if (isStraight(c)) ctx.lineTo(c.p3.x, c.p3.y);
+    else ctx.bezierCurveTo(c.p1.x, c.p1.y, c.p2.x, c.p2.y, c.p3.x, c.p3.y);
+  });
+  if (close && steps.length > 0) ctx.closePath();
+}
+
+/** Adds a vector network to the current path: its closed regions for filling, or every segment for stroking. */
+export function traceNetwork(ctx: PathContext, network: VectorNetwork, part: PathPart): void {
+  const geometry = networkGeometry(network);
+  if (part === 'fill') for (const loop of geometry.loops) traceSteps(ctx, network, loop, true);
+  else for (const chain of geometry.chains) traceSteps(ctx, network, chain.steps, chain.closed);
 }
 
 function roundedRect(ctx: PathContext, x: number, y: number, w: number, h: number, radii: CornerRadii): void {
@@ -62,9 +70,10 @@ function roundedRect(ctx: PathContext, x: number, y: number, w: number, h: numbe
 /**
  * Traces a layer's outline in its local space (origin at the box's top-left).
  * `inset` shrinks (positive) or grows (negative) the outline; it is used for
- * shadow spread on boxes and ellipses.
+ * shadow spread on boxes and ellipses. `part` matters for vectors, where the
+ * area a fill covers and the lines a stroke follows are not the same thing.
  */
-export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0): void {
+export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0, part: PathPart = 'fill'): void {
   const { width, height } = node;
   ctx.beginPath();
   switch (node.type) {
@@ -94,6 +103,9 @@ export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0): vo
       ctx.closePath();
       break;
     }
+    case 'VECTOR':
+      traceNetwork(ctx, node.network, part);
+      break;
   }
 }
 
@@ -169,29 +181,41 @@ function drawImagePaint(ctx: Ctx, paint: ImagePaint, width: number, height: numb
   ctx.drawImage(decoded.image, source.x, source.y, source.width, source.height, target.x, target.y, target.width, target.height);
 }
 
+/** Fills the current path with the current style, by the given rule. */
+export function fillPath(ctx: Ctx, rule: CanvasFillRule): void {
+  if (rule === 'evenodd') ctx.fill('evenodd');
+  else ctx.fill();
+}
+
+/** Clips to the current path, by the given rule. */
+export function clipPath(ctx: Ctx, rule: CanvasFillRule): void {
+  if (rule === 'evenodd') ctx.clip('evenodd');
+  else ctx.clip();
+}
+
 /**
  * Fills the current path with a paint. The path must already be traced in the
  * layer's local space. Radial, angular and diamond gradients are drawn in the
  * layer's unit square, so they stretch with the box: a radial gradient in a
  * wide rectangle is an ellipse, as designers expect.
  */
-export function fillWithPaint(ctx: Ctx, paint: Paint, width: number, height: number, images?: ImageSource): void {
+export function fillWithPaint(ctx: Ctx, paint: Paint, width: number, height: number, images?: ImageSource, rule: CanvasFillRule = 'nonzero'): void {
   const previousAlpha = ctx.globalAlpha;
   ctx.globalAlpha = previousAlpha * paint.opacity;
   if (paint.type === 'SOLID') {
     ctx.fillStyle = rgbToCss(paint.color);
-    ctx.fill();
+    fillPath(ctx, rule);
   } else if (paint.type === 'IMAGE') {
     ctx.save();
-    ctx.clip();
+    clipPath(ctx, rule);
     drawImagePaint(ctx, paint, width, height, images);
     ctx.restore();
   } else if (paint.type === 'GRADIENT_LINEAR' || width <= 0 || height <= 0) {
     ctx.fillStyle = gradientInPixels(ctx, paint, width, height);
-    ctx.fill();
+    fillPath(ctx, rule);
   } else {
     ctx.save();
-    ctx.clip();
+    clipPath(ctx, rule);
     // From here on, (0,0)-(1,1) is the layer's box.
     ctx.transform(width, 0, 0, height, 0, 0);
     const { from, to } = paint;

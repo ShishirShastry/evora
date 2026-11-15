@@ -4,6 +4,7 @@ import {
   approximateMeasurer,
   diffDocuments,
   fitTextLayers,
+  fitVectors,
   getPageIdOf,
   getPages,
   isLayer,
@@ -168,9 +169,9 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
   const initialPage = resolvePage(doc, session?.pageId);
   const viewports = { ...(session?.viewports ?? {}) };
   const measurer = options.measurer ?? approximateMeasurer;
-  /** Restores the invariants that depend on content: text sizes, then group bounds. */
+  /** Restores the invariants that depend on content: text sizes and vector boxes, then group bounds. */
   const normalize = (previous: Document, next: Document): Document =>
-    normalizeGroups(fitTextLayers(previous, next, measurer));
+    normalizeGroups(fitVectors(previous, fitTextLayers(previous, next, measurer)));
 
   return createStore<EditorState & EditorActions>()((set, get) => {
     /** Switches page (if needed) and selection after a history step or page change. */

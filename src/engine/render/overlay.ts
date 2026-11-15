@@ -187,7 +187,7 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     const z = viewport.zoom;
     ctx.save();
     ctx.transform(m[0] * z, m[1] * z, m[2] * z, m[3] * z, (m[4] - viewport.x) * z, (m[5] - viewport.y) * z);
-    traceLayerPath(ctx, node);
+    traceLayerPath(ctx, node, 0, 'stroke');
     ctx.restore();
     ctx.strokeStyle = ACCENT;
     ctx.lineWidth = lineWidth;
