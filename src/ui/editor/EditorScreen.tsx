@@ -236,6 +236,12 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
         event.preventDefault();
         return;
       }
+      if (event.key === 'Alt') {
+        // Alt on its own measures from the selection. Left alone, the browser would move the focus to its own menu.
+        controller.current?.setAltDown(true);
+        event.preventDefault();
+        return;
+      }
       if ((event.code === 'Enter' || event.code === 'NumpadEnter') && onControl(event.target)) return;
       const command = commandForKey(event);
       if (!command) return;
@@ -249,8 +255,15 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     };
     const onKeyUp = (event: KeyboardEvent): void => {
       if (event.code === 'Space') controller.current?.setSpaceDown(false);
+      if (event.key === 'Alt') {
+        controller.current?.setAltDown(false);
+        event.preventDefault();
+      }
     };
-    const onBlur = (): void => controller.current?.setSpaceDown(false);
+    const onBlur = (): void => {
+      controller.current?.setSpaceDown(false);
+      controller.current?.setAltDown(false);
+    };
 
     /** Paste: images from the system clipboard are placed; otherwise layers copied in the editor are pasted. */
     const onPaste = (event: ClipboardEvent): void => {

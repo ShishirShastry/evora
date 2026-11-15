@@ -2,6 +2,7 @@ import {
   addLayer,
   applyToPoint,
   clean,
+  collectSnapRects,
   collectSnapTargets,
   containerAt,
   deeperTargetAt,
@@ -11,7 +12,9 @@ import {
   getLayer,
   guideSnapTargets,
   hitGuide,
+  isFrame,
   isPage,
+  measureDistances,
   setGuide,
   getWorldBounds,
   getWorldMatrix,
@@ -38,9 +41,12 @@ import {
   snapAngle,
   snapPoint,
   snapRect,
+  snapSpacing,
+  spacingMarks,
   topLevelIds,
   TYPE_LABELS,
   unionRects,
+  type DistanceMark,
   type Document,
   type Guide,
   type Handle,
@@ -174,8 +180,17 @@ export class InteractionController {
   labels: FrameLabel[] = [];
   /** Smart guides for whatever is snapped right now, read by the overlay renderer. */
   guides: SnapGuide[] = [];
-  /** Snap lines of the container being worked in, kept for the length of one interaction. */
-  private snapCache: { doc: Document; key: string; targets: SnapTargets } | null = null;
+  /**
+   * Distances to show with their lengths: the equal gaps the layers being moved sit in, or, while Alt is held,
+   * what lies between the selection and the layer under the pointer. Read by the overlay renderer.
+   */
+  distances: DistanceMark[] = [];
+  /** Edges carried on to a measured distance that they do not reach, drawn dashed. */
+  distanceGuides: SnapGuide[] = [];
+  /** The last pointer position seen while nothing was being dragged, so that pressing Alt can measure from it. */
+  private lastHover: PointerInput | null = null;
+  /** Snap lines and boxes of the container being worked in, kept for the length of one interaction. */
+  private snapCache: { doc: Document; key: string; targets: SnapTargets; rects: Rect[] } | null = null;
 
   /** The Pen tool and the editing of a vector's points. */
   readonly vector: VectorTool;
@@ -232,14 +247,17 @@ export class InteractionController {
    * the layers being transformed. Cached per interaction, since the layers
    * that are not moving do not change while it lasts.
    */
-  private snapTargets(doc: Document, containerIds: readonly NodeId[], exclude: ReadonlySet<NodeId>): SnapTargets {
+  private snapSources(doc: Document, containerIds: readonly NodeId[], exclude: ReadonlySet<NodeId>): { targets: SnapTargets; rects: Rect[] } {
     const key = containerIds.join(',');
-    if (this.snapCache && this.snapCache.doc === doc && this.snapCache.key === key) return this.snapCache.targets;
+    if (this.snapCache && this.snapCache.doc === doc && this.snapCache.key === key) return this.snapCache;
     const targets: SnapTargets = { xs: [], ys: [] };
+    // The boxes of the same layers, for spacing a moving layer evenly among them.
+    const rects: Rect[] = [];
     for (const id of new Set(containerIds)) {
       const part = collectSnapTargets(doc, id, exclude, { layoutGrids: this.state.showLayoutGrids });
       targets.xs.push(...part.xs);
       targets.ys.push(...part.ys);
+      rects.push(...collectSnapRects(doc, id, exclude));
     }
     // The page's ruler guides, while the rulers are shown.
     if (this.state.showRulers) {
@@ -247,8 +265,12 @@ export class InteractionController {
       targets.xs.push(...guides.xs);
       targets.ys.push(...guides.ys);
     }
-    this.snapCache = { doc, key, targets };
-    return targets;
+    this.snapCache = { doc, key, targets, rects };
+    return this.snapCache;
+  }
+
+  private snapTargets(doc: Document, containerIds: readonly NodeId[], exclude: ReadonlySet<NodeId>): SnapTargets {
+    return this.snapSources(doc, containerIds, exclude).targets;
   }
 
   /** Snaps a page-space point to nearby lines, if snapping is on, and shows the guides. */
@@ -300,6 +322,36 @@ export class InteractionController {
   private endSnapping(): void {
     this.guides = [];
     this.snapCache = null;
+    this.clearDistances();
+  }
+
+  /** Puts away the distances being shown. */
+  private clearDistances(): void {
+    if (this.distances.length === 0 && this.distanceGuides.length === 0) return;
+    this.distances = [];
+    this.distanceGuides = [];
+    this.host.requestRender();
+  }
+
+  /**
+   * Shows the distances from the selection to another layer: the one under the pointer or, over the selection
+   * itself or over nothing, the frame the selection is in.
+   */
+  private measureTo(target: NodeId | null): void {
+    const state = this.state;
+    const ids = topLevelIds(state.doc, state.selection).filter((id) => isLayer(state.doc.nodes[id]));
+    const from = unionRects(ids.map((id) => getWorldBounds(state.doc, id)));
+    if (!from) return;
+    let other = target !== null && !state.selection.includes(target) ? target : null;
+    if (other === null) {
+      const parentId = state.doc.nodes[ids[0] as NodeId]?.parentId;
+      if (parentId && isFrame(state.doc.nodes[parentId])) other = parentId;
+    }
+    if (other === null) return;
+    const measured = measureDistances(from, getWorldBounds(state.doc, other));
+    this.distances = measured.marks;
+    this.distanceGuides = measured.guides;
+    if (measured.marks.length > 0) this.host.requestRender();
   }
 
   /** Converts a page-space point into the coordinate space of `parentId`. */
@@ -311,6 +363,7 @@ export class InteractionController {
 
   pointerDown(e: PointerInput): void {
     if (this.mode.kind !== 'idle') return;
+    this.clearDistances();
     const { tool } = this.state;
     if (e.button === 1 || (e.button === 0 && (this.spaceDown || tool === 'hand'))) {
       this.mode = { kind: 'pan', lastX: e.x, lastY: e.y };
@@ -344,6 +397,7 @@ export class InteractionController {
     const world = this.toWorld(e);
     switch (mode.kind) {
       case 'idle':
+        this.lastHover = e;
         this.updateHover(e);
         return;
       case 'pan':
@@ -488,6 +542,8 @@ export class InteractionController {
   /** The pointer left the canvas. */
   pointerLeave(): void {
     if (this.mode.kind !== 'idle') return;
+    this.lastHover = null;
+    this.clearDistances();
     this.state.setHovered(null);
     this.vector.pointerLeave();
   }
@@ -514,6 +570,16 @@ export class InteractionController {
     if (this.spaceDown === down) return;
     this.spaceDown = down;
     if (this.mode.kind === 'idle') this.host.setCursor(this.idleCursor());
+  }
+
+  /**
+   * Holding Alt measures from the selection to whatever the pointer is over. It takes effect when the key goes
+   * down or comes up, without the pointer having to move.
+   */
+  setAltDown(down: boolean): void {
+    if (this.mode.kind !== 'idle' || !this.lastHover || this.lastHover.altKey === down) return;
+    this.lastHover = { ...this.lastHover, altKey: down };
+    this.updateHover(this.lastHover);
   }
 
   /** The cursor for the active tool when nothing more specific applies. */
@@ -545,6 +611,7 @@ export class InteractionController {
 
   private updateHover(e: PointerInput): void {
     const state = this.state;
+    this.clearDistances();
     if (!this.spaceDown && this.vector.wantsPointer) {
       state.setHovered(null);
       this.vector.hover(e);
@@ -593,6 +660,8 @@ export class InteractionController {
       });
     state.setHovered(target);
     this.host.setCursor('default');
+    // With Alt held, the distances from the selection to what the pointer is over.
+    if (e.altKey) this.measureTo(target);
   }
 
   private beginSelect(e: PointerInput): void {
@@ -748,22 +817,30 @@ export class InteractionController {
 
     // Snap the moving bounds to the layers around them. An axis locked by Shift is left alone.
     this.guides = [];
+    this.distances = [];
+    this.distanceGuides = [];
     const bounds = this.state.snapping ? unionRects(mode.ids.map((id) => getWorldBounds(mode.base, id))) : null;
+    let neighbours: Rect[] = [];
     if (bounds) {
       const exclude = new Set(mode.ids);
       const first = mode.base.nodes[mode.ids[0] as NodeId];
       // Offer the frame under the pointer and, for a layer inside a group, its fellow group members.
       const containers = [containerAt(mode.base, pageId, world, exclude)];
       if (first?.parentId && isGroupLike(mode.base.nodes[first.parentId])) containers.push(first.parentId);
-      const snap = snapRect(
-        { x: bounds.x + dx, y: bounds.y + dy, width: bounds.width, height: bounds.height },
-        this.snapTargets(mode.base, containers, exclude),
-        SNAP_DISTANCE_PX / this.state.viewport.zoom,
-        { x: !(e.shiftKey && dx === 0), y: !(e.shiftKey && dy === 0) },
-      );
-      dx += snap.dx;
-      dy += snap.dy;
-      this.guides = snap.guides;
+      const sources = this.snapSources(mode.base, containers, exclude);
+      neighbours = sources.rects;
+      const moved = { x: bounds.x + dx, y: bounds.y + dy, width: bounds.width, height: bounds.height };
+      const threshold = SNAP_DISTANCE_PX / this.state.viewport.zoom;
+      const axes = { x: !(e.shiftKey && dx === 0), y: !(e.shiftKey && dy === 0) };
+      const snap = snapRect(moved, sources.targets, threshold, axes);
+      // Even spacing with the neighbours is offered as well. On each axis the nearer of the two wins, and a line wins a tie.
+      const spaced = snapSpacing(moved, neighbours, threshold, axes, this.state.pixelSnap);
+      const onLine = (axis: 'x' | 'y'): boolean => snap.guides.some((guide) => guide.axis === axis);
+      const spaceX = spaced.dx !== null && (!onLine('x') || Math.abs(spaced.dx) < Math.abs(snap.dx) - 1e-9);
+      const spaceY = spaced.dy !== null && (!onLine('y') || Math.abs(spaced.dy) < Math.abs(snap.dy) - 1e-9);
+      dx += spaceX ? (spaced.dx as number) : snap.dx;
+      dy += spaceY ? (spaced.dy as number) : snap.dy;
+      this.guides = snap.guides.filter((guide) => !(guide.axis === 'x' ? spaceX : spaceY));
     }
 
     this.state.updateGesture(() => {
@@ -778,6 +855,12 @@ export class InteractionController {
       if (outside.length > 0) doc = reparentNodes(doc, outside, container);
       return doc;
     }, mode.ids);
+
+    // The equal gaps the layers have come to rest in are shown with their sizes, however they got there.
+    if (bounds) {
+      const now = unionRects(mode.ids.map((id) => getWorldBounds(this.state.doc, id)));
+      if (now) this.distances = spacingMarks(now, neighbours);
+    }
   }
 
   // --------------------------------------------------------------- resizing

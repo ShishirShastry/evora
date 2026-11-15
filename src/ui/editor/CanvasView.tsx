@@ -113,6 +113,8 @@ export function CanvasView() {
         hoveredId: state.hoveredId,
         marquee: controller.marquee,
         guides: controller.guides,
+        distances: controller.distances,
+        distanceGuides: controller.distanceGuides,
         showLayoutGrids: state.showLayoutGrids,
         showRulers: state.showRulers,
         // A vector whose points are being edited shows those instead of the box handles.

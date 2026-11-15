@@ -13,6 +13,7 @@ export * from './scene/tree';
 export * from './scene/shapes';
 export * from './scene/hitTest';
 export * from './scene/snap';
+export * from './scene/spacing';
 export * from './scene/guides';
 export * from './ops/ordering';
 export * from './ops/nodes';

@@ -16,6 +16,7 @@ import {
   type NodeId,
   type NodeMap,
   type Point,
+  type DistanceMark,
   type Rect,
   type SnapGuide,
 } from '../../core';
@@ -61,6 +62,10 @@ export interface OverlayInput {
   showHandles: boolean;
   /** Smart guides to draw while something is snapped. */
   guides?: readonly SnapGuide[];
+  /** Distances to draw with their lengths: equal gaps while moving, or what Alt measures. */
+  distances?: readonly DistanceMark[];
+  /** Edges carried on to a measured distance, drawn dashed. */
+  distanceGuides?: readonly SnapGuide[];
   /** Draw the layout grids of frames. On by default. */
   showLayoutGrids?: boolean;
   /** Draw the rulers and the page's ruler guides. Off by default. */
@@ -314,6 +319,8 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     ctx.stroke();
   }
 
+  if (input.distances && input.distances.length > 0) drawDistances(ctx, viewport, input.distances, input.distanceGuides ?? []);
+
   if (input.marquee) {
     const s = rectToPolygon(input.marquee).map(toScreen);
     polygon(ctx, s);
@@ -334,6 +341,82 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   return { labels };
+}
+
+/** Half the length of the little bar across each end of a distance. */
+const DISTANCE_TICK = 4;
+const DISTANCE_LABEL_HEIGHT = 16;
+
+/**
+ * Where the number of a distance is drawn, in screen pixels: below the middle
+ * of a horizontal run, to the right of the middle of a vertical one.
+ */
+export function distanceLabelBox(mark: DistanceMark, viewport: Viewport, textWidth: number): { x: number; y: number; width: number; height: number } {
+  const a = worldToScreen(viewport, mark.axis === 'x' ? { x: mark.from, y: mark.at } : { x: mark.at, y: mark.from });
+  const b = worldToScreen(viewport, mark.axis === 'x' ? { x: mark.to, y: mark.at } : { x: mark.at, y: mark.to });
+  const width = Math.ceil(textWidth) + 8;
+  const cx = (a.x + b.x) / 2;
+  const cy = (a.y + b.y) / 2;
+  return mark.axis === 'x'
+    ? { x: Math.round(cx - width / 2), y: Math.round(cy + 6), width, height: DISTANCE_LABEL_HEIGHT }
+    : { x: Math.round(cx + 6), y: Math.round(cy - DISTANCE_LABEL_HEIGHT / 2), width, height: DISTANCE_LABEL_HEIGHT };
+}
+
+/**
+ * Draws distances: each a line with a short bar across both ends and its
+ * length in a label beside its middle. Edges carried on to a distance are
+ * dashed lines.
+ */
+function drawDistances(ctx: Ctx, viewport: Viewport, marks: readonly DistanceMark[], guides: readonly SnapGuide[]): void {
+  ctx.save();
+  ctx.strokeStyle = GUIDE_COLOR;
+  ctx.lineWidth = 1;
+  if (guides.length > 0) {
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    for (const guide of guides) {
+      const a = worldToScreen(viewport, guide.axis === 'x' ? { x: guide.position, y: guide.from } : { x: guide.from, y: guide.position });
+      const b = worldToScreen(viewport, guide.axis === 'x' ? { x: guide.position, y: guide.to } : { x: guide.to, y: guide.position });
+      ctx.moveTo(Math.round(a.x) + 0.5, Math.round(a.y) + 0.5);
+      ctx.lineTo(Math.round(b.x) + 0.5, Math.round(b.y) + 0.5);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.font = LABEL_FONT;
+  ctx.textBaseline = 'middle';
+  for (const mark of marks) {
+    const a = worldToScreen(viewport, mark.axis === 'x' ? { x: mark.from, y: mark.at } : { x: mark.at, y: mark.from });
+    const b = worldToScreen(viewport, mark.axis === 'x' ? { x: mark.to, y: mark.at } : { x: mark.at, y: mark.to });
+    const ax = Math.round(a.x) + 0.5;
+    const ay = Math.round(a.y) + 0.5;
+    const bx = Math.round(b.x) + 0.5;
+    const by = Math.round(b.y) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    if (mark.axis === 'x') {
+      ctx.moveTo(ax, ay - DISTANCE_TICK);
+      ctx.lineTo(ax, ay + DISTANCE_TICK);
+      ctx.moveTo(bx, by - DISTANCE_TICK);
+      ctx.lineTo(bx, by + DISTANCE_TICK);
+    } else {
+      ctx.moveTo(ax - DISTANCE_TICK, ay);
+      ctx.lineTo(ax + DISTANCE_TICK, ay);
+      ctx.moveTo(bx - DISTANCE_TICK, by);
+      ctx.lineTo(bx + DISTANCE_TICK, by);
+    }
+    ctx.stroke();
+    const text = formatSize(Math.abs(mark.to - mark.from));
+    const box = distanceLabelBox(mark, viewport, ctx.measureText(text).width);
+    ctx.fillStyle = GUIDE_COLOR;
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.width, box.height);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, box.x + 4, box.y + box.height / 2);
+  }
+  ctx.restore();
 }
 
 const POINT_SIZE = 7;
