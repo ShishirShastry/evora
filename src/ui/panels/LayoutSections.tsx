@@ -10,7 +10,8 @@ import {
   type LayoutGridPattern,
   type NodeId,
 } from '../../core';
-import { ColorField, NumberField } from '../components/Fields';
+import { ColorField } from '../components/ColorField';
+import { NumberField } from '../components/Fields';
 import { Icon } from '../components/Icon';
 import { useEditorContext } from '../editor/EditorContext';
 import { applyLive, Row, Section, SelectField, shared } from './panelParts';

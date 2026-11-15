@@ -20,7 +20,8 @@ import {
   type Paint,
   type RGB,
 } from '../../core';
-import { ColorField, NumberField } from '../components/Fields';
+import { ColorField } from '../components/ColorField';
+import { NumberField } from '../components/Fields';
 import { Icon } from '../components/Icon';
 import { useEditor, useEditorContext } from '../editor/EditorContext';
 import { applyLive, Row, sameList, Section, SelectField } from './panelParts';

@@ -38,7 +38,8 @@ import {
 } from '../../core';
 import { availableFonts } from '../../engine/text/measure';
 import { getCommand, updateLayers, type Command } from '../../state/commands';
-import { ColorField, MIXED, NumberField, type Mixed } from '../components/Fields';
+import { ColorField } from '../components/ColorField';
+import { MIXED, NumberField, type Mixed } from '../components/Fields';
 import { Icon, type IconName } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 import { EffectsSection } from './EffectsSection';
