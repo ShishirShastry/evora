@@ -40,7 +40,8 @@ export type IconName =
   | 'textRight'
   | 'textTop'
   | 'textMiddle'
-  | 'textBottom';
+  | 'textBottom'
+  | 'corners';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -107,6 +108,7 @@ const PATHS: Record<IconName, ReactNode> = {
   textTop: <path {...s} d="M2.5 2.5h11M8 13.5V6M5.5 8.5L8 6l2.5 2.5" />,
   textMiddle: <path {...s} d="M2.5 8h11M8 2v3.5M6.3 4L8 5.5 9.7 4M8 14v-3.5M6.3 12L8 10.5 9.7 12" />,
   textBottom: <path {...s} d="M2.5 13.5h11M8 2.5V10M5.5 7.5L8 10l2.5-2.5" />,
+  corners: <path {...s} d="M2.5 6V4.5a2 2 0 0 1 2-2H6M10 2.5h1.5a2 2 0 0 1 2 2V6M13.5 10v1.5a2 2 0 0 1-2 2H10M6 13.5H4.5a2 2 0 0 1-2-2V10" />,
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

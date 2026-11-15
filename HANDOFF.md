@@ -1,6 +1,6 @@
 # OPEN DESIGN — Handoff note
 
-Last updated: 2026-11-15, after three slices of Phase 2 (groups and arranging; text; snapping).
+Last updated: 2026-11-15, after four slices of Phase 2 (groups and arranging; text; snapping; appearance).
 
 ## Where the project stands
 
@@ -8,7 +8,7 @@ Last updated: 2026-11-15, after three slices of Phase 2 (groups and arranging; t
 |---|---|
 | 0 — Planning | Partly done, then stopped at the owner's request. `PROJECT_ARCHITECTURE.md` and `DOCUMENT_SCHEMA.md` exist. The other four planning documents were **not written**. |
 | 1 — Editor foundation | **Implemented and tested.** Acceptance criterion met (see below). |
-| 2 — Design functionality | **In progress.** Done and tested: groups, align, distribute, flip, text layers, snapping to objects with smart guides. **Not started:** gradients, extra stroke options, effects, images, clipping masks, rulers, draggable guides, layout grids, constraints. The Phase 2 acceptance criterion is **not** met. |
+| 2 — Design functionality | **In progress.** Done and tested: groups, align, distribute, flip, text layers, snapping to objects with smart guides, gradients, stroke caps / joins / dashes, per-corner radii, shadows, blurs, blend modes. **Not started:** images, clipping masks, rulers, draggable guides, layout grids, constraints. The Phase 2 acceptance criterion is **not** met. |
 | 3 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
 
 How to run and check the project: [README.md](README.md).
@@ -33,11 +33,12 @@ All of this is wired to the real document model, is undoable, and is saved autom
 - **Arrange (Phase 2).** Align left / centre / right / top / middle / bottom (to the selection, or to the parent frame for a single layer), distribute horizontal and vertical spacing, flip horizontal and vertical. Available from the properties panel, the Arrange and Object menus and shortcuts.
 - **Text (Phase 2).** Text tool (T): click for text that grows with what you type, or drag out a box that wraps. Typed in place on the canvas with a real text field (caret, selection, clipboard, IME), at any zoom and rotation. Double-click or Enter edits existing text; Escape, Ctrl+Enter or clicking away finishes. Font family (from the fonts installed on the machine), weight, size, line height, letter spacing, horizontal and vertical alignment, auto width / auto height / fixed size, letter case, underline or strikethrough, italic, fill colour. The layer resizes itself to its text and is named after it. Leaving new text empty creates nothing.
 - **Snapping (Phase 2).** While moving, resizing or drawing, edges and centre lines snap to the other layers in the same frame and to the frame's own edges and centre, within 6 screen pixels, and the lines snapped to are shown as guides. An axis locked with Shift is not snapped. "Snap to objects" in the View menu switches it off; the choice is remembered on this device.
+- **Appearance (Phase 2).** Fills and strokes can be solid or a linear, radial, angular or diamond gradient with any number of colour stops (colour, position, opacity) and an angle. Strokes have flat / round / square ends, sharp / cut / round corners and dashes with a gap. Frames and rectangles can have a different radius on each corner. Effects: drop shadow and inner shadow (offset, blur, spread, colour, opacity), layer blur and background blur, stacked, each hideable. Sixteen blend modes. Opacity, blend mode, blur and shadow apply to a layer as a whole, children included.
 - **Menus and shortcuts.** Main menu (File, Edit, View, Object, Help), context menus and a shortcut reference, all generated from one command table, so a menu item and its shortcut cannot disagree.
 
 ## What is tested
 
-Run on 2026-11-15: TypeScript clean; **200 unit tests** and **7 browser acceptance tests** pass; production build succeeds.
+Run on 2026-11-15: TypeScript clean; **214 unit tests** and **11 browser acceptance tests** pass; production build succeeds.
 
 - `src/core/core.test.ts`, `src/core/document/validate.test.ts` — document operations, transforms, ordering, hit testing, selection rules, history diff, validation and repair, file format and version handling.
 - `src/state/editor.test.ts` — the real store and the real tools driven with pointer sequences: drawing, selecting, moving, nesting, resizing, rotating, pan and zoom, commands, pages, history.
@@ -47,6 +48,8 @@ Run on 2026-11-15: TypeScript clean; **200 unit tests** and **7 browser acceptan
 - `e2e/phase1.spec.ts` — the Phase 1 acceptance criterion end to end in Microsoft Edge with real mouse and keyboard, including a reload and reopening from the file browser.
 - `src/core/ops/arrange.test.ts`, `src/state/arrange.test.ts` — groups (fit, nesting, scaling, removal when empty), align, distribute, flip, and opening a version 1 file in the version 2 format.
 - `src/core/text/layout.test.ts`, `src/state/text.test.ts` — line breaking, alignment, auto-sizing with the anchored edge, the text tool, editing, resizing rules, validation of text properties, and opening a version 2 file in the version 3 format.
+- `src/appearance.test.ts` — gradient construction and conversion, validation and repair of paints, effects, dashes and corner radii, corner-radius fitting, culling bounds with effects, which layers the renderer composites as a whole, and opening a version 3 file in version 4.
+- `e2e/appearance.spec.ts` — real pixels for all four gradient kinds, dashes, stroke position and caps, per-corner radii, drop shadow with spread and blur, inner shadow, layer blur, background blur, multiply / screen / difference, and group opacity.
 - `src/state/snap.test.ts` — snap targets, snapping maths, snapping while moving, resizing and drawing, the on/off preference.
 - `e2e/phase2.spec.ts` — snapping on and off in the browser with the preference surviving a reload; group, ungroup, align, distribute and flip; and text: typing in the real in-place editor, glyph pixels on the canvas, restyling, re-editing, undo, discarding empty text, reload.
 - `e2e/rendering.spec.ts` — reads real pixels from the canvas: fills, clipping, ellipse shape, strokes, hidden layers, undo.
@@ -55,7 +58,10 @@ Not covered by automated tests: the native save/open file dialogs (`src/persiste
 
 ## Known limitations and rough edges
 
-- No images, gradients, effects, rulers, draggable guides, layout grids, constraints or Auto Layout yet: those are the rest of Phase 2 and later.
+- No images, rulers, draggable guides, layout grids, constraints or Auto Layout yet: those are the rest of Phase 2 and later.
+- Gradients are edited in the properties panel only (type, angle, stops); there are no draggable gradient handles on the canvas, and no eyedropper. On text and strokes, radial and angular gradients are circular rather than stretched to the box, and diamond falls back to radial.
+- Shadow spread works on rectangles, ellipses and frames only. Inner shadows are not drawn on text or groups. A drop shadow shows through a translucent fill. Background blur does not see through a group that is itself being composited (one with a blend mode, blur or partial opacity).
+- There is one colour picker (the browser's), with HEX entry; no RGB / HSL fields, no colour styles.
 - Snapping is to objects only: no snapping to a grid or to guides (there are none yet), no equal-spacing snapping, no distance read-outs, and nothing snaps inside a rotated frame. Whole-pixel snapping is always on and has no switch yet.
 - Text has one style per layer: no bold word inside a sentence, no lists, no text on a path, no justified alignment. No fonts are bundled, so the font menu offers what the machine has (default Arial) and a file opened on a machine without a font shows a fallback. Text strokes are always centred on the outline.
 - While text is being edited, the in-place editor ignores vertical alignment and may sit a fraction of a pixel off the painted text.
@@ -84,9 +90,9 @@ Phase 2 (static design), suggested order, each to be finished with tests before 
 
 1. ~~Groups, alignment and distribution, flip.~~ Done.
 2. ~~Snapping to objects and frame edges with smart guides.~~ Done. Still to do here: rulers, draggable guides and snapping to them, equal-spacing snapping, a switch for pixel snapping.
-3. Appearance: gradients, multiple strokes with dash/cap/join, independent corner radii, shadows and blurs, blend modes.
+3. ~~Appearance: gradients, strokes with dash/cap/join, independent corner radii, shadows and blurs, blend modes.~~ Done. Still to do here: gradient handles on the canvas, eyedropper, RGB/HSL entry, arrowheads.
 4. ~~Text layers with inline editing and font properties.~~ Done, with the limits listed above. Still to do for text: per-range styles, lists, bundled open-licence fonts, justified text.
 5. Images: import (file, drag-and-drop, paste), fill modes, crop; this needs the asset store and schema version 2 (zip container).
 6. Constraints and layout grids.
 
-Each schema addition needs a version bump and a migration with a fixture test (see `MIGRATIONS` in `src/core/document/serialize.ts`). The schema is currently at version 3.
+Each schema addition needs a version bump and a migration with a fixture test (see `MIGRATIONS` in `src/core/document/serialize.ts`). The schema is currently at version 4.

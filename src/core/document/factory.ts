@@ -2,12 +2,16 @@ import { createId } from '../ids';
 import { freshKeys } from '../order';
 import type {
   Document,
+  GradientPaint,
+  GradientType,
   LayerNode,
   LayerPatch,
   LayerType,
   NodeId,
   PageNode,
+  Paint,
   RGB,
+  ShadowEffect,
   SolidPaint,
 } from './schema';
 
@@ -32,6 +36,48 @@ export const DEFAULT_FONT_SIZE = 16;
 
 export function solidPaint(color: RGB, opacity = 1): SolidPaint {
   return { type: 'SOLID', color: { ...color }, opacity, visible: true };
+}
+
+/** The two handles of a gradient at an angle through the middle of the box. 0° runs left to right, 90° top to bottom. */
+export function gradientHandles(angle: number): Pick<GradientPaint, 'from' | 'to'> {
+  const r = (angle * Math.PI) / 180;
+  const dx = Math.cos(r) / 2;
+  const dy = Math.sin(r) / 2;
+  const tidy = (v: number): number => Math.round(v * 1e6) / 1e6;
+  return { from: { x: tidy(0.5 - dx), y: tidy(0.5 - dy) }, to: { x: tidy(0.5 + dx), y: tidy(0.5 + dy) } };
+}
+
+/** The angle of a gradient's handles, in degrees, 0..360. */
+export function gradientAngle(paint: Pick<GradientPaint, 'from' | 'to'>): number {
+  const angle = (Math.atan2(paint.to.y - paint.from.y, paint.to.x - paint.from.x) * 180) / Math.PI;
+  return Math.round(((angle % 360) + 360) % 360 * 100) / 100;
+}
+
+/** A two-stop gradient. Linear gradients span the box; the others start at its centre. */
+export function gradientPaint(type: GradientType, start: RGB, end: RGB, angle = type === 'GRADIENT_LINEAR' ? 90 : 0): GradientPaint {
+  const handles =
+    type === 'GRADIENT_LINEAR'
+      ? gradientHandles(angle)
+      : { from: { x: 0.5, y: 0.5 }, to: { x: 0.5 + Math.cos((angle * Math.PI) / 180) / 2, y: 0.5 + Math.sin((angle * Math.PI) / 180) / 2 } };
+  return {
+    type,
+    stops: [
+      { position: 0, color: { ...start }, opacity: 1 },
+      { position: 1, color: { ...end }, opacity: 1 },
+    ],
+    ...handles,
+    opacity: 1,
+    visible: true,
+  };
+}
+
+/** One colour that stands for a paint, for swatches and text carets: the solid colour or the first stop. */
+export function paintColor(paint: Paint): RGB {
+  return paint.type === 'SOLID' ? paint.color : (paint.stops[0]?.color ?? BLACK);
+}
+
+export function dropShadow(): ShadowEffect {
+  return { type: 'DROP_SHADOW', color: { ...BLACK }, opacity: 0.25, offsetX: 0, offsetY: 4, blur: 8, spread: 0, visible: true };
 }
 
 export function createPage(name: string, order: string): PageNode {
@@ -78,17 +124,22 @@ export function createLayer(
     strokes: [] as SolidPaint[],
     strokeWeight: 1,
     strokeAlign: 'INSIDE' as const,
+    strokeCap: 'NONE' as const,
+    strokeJoin: 'MITER' as const,
+    dashPattern: [] as number[],
+    effects: [] as LayerNode['effects'],
+    blendMode: 'NORMAL' as const,
   };
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0 };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };
       break;
     case 'RECTANGLE':
-      node = { ...base, type, cornerRadius: 0 };
+      node = { ...base, type, cornerRadius: 0, cornerRadii: null };
       break;
     case 'ELLIPSE':
       node = { ...base, type };

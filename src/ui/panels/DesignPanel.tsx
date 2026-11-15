@@ -1,6 +1,7 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo } from 'react';
 import {
   BLACK,
+  BLEND_MODES,
   clean,
   DEFAULT_SHAPE_FILL,
   hasCornerRadius,
@@ -11,15 +12,15 @@ import {
   patchNodes,
   resizeFromTopLeft,
   setLayerBox,
-  solidPaint,
   TYPE_LABELS,
-  type Document,
+  type BlendMode,
+  type CornerRadii,
   type LayerNode,
   type LayerPatch,
   type NodeId,
-  type Paint,
-  type RGB,
   type StrokeAlign,
+  type StrokeCap,
+  type StrokeJoin,
   type TextAlign,
   type TextAutoResize,
   type TextCase,
@@ -29,145 +30,32 @@ import {
 } from '../../core';
 import { availableFonts } from '../../engine/text/measure';
 import { getCommand, updateLayers, type Command } from '../../state/commands';
-import type { EditorStore } from '../../state/editorStore';
 import { ColorField, MIXED, NumberField, type Mixed } from '../components/Fields';
 import { Icon, type IconName } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
+import { EffectsSection } from './EffectsSection';
+import { PaintList } from './PaintList';
+import { applyLive, Row, Section, SelectField, shared } from './panelParts';
 
-function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section aria-label={title} className="border-b border-line px-3 py-2.5">
-      <header className="mb-2 flex h-6 items-center justify-between">
-        <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">{title}</h3>
-        {action}
-      </header>
-      <div className="flex flex-col gap-1.5">{children}</div>
-    </section>
-  );
-}
+const CORNER_NAMES = ['Top left', 'Top right', 'Bottom right', 'Bottom left'] as const;
 
-function Row({ children }: { children: ReactNode }) {
-  return <div className="flex items-center gap-1.5">{children}</div>;
-}
+const BLEND_NAMES: readonly (readonly [BlendMode, string])[] = BLEND_MODES.map((mode) => {
+  const words = mode.toLowerCase().replace(/_/g, ' ');
+  return [mode, words.charAt(0).toUpperCase() + words.slice(1)] as const;
+});
 
-/** The shared value of a property across layers, or MIXED when they differ. */
-function shared<T>(layers: readonly LayerNode[], get: (layer: LayerNode) => T): T | Mixed {
-  const first = get(layers[0] as LayerNode);
-  return layers.every((layer) => get(layer) === first) ? first : MIXED;
-}
+const CAP_NAMES: readonly (readonly [StrokeCap, string])[] = [
+  ['NONE', 'Flat ends'],
+  ['ROUND', 'Round ends'],
+  ['SQUARE', 'Square ends'],
+];
 
-function samePaints(layers: readonly LayerNode[], key: 'fills' | 'strokes'): boolean {
-  const first = JSON.stringify((layers[0] as LayerNode)[key]);
-  return layers.every((layer) => JSON.stringify(layer[key]) === first);
-}
+const JOIN_NAMES: readonly (readonly [StrokeJoin, string])[] = [
+  ['MITER', 'Sharp corners'],
+  ['BEVEL', 'Cut corners'],
+  ['ROUND', 'Round corners'],
+];
 
-/**
- * Applies a per-layer change as a live preview (inside a gesture) or as a
- * committed undo step. Used by the colour picker, which reports many values
- * while it is dragged and one final value when it closes.
- */
-function applyLive(
-  store: EditorStore,
-  label: string,
-  phase: 'live' | 'commit',
-  change: (doc: Document) => Document,
-): void {
-  const state = store.getState();
-  if (phase === 'live') {
-    state.beginGesture();
-    store.getState().updateGesture(change);
-    return;
-  }
-  if (state.gesture) {
-    state.updateGesture(change);
-    store.getState().commitGesture(label);
-  } else {
-    state.apply(label, change);
-  }
-}
-
-interface PaintListProps {
-  title: string;
-  paintKey: 'fills' | 'strokes';
-  layers: LayerNode[];
-  defaultColor: RGB;
-  children?: ReactNode;
-}
-
-/** Editable stack of solid paints (fills or strokes) for the selected layers. */
-function PaintList({ title, paintKey, layers, defaultColor, children }: PaintListProps) {
-  const { store } = useEditorContext();
-  const ids = layers.map((layer) => layer.id);
-  const mixed = !samePaints(layers, paintKey);
-  const paints = mixed ? [] : (layers[0] as LayerNode)[paintKey];
-  const noun = paintKey === 'fills' ? 'fill' : 'stroke';
-
-  const setPaints = (label: string, next: Paint[], phase: 'live' | 'commit' = 'commit'): void => {
-    const patches: Record<NodeId, LayerPatch> = {};
-    for (const id of ids) patches[id] = { [paintKey]: next };
-    applyLive(store, label, phase, (doc) => patchNodes(doc, patches));
-  };
-  const update = (index: number, patch: Partial<Paint>, label: string, phase: 'live' | 'commit' = 'commit'): void =>
-    setPaints(label, paints.map((paint, i) => (i === index ? { ...paint, ...patch } : paint)), phase);
-
-  return (
-    <Section
-      title={title}
-      action={
-        <button
-          type="button"
-          className="od-icon-button !h-6 !w-6"
-          aria-label={`Add ${noun}`}
-          title={`Add ${noun}`}
-          onClick={() => setPaints(`Add ${noun}`, [...paints, solidPaint(defaultColor)])}
-        >
-          <Icon name="plus" size={14} />
-        </button>
-      }
-    >
-      {mixed && <p className="m-0 text-dim">The selected layers have different {noun}s. Add one to replace them.</p>}
-      {!mixed && paints.length === 0 && <p className="m-0 text-faint">No {noun}</p>}
-      {paints.map((paint, index) => (
-        <Row key={index}>
-          <ColorField
-            label={`${title} ${index + 1} colour`}
-            value={paint.color}
-            onChange={(color, phase) => update(index, { color }, `Change ${noun} colour`, phase)}
-          />
-          <div className="w-16 flex-none">
-            <NumberField
-              label={`${title} ${index + 1} opacity`}
-              suffix="%"
-              value={Math.round(paint.opacity * 100)}
-              min={0}
-              max={100}
-              onCommit={(value) => update(index, { opacity: value / 100 }, `Change ${noun} opacity`)}
-            />
-          </div>
-          <button
-            type="button"
-            className="od-icon-button !h-6 !w-6"
-            aria-label={paint.visible ? `Hide ${noun} ${index + 1}` : `Show ${noun} ${index + 1}`}
-            title={paint.visible ? 'Hide' : 'Show'}
-            onClick={() => update(index, { visible: !paint.visible }, paint.visible ? `Hide ${noun}` : `Show ${noun}`)}
-          >
-            <Icon name={paint.visible ? 'eye' : 'eyeOff'} size={13} />
-          </button>
-          <button
-            type="button"
-            className="od-icon-button !h-6 !w-6"
-            aria-label={`Remove ${noun} ${index + 1}`}
-            title="Remove"
-            onClick={() => setPaints(`Remove ${noun}`, paints.filter((_, i) => i !== index))}
-          >
-            <Icon name="minus" size={13} />
-          </button>
-        </Row>
-      ))}
-      {!mixed && paints.length > 0 && children}
-    </Section>
-  );
-}
 
 const ARRANGE_BUTTONS: { id: string; icon: IconName }[] = [
   { id: 'arrange.align.left', icon: 'alignLeft' },
@@ -453,6 +341,22 @@ export function DesignPanel() {
   const textLayers = layers.filter((layer): layer is TextNode => layer.type === 'TEXT');
   const stars = layers.filter((layer) => layer.type === 'STAR');
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
+  /** Applies a patch computed separately for each layer, as one undo step. */
+  const setEach = (label: string, targets: readonly LayerNode[], make: (layer: LayerNode) => LayerPatch): void => {
+    const patches: Record<NodeId, LayerPatch> = {};
+    for (const layer of targets) patches[layer.id] = make(layer);
+    store.getState().apply(label, (d) => patchNodes(d, patches));
+  };
+  const allHaveRadius = radiusLayers.length === layers.length;
+  const perCorner = allHaveRadius && radiusLayers.every((layer) => layer.cornerRadii !== null);
+  const cornersOf = (layer: LayerNode): CornerRadii =>
+    hasCornerRadius(layer) ? (layer.cornerRadii ?? [layer.cornerRadius, layer.cornerRadius, layer.cornerRadius, layer.cornerRadius]) : [0, 0, 0, 0];
+  const setDash = (dash: number | undefined, gap: number | undefined): void =>
+    setEach('Change stroke dashes', paintable, (layer) => {
+      const length = dash ?? layer.dashPattern[0] ?? 0;
+      const space = gap ?? layer.dashPattern[1] ?? length;
+      return { dashPattern: length > 0 ? [length, space > 0 ? space : length] : [] };
+    });
 
   /** Changes width and/or height, keeping each layer's top-left corner in place. */
   const setSize = (label: string, size: { width?: number; height?: number }): void => {
@@ -516,18 +420,56 @@ export function DesignPanel() {
             value={shared(layers, (l) => l.rotation)}
             onCommit={(rotation) => set('Rotate', { rotation: clean(rotation) })}
           />
-          {radiusLayers.length === layers.length ? (
-            <NumberField
-              label="Corner radius"
-              prefix="R"
-              min={0}
-              value={shared(radiusLayers, (l) => (hasCornerRadius(l) ? l.cornerRadius : 0))}
-              onCommit={(cornerRadius) => set('Change corner radius', { cornerRadius })}
-            />
+          {allHaveRadius ? (
+            <>
+              <NumberField
+                label="Corner radius"
+                prefix="R"
+                min={0}
+                disabled={perCorner}
+                value={perCorner ? MIXED : shared(radiusLayers, (l) => (hasCornerRadius(l) ? l.cornerRadius : 0))}
+                onCommit={(cornerRadius) => set('Change corner radius', { cornerRadius })}
+              />
+              <button
+                type="button"
+                className="od-icon-button !h-[26px] !w-[26px]"
+                aria-label="Separate corner radii"
+                aria-pressed={perCorner}
+                title="Set each corner separately"
+                onClick={() =>
+                  setEach('Change corner radius', radiusLayers, (layer) =>
+                    perCorner ? { cornerRadii: null, cornerRadius: Math.max(...cornersOf(layer)) } : { cornerRadii: cornersOf(layer) },
+                  )
+                }
+              >
+                <Icon name="corners" size={14} />
+              </button>
+            </>
           ) : (
             <div className="flex-1" />
           )}
         </Row>
+        {perCorner && (
+          <div className="grid grid-cols-2 gap-1.5">
+            {/* Shown in reading order: top row, then bottom row. */}
+            {[0, 1, 3, 2].map((corner) => (
+              <NumberField
+                key={corner}
+                label={`${CORNER_NAMES[corner]} radius`}
+                prefix={['TL', 'TR', 'BR', 'BL'][corner]}
+                min={0}
+                value={shared(radiusLayers, (l) => cornersOf(l)[corner] as number)}
+                onCommit={(value) =>
+                  setEach('Change corner radius', radiusLayers, (layer) => {
+                    const radii = [...cornersOf(layer)] as CornerRadii;
+                    radii[corner] = value;
+                    return { cornerRadii: radii };
+                  })
+                }
+              />
+            ))}
+          </div>
+        )}
         {pointLayers.length === layers.length && (
           <Row>
             <NumberField
@@ -580,6 +522,15 @@ export function DesignPanel() {
             onCommit={(value) => set('Change opacity', { opacity: value / 100 })}
           />
         </Row>
+        <Row>
+          <span className="w-20 flex-none text-dim">Blend</span>
+          <SelectField<BlendMode>
+            label="Blend mode"
+            value={shared(layers, (l) => l.blendMode)}
+            options={BLEND_NAMES}
+            onChange={(blendMode) => set('Change blend mode', { blendMode })}
+          />
+        </Row>
       </Section>
 
       {paintable.some((l) => l.type !== 'LINE') && (
@@ -610,8 +561,40 @@ export function DesignPanel() {
             </select>
           )}
         </Row>
+        <Row>
+          <SelectField<StrokeCap>
+            label="Stroke ends"
+            value={shared(paintable, (l) => l.strokeCap)}
+            options={CAP_NAMES}
+            onChange={(strokeCap) => updateLayers(store, 'Change stroke ends', paintable.map((l) => l.id), { strokeCap })}
+          />
+          <SelectField<StrokeJoin>
+            label="Stroke corners"
+            value={shared(paintable, (l) => l.strokeJoin)}
+            options={JOIN_NAMES}
+            onChange={(strokeJoin) => updateLayers(store, 'Change stroke corners', paintable.map((l) => l.id), { strokeJoin })}
+          />
+        </Row>
+        <Row>
+          <NumberField
+            label="Dash length"
+            prefix="Dash"
+            min={0}
+            value={shared(paintable, (l) => l.dashPattern[0] ?? 0)}
+            onCommit={(dash) => setDash(dash, undefined)}
+          />
+          <NumberField
+            label="Dash gap"
+            prefix="Gap"
+            min={0}
+            value={shared(paintable, (l) => l.dashPattern[1] ?? l.dashPattern[0] ?? 0)}
+            onCommit={(gap) => setDash(undefined, gap)}
+          />
+        </Row>
       </PaintList>
       )}
+
+      <EffectsSection layers={layers} />
     </aside>
   );
 }

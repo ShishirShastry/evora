@@ -32,6 +32,25 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   1: (file) => ({ ...file, schemaVersion: 2 }),
   // Version 3 adds the TEXT layer type. Older files contain no text layers.
   2: (file) => ({ ...file, schemaVersion: 3 }),
+  // Version 4 gives every layer stroke cap, join and dash settings, an effect
+  // list and a blend mode, and frames and rectangles per-corner radii. Older
+  // layers get the values that paint exactly what they painted before.
+  3: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node) || node.type === 'PAGE') {
+        upgraded[id] = node;
+        continue;
+      }
+      const next: Raw = { strokeCap: 'NONE', strokeJoin: 'MITER', dashPattern: [], effects: [], blendMode: 'NORMAL', ...node };
+      if ((node.type === 'FRAME' || node.type === 'RECTANGLE') && !('cornerRadii' in node)) next.cornerRadii = null;
+      upgraded[id] = next;
+    }
+    return { ...file, schemaVersion: 4, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

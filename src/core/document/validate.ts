@@ -2,15 +2,23 @@ import { createId } from '../ids';
 import { freshKeys } from '../order';
 import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
 import {
+  BLEND_MODES,
   CONTAINER_TYPES,
+  GRADIENT_TYPES,
   LAYER_TYPES,
+  STROKE_CAPS,
+  STROKE_JOINS,
   TEXT_ALIGNS,
   TEXT_AUTO_RESIZES,
   TEXT_CASES,
   TEXT_DECORATIONS,
   VERTICAL_ALIGNS,
+  type CornerRadii,
   type DesignNode,
   type Document,
+  type Effect,
+  type GradientStop,
+  type GradientType,
   type LayerNode,
   type LayerType,
   type NodeId,
@@ -42,19 +50,89 @@ function rgb(value: unknown, fallback: RGB): RGB {
   return { r: finite(value.r, fallback.r, 0, 1), g: finite(value.g, fallback.g, 0, 1), b: finite(value.b, fallback.b, 0, 1) };
 }
 
+const BLACK_RGB: RGB = { r: 0, g: 0, b: 0 };
+
+function unitPoint(value: unknown, fallback: { x: number; y: number }): { x: number; y: number } {
+  if (!isObject(value)) return { ...fallback };
+  return { x: finite(value.x, fallback.x, -100, 100), y: finite(value.y, fallback.y, -100, 100) };
+}
+
+function gradientStops(value: unknown): GradientStop[] {
+  const stops: GradientStop[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!isObject(item)) continue;
+      stops.push({
+        position: finite(item.position, 0, 0, 1),
+        color: rgb(item.color, BLACK_RGB),
+        opacity: finite(item.opacity, 1, 0, 1),
+      });
+    }
+  }
+  // A gradient needs two stops to be a gradient.
+  while (stops.length < 2) stops.push({ position: stops.length === 0 ? 0 : 1, color: { ...BLACK_RGB }, opacity: 1 });
+  // Stable sort: stops at the same position keep their order.
+  return stops.map((stop, index) => ({ stop, index })).sort((a, b) => a.stop.position - b.stop.position || a.index - b.index).map((entry) => entry.stop);
+}
+
 function paints(value: unknown): Paint[] {
   if (!Array.isArray(value)) return [];
   const out: Paint[] = [];
   for (const item of value) {
-    if (!isObject(item) || item.type !== 'SOLID') continue;
-    out.push({
-      type: 'SOLID',
-      color: rgb(item.color, { r: 0, g: 0, b: 0 }),
-      opacity: finite(item.opacity, 1, 0, 1),
-      visible: item.visible !== false,
-    });
+    if (!isObject(item)) continue;
+    const opacity = finite(item.opacity, 1, 0, 1);
+    const visible = item.visible !== false;
+    if (item.type === 'SOLID') {
+      out.push({ type: 'SOLID', color: rgb(item.color, BLACK_RGB), opacity, visible });
+    } else if ((GRADIENT_TYPES as readonly unknown[]).includes(item.type)) {
+      out.push({
+        type: item.type as GradientType,
+        stops: gradientStops(item.stops),
+        from: unitPoint(item.from, { x: 0.5, y: 0 }),
+        to: unitPoint(item.to, { x: 0.5, y: 1 }),
+        opacity,
+        visible,
+      });
+    }
+    // Paints of a kind this version does not know are dropped.
   }
   return out;
+}
+
+function effects(value: unknown): Effect[] {
+  if (!Array.isArray(value)) return [];
+  const out: Effect[] = [];
+  for (const item of value) {
+    if (!isObject(item)) continue;
+    const visible = item.visible !== false;
+    if (item.type === 'DROP_SHADOW' || item.type === 'INNER_SHADOW') {
+      out.push({
+        type: item.type,
+        color: rgb(item.color, BLACK_RGB),
+        opacity: finite(item.opacity, 0.25, 0, 1),
+        offsetX: finite(item.offsetX, 0, -10000, 10000),
+        offsetY: finite(item.offsetY, 0, -10000, 10000),
+        blur: finite(item.blur, 0, 0, 1000),
+        spread: finite(item.spread, 0, -1000, 1000),
+        visible,
+      });
+    } else if (item.type === 'LAYER_BLUR' || item.type === 'BACKGROUND_BLUR') {
+      out.push({ type: item.type, radius: finite(item.radius, 0, 0, 1000), visible });
+    }
+  }
+  return out;
+}
+
+function dashes(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const out = value.map((item) => finite(item, 0, 0, 10000));
+  // A pattern of nothing but zeros would draw nothing at all.
+  return out.some((length) => length > 0) ? out : [];
+}
+
+function cornerRadii(value: unknown): CornerRadii | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  return value.map((item) => finite(item, 0, 0)) as CornerRadii;
 }
 
 const STROKE_ALIGNS: readonly StrokeAlign[] = ['INSIDE', 'CENTER', 'OUTSIDE'];
@@ -101,13 +179,20 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     strokes: paints(raw.strokes),
     strokeWeight: finite(raw.strokeWeight, 1, 0),
     strokeAlign: STROKE_ALIGNS.includes(raw.strokeAlign as StrokeAlign) ? (raw.strokeAlign as StrokeAlign) : defaults.strokeAlign,
+    strokeCap: oneOf(raw.strokeCap, STROKE_CAPS, 'NONE'),
+    strokeJoin: oneOf(raw.strokeJoin, STROKE_JOINS, 'MITER'),
+    dashPattern: dashes(raw.dashPattern),
+    effects: effects(raw.effects),
+    blendMode: oneOf(raw.blendMode, BLEND_MODES, 'NORMAL'),
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
     layer.clipsContent = raw.clipsContent !== false;
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
+    layer.cornerRadii = cornerRadii(raw.cornerRadii);
   } else if (layer.type === 'RECTANGLE') {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
+    layer.cornerRadii = cornerRadii(raw.cornerRadii);
   } else if (layer.type === 'POLYGON') {
     layer.pointCount = Math.round(finite(raw.pointCount, 3, 3, 60));
   } else if (layer.type === 'STAR') {

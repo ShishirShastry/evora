@@ -291,6 +291,24 @@ describe('flip', () => {
   });
 });
 
+/**
+ * Checks that a file from an older version opened with everything it had,
+ * plus the defaults later versions added: nothing lost, nothing repaired.
+ */
+function expectUpgraded(actual: Document, fixture: { id: string; name: string; nodes: Record<string, Record<string, unknown>> }): void {
+  expect(actual.id).toBe(fixture.id);
+  expect(actual.name).toBe(fixture.name);
+  expect(Object.keys(actual.nodes).sort()).toEqual(Object.keys(fixture.nodes).sort());
+  for (const [id, original] of Object.entries(fixture.nodes)) {
+    expect(actual.nodes[id]).toMatchObject(original);
+    if (original.type === 'PAGE') continue;
+    // Added in version 4, with values that paint what the layer painted before.
+    expect(actual.nodes[id]).toMatchObject({ strokeCap: 'NONE', strokeJoin: 'MITER', dashPattern: [], effects: [], blendMode: 'NORMAL' });
+    if (original.type === 'FRAME' || original.type === 'RECTANGLE') expect(actual.nodes[id]).toMatchObject({ cornerRadii: null });
+  }
+  expect(validateDocument(actual)).toEqual([]);
+}
+
 describe('schema migration', () => {
   /** A file exactly as version 1 of the application wrote it. */
   const V1_FIXTURE = {
@@ -324,7 +342,7 @@ describe('schema migration', () => {
     expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(2);
     expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(parsed.repairs).toEqual([]);
-    expect(parsed.file.document).toEqual(V1_FIXTURE.document);
+    expectUpgraded(parsed.file.document, V1_FIXTURE.document);
     expect(parsed.file.meta).toEqual(V1_FIXTURE.meta);
   });
 });

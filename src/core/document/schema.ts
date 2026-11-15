@@ -1,10 +1,12 @@
 /**
- * OPEN DESIGN document schema, version 3.
- * Version 2 added the GROUP layer type; version 3 adds TEXT.
+ * OPEN DESIGN document schema, version 4.
+ * Version 2 added the GROUP layer type, version 3 TEXT, and version 4
+ * gradient paints, stroke caps/joins/dashes, per-corner radii, effects and
+ * blend modes.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -31,9 +33,116 @@ export interface SolidPaint {
   visible: boolean;
 }
 
-export type Paint = SolidPaint;
+export interface GradientStop {
+  /** 0 at the start of the gradient, 1 at its end. */
+  position: number;
+  color: RGB;
+  opacity: number;
+}
+
+export type GradientType = 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'GRADIENT_ANGULAR' | 'GRADIENT_DIAMOND';
+export const GRADIENT_TYPES: readonly GradientType[] = ['GRADIENT_LINEAR', 'GRADIENT_RADIAL', 'GRADIENT_ANGULAR', 'GRADIENT_DIAMOND'];
+
+/** A point in a layer's box: (0, 0) is its top-left corner and (1, 1) its bottom-right. */
+export interface UnitPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * A gradient. `from` and `to` are its two handles, in the layer's box:
+ * a linear gradient runs from one to the other; for the other kinds `from`
+ * is the centre and `to` sets the radius and the direction of the first stop.
+ */
+export interface GradientPaint {
+  type: GradientType;
+  /** At least two, sorted by position. */
+  stops: GradientStop[];
+  from: UnitPoint;
+  to: UnitPoint;
+  opacity: number;
+  visible: boolean;
+}
+
+export type Paint = SolidPaint | GradientPaint;
+
+export function isGradient(paint: Paint): paint is GradientPaint {
+  return paint.type !== 'SOLID';
+}
 
 export type StrokeAlign = 'INSIDE' | 'CENTER' | 'OUTSIDE';
+/** How the ends of open strokes and of dashes are drawn. NONE is a flat end at the endpoint. */
+export type StrokeCap = 'NONE' | 'ROUND' | 'SQUARE';
+export type StrokeJoin = 'MITER' | 'BEVEL' | 'ROUND';
+export const STROKE_CAPS: readonly StrokeCap[] = ['NONE', 'ROUND', 'SQUARE'];
+export const STROKE_JOINS: readonly StrokeJoin[] = ['MITER', 'BEVEL', 'ROUND'];
+
+export type BlendMode =
+  | 'NORMAL'
+  | 'DARKEN'
+  | 'MULTIPLY'
+  | 'COLOR_BURN'
+  | 'LIGHTEN'
+  | 'SCREEN'
+  | 'COLOR_DODGE'
+  | 'OVERLAY'
+  | 'SOFT_LIGHT'
+  | 'HARD_LIGHT'
+  | 'DIFFERENCE'
+  | 'EXCLUSION'
+  | 'HUE'
+  | 'SATURATION'
+  | 'COLOR'
+  | 'LUMINOSITY';
+export const BLEND_MODES: readonly BlendMode[] = [
+  'NORMAL',
+  'DARKEN',
+  'MULTIPLY',
+  'COLOR_BURN',
+  'LIGHTEN',
+  'SCREEN',
+  'COLOR_DODGE',
+  'OVERLAY',
+  'SOFT_LIGHT',
+  'HARD_LIGHT',
+  'DIFFERENCE',
+  'EXCLUSION',
+  'HUE',
+  'SATURATION',
+  'COLOR',
+  'LUMINOSITY',
+];
+
+/** A shadow cast outside the layer (drop) or inside its outline (inner). Offsets are in the layer's own axes. */
+export interface ShadowEffect {
+  type: 'DROP_SHADOW' | 'INNER_SHADOW';
+  color: RGB;
+  opacity: number;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  /** Grows (positive) or shrinks the shadow's shape before it is blurred. */
+  spread: number;
+  visible: boolean;
+}
+
+/** Blurs the layer itself (layer blur) or whatever is behind it, inside its outline (background blur). */
+export interface BlurEffect {
+  type: 'LAYER_BLUR' | 'BACKGROUND_BLUR';
+  radius: number;
+  visible: boolean;
+}
+
+export type Effect = ShadowEffect | BlurEffect;
+export type EffectType = Effect['type'];
+export const EFFECT_TYPES: readonly EffectType[] = ['DROP_SHADOW', 'INNER_SHADOW', 'LAYER_BLUR', 'BACKGROUND_BLUR'];
+
+export function isShadow(effect: Effect): effect is ShadowEffect {
+  return effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW';
+}
+
+/** Corner radii in the order top-left, top-right, bottom-right, bottom-left. */
+export type CornerRadii = [number, number, number, number];
 
 interface NodeBase {
   id: NodeId;
@@ -68,12 +177,22 @@ interface LayerBase extends NodeBase {
   strokes: Paint[];
   strokeWeight: number;
   strokeAlign: StrokeAlign;
+  strokeCap: StrokeCap;
+  strokeJoin: StrokeJoin;
+  /** Alternating dash and gap lengths. Empty for a solid stroke. */
+  dashPattern: number[];
+  /** Applied in order; the first is the bottom-most. */
+  effects: Effect[];
+  /** How the layer, with everything in it, is mixed with what is beneath it. */
+  blendMode: BlendMode;
 }
 
 export interface FrameNode extends LayerBase {
   type: 'FRAME';
   clipsContent: boolean;
   cornerRadius: number;
+  /** One radius per corner; when null, `cornerRadius` applies to all four. */
+  cornerRadii: CornerRadii | null;
 }
 
 /**
@@ -87,6 +206,8 @@ export interface GroupNode extends LayerBase {
 export interface RectangleNode extends LayerBase {
   type: 'RECTANGLE';
   cornerRadius: number;
+  /** One radius per corner; when null, `cornerRadius` applies to all four. */
+  cornerRadii: CornerRadii | null;
 }
 
 export interface EllipseNode extends LayerBase {
@@ -201,6 +322,7 @@ export function hasCornerRadius(node: DesignNode | undefined): node is FrameNode
 export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   clipsContent?: boolean;
   cornerRadius?: number;
+  cornerRadii?: CornerRadii | null;
   pointCount?: number;
   innerRadius?: number;
 } & Partial<Omit<TextNode, keyof LayerBase>>;

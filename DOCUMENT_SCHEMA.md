@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **3**. Version 1 was Phase 1; version 2 added the `GROUP` layer type and version 3 adds `TEXT` (both Phase 2). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **4**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, and version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -123,6 +123,13 @@ interface LayerBase extends NodeBase {
   strokes: Paint[];
   strokeWeight: number;      // ≥ 0
   strokeAlign: 'INSIDE' | 'CENTER' | 'OUTSIDE';
+
+  // Version 4
+  strokeCap: 'NONE' | 'ROUND' | 'SQUARE';   // ends of open strokes and of dashes
+  strokeJoin: 'MITER' | 'BEVEL' | 'ROUND';
+  dashPattern: number[];     // alternating dash and gap lengths; [] is a solid stroke
+  effects: Effect[];         // applied in order, first at the bottom
+  blendMode: BlendMode;      // how the layer and everything in it mixes with what is beneath
 }
 ```
 
@@ -133,6 +140,7 @@ interface FrameNode extends LayerBase {
   type: 'FRAME';
   clipsContent: boolean;     // children are clipped to the frame's box
   cornerRadius: number;      // ≥ 0
+  cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
 }
 
 interface GroupNode extends LayerBase {
@@ -141,7 +149,10 @@ interface GroupNode extends LayerBase {
 
 interface RectangleNode extends LayerBase {
   type: 'RECTANGLE';
-  cornerRadius: number;      // ≥ 0, clamped at paint time to half the shorter side
+  cornerRadius: number;      // ≥ 0
+  // Version 4. One radius per corner in the order top-left, top-right,
+  // bottom-right, bottom-left. When null, cornerRadius applies to all four.
+  cornerRadii: [number, number, number, number] | null;
 }
 
 interface EllipseNode extends LayerBase {
@@ -198,8 +209,51 @@ interface SolidPaint {
   visible: boolean;
 }
 
-type Paint = SolidPaint;     // gradients and images are added in Phase 2
+// Version 4
+interface GradientStop { position: number; color: RGB; opacity: number }   // position 0..1
+interface GradientPaint {
+  type: 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'GRADIENT_ANGULAR' | 'GRADIENT_DIAMOND';
+  stops: GradientStop[];     // at least two, sorted by position
+  from: { x: number; y: number };   // the two handles, in the layer's unit square:
+  to: { x: number; y: number };     // (0,0) is its top-left corner, (1,1) its bottom-right
+  opacity: number;
+  visible: boolean;
+}
+
+type Paint = SolidPaint | GradientPaint;     // image paints are still to come
 ```
+
+A linear gradient runs from `from` to `to`, with its bands at right angles to that line in pixel space. For the other kinds `from` is the centre and `to` gives the radius and the direction of the first stop; they are laid out in the layer's unit square, so they stretch with the box (a radial gradient in a wide rectangle is an ellipse). On text and on strokes, which cannot be stretched that way, the round kinds are circular and a diamond falls back to radial.
+
+When the radii of neighbouring corners do not fit along a side, all four are scaled down by the same factor at paint time (the CSS rule), so stored radii are never changed by resizing.
+
+### 5.5 Effects and blend modes (version 4)
+
+```ts
+interface ShadowEffect {
+  type: 'DROP_SHADOW' | 'INNER_SHADOW';
+  color: RGB;
+  opacity: number;
+  offsetX: number;           // in the layer's own axes: a rotated layer casts a rotated shadow
+  offsetY: number;
+  blur: number;              // ≥ 0, as a CSS shadow blur radius
+  spread: number;            // grows (+) or shrinks (−) the shadow's shape before blurring
+  visible: boolean;
+}
+
+interface BlurEffect {
+  type: 'LAYER_BLUR' | 'BACKGROUND_BLUR';
+  radius: number;            // ≥ 0, as a CSS blur() radius
+  visible: boolean;
+}
+
+type Effect = ShadowEffect | BlurEffect;
+
+type BlendMode = 'NORMAL' | 'DARKEN' | 'MULTIPLY' | 'COLOR_BURN' | 'LIGHTEN' | 'SCREEN' | 'COLOR_DODGE'
+  | 'OVERLAY' | 'SOFT_LIGHT' | 'HARD_LIGHT' | 'DIFFERENCE' | 'EXCLUSION' | 'HUE' | 'SATURATION' | 'COLOR' | 'LUMINOSITY';
+```
+
+Opacity, blend mode, layer blur and drop shadows apply to a layer as a whole, children included. Spread is honoured on rectangles, ellipses and frames; other shapes cast a shadow of their exact outline. Inner shadows apply to shapes and frames, not to text or groups.
 
 ---
 
@@ -246,6 +300,10 @@ const MIGRATIONS: Record<number, (file) => file> = {
   1: (file) => ({ ...file, schemaVersion: 2 }),
   // 2 -> 3: adds the TEXT type. Older files have no text layers.
   2: (file) => ({ ...file, schemaVersion: 3 }),
+  // 3 -> 4: every layer gets strokeCap 'NONE', strokeJoin 'MITER', dashPattern [],
+  // effects [] and blendMode 'NORMAL'; frames and rectangles get cornerRadii null.
+  // These are the values that paint exactly what the layer painted before.
+  3: addVersion4Defaults,
 };
 ```
 
@@ -253,6 +311,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 |---|---|---|---|
 | 1 | 2 | `GROUP` layer type added | `src/core/ops/arrange.test.ts` ("schema migration") |
 | 2 | 3 | `TEXT` layer type added | `src/core/text/layout.test.ts` ("text in the file format") |
+| 3 | 4 | Gradient paints; stroke cap, join and dashes; per-corner radii; effects; blend modes | `src/appearance.test.ts` ("version 3 files") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -281,7 +340,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | Per-range text styles, `IMAGE` fills, gradient paints, multiple strokes with dash/cap/join, independent corner radii, `effects[]`, `blendMode`, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`, asset table. (`GROUP` is done in version 2 and `TEXT` in version 3.) |
+| 2 | Per-range text styles, `IMAGE` fills with an asset table, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4.) |
 | 3 | `VECTOR` (vector network: vertices, segments with Bézier handles, regions), `BOOLEAN_OPERATION`, arc data on ellipses. |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |
