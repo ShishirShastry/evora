@@ -1,0 +1,32 @@
+# Local toolchain (portable Node.js and npm cache) - never committed
+.tools/
+
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.vitest-cache/
+
+# Local assistant configuration (machine-specific paths)
+.claude/
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+._*
+
+# Logs and local environment
+*.log
+.env
+.env.*
+!.env.example

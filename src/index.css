@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+/*
+ * OPEN DESIGN interface theme. Every colour in the application chrome comes
+ * from these variables, so a second theme is a second set of values.
+ */
+:root {
+  --od-bg: #0e1112;
+  --od-panel: #171b1c;
+  --od-field: #222829;
+  --od-hover: #262d2e;
+  --od-line: #2b3233;
+  --od-ink: #e7eded;
+  --od-dim: #8d9797;
+  --od-faint: #5d6767;
+  --od-accent: #19c2b3;
+  --od-accent-ink: #04201d;
+  --od-selected: rgba(25, 194, 179, 0.2);
+  --od-danger: #ff7a7a;
+}
+
+@theme inline {
+  --color-bg: var(--od-bg);
+  --color-panel: var(--od-panel);
+  --color-field: var(--od-field);
+  --color-hover: var(--od-hover);
+  --color-line: var(--od-line);
+  --color-ink: var(--od-ink);
+  --color-dim: var(--od-dim);
+  --color-faint: var(--od-faint);
+  --color-accent: var(--od-accent);
+  --color-accent-ink: var(--od-accent-ink);
+  --color-selected: var(--od-selected);
+  --color-danger: var(--od-danger);
+  --font-sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--od-bg);
+  color: var(--od-ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+  user-select: text;
+}
+
+:focus-visible {
+  outline: 1.5px solid var(--od-accent);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--od-line);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--od-faint);
+}
+
+/* Shared control styles. */
+.od-field {
+  height: 26px;
+  min-width: 0;
+  width: 100%;
+  background: var(--od-field);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 0 7px;
+  outline: none;
+}
+.od-field:hover {
+  border-color: var(--od-line);
+}
+.od-field:focus {
+  border-color: var(--od-accent);
+}
+.od-field:disabled {
+  color: var(--od-faint);
+}
+
+.od-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--od-dim);
+  cursor: pointer;
+  flex: none;
+}
+.od-icon-button:hover:not(:disabled) {
+  background: var(--od-hover);
+  color: var(--od-ink);
+}
+.od-icon-button:disabled {
+  color: var(--od-faint);
+  cursor: default;
+  opacity: 0.6;
+}
+.od-icon-button[aria-pressed="true"] {
+  background: var(--od-accent);
+  color: var(--od-accent-ink);
+}
+
+.od-button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--od-line);
+  background: var(--od-field);
+  cursor: pointer;
+}
+.od-button:hover {
+  background: var(--od-hover);
+}
+.od-button-primary {
+  background: var(--od-accent);
+  border-color: var(--od-accent);
+  color: var(--od-accent-ink);
+  font-weight: 600;
+}
+.od-button-primary:hover {
+  background: var(--od-accent);
+  filter: brightness(1.08);
+}
