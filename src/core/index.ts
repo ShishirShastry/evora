@@ -28,4 +28,5 @@ export * from './vector/bezier';
 export * from './vector/network';
 export * from './vector/shapes';
 export * from './vector/fit';
+export * from './vector/fitCurve';
 export * from './ops/vector';

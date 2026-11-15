@@ -16,6 +16,7 @@ import {
   mirroringAt,
   moveVertices,
   nearestSegment,
+  networkFromStroke,
   rectContainsPoint,
   rectFromPoints,
   setNetwork,
@@ -43,6 +44,12 @@ const DRAG_THRESHOLD_PX = 3;
 export const POINT_HIT_PX = 7;
 /** How close, in screen pixels, the pointer must be to a curve to act on it. */
 export const SEGMENT_HIT_PX = 5;
+/** The pencil records a point each time the pointer has moved this far, in screen pixels. */
+const PENCIL_STEP_PX = 2;
+/** How far, in screen pixels, the smoothed pencil line may stray from what was drawn. */
+const PENCIL_TOLERANCE_PX = 2.5;
+/** A pencil stroke that ends this close, in screen pixels, to where it began is closed into a shape. */
+const PENCIL_CLOSE_PX = 8;
 
 /** What the vector tools need from the interaction controller that owns them. */
 export interface VectorToolHost {
@@ -111,7 +118,17 @@ type VectorMode =
     }
   | { kind: 'handle'; id: NodeId; base: Document; ref: HandleRef; mirroring: HandleMirroring }
   | { kind: 'bend'; id: NodeId; base: Document; vertex: number; startScreen: Point; dragging: boolean }
-  | { kind: 'marquee'; id: NodeId; startWorld: Point; baseSelection: number[] };
+  | { kind: 'marquee'; id: NodeId; startWorld: Point; baseSelection: number[] }
+  /** The pencil is down: `points` is the stroke so far, in page space, and `id` the layer it is drawn into. */
+  | { kind: 'pencil'; base: Document; id: NodeId; points: Point[]; lastScreen: Point };
+
+/** Straight lines through the given points, in order. */
+function polyline(points: readonly Point[]): VectorNetwork {
+  return {
+    vertices: points.map((p) => ({ x: p.x, y: p.y })),
+    segments: points.slice(1).map((_, i) => ({ start: i, end: i + 1, tangentStart: { x: 0, y: 0 }, tangentEnd: { x: 0, y: 0 } })),
+  };
+}
 
 const sub = (a: Point, b: Point): Point => ({ x: a.x - b.x, y: a.y - b.y });
 const add = (a: Point, b: Point): Point => ({ x: a.x + b.x, y: a.y + b.y });
@@ -149,13 +166,19 @@ export class VectorTool {
   /** True while a drag is changing the document. */
   get isTransforming(): boolean {
     const mode = this.mode;
-    return mode.kind === 'pen-add' || mode.kind === 'handle' || (mode.kind === 'points' && mode.dragging) || (mode.kind === 'bend' && mode.dragging);
+    return (
+      mode.kind === 'pen-add' ||
+      mode.kind === 'handle' ||
+      mode.kind === 'pencil' ||
+      (mode.kind === 'points' && mode.dragging) ||
+      (mode.kind === 'bend' && mode.dragging)
+    );
   }
 
   /** Whether pointer input currently belongs to this tool rather than to the ordinary selection tool. */
   get wantsPointer(): boolean {
     const { tool, vectorEdit } = this.state;
-    return tool === 'pen' || (tool === 'move' && vectorEdit !== null);
+    return tool === 'pen' || tool === 'pencil' || (tool === 'move' && vectorEdit !== null);
   }
 
   /** The vector being edited, if there is one. */
@@ -262,6 +285,7 @@ export class VectorTool {
     this.sync();
     this.state.setHovered(null);
     if (this.state.tool === 'pen') this.penDown(e);
+    else if (this.state.tool === 'pencil') this.pencilDown(e);
     else this.editDown(e);
   }
 
@@ -296,6 +320,13 @@ export class VectorTool {
       }
       case 'bend':
         this.bendDrag(mode, e);
+        return;
+      case 'pencil':
+        if (distance(e, mode.lastScreen) < PENCIL_STEP_PX) return;
+        mode.lastScreen = { x: e.x, y: e.y };
+        mode.points.push(world);
+        // While it is being drawn the stroke is shown as it is; it is smoothed when the pencil is lifted.
+        this.state.updateGesture(() => setNetwork(mode.base, mode.id, polyline(this.strokeLocal(mode))), [mode.id]);
         return;
       case 'marquee': {
         const rect = rectFromPoints(mode.startWorld, world);
@@ -355,6 +386,17 @@ export class VectorTool {
       case 'marquee':
         this.host.setMarquee(null);
         break;
+      case 'pencil': {
+        const zoom = state.viewport.zoom;
+        const network = networkFromStroke(this.strokeLocal(mode), PENCIL_TOLERANCE_PX / zoom, PENCIL_CLOSE_PX / zoom);
+        // A press without a stroke draws nothing.
+        if (network.segments.length === 0) state.cancelGesture();
+        else {
+          state.updateGesture(() => setNetwork(mode.base, mode.id, network), [mode.id]);
+          state.commitGesture('Draw with pencil');
+        }
+        break;
+      }
     }
     this.depth = this.store.getState().undoStack.length;
     this.host.requestRender();
@@ -413,7 +455,7 @@ export class VectorTool {
       const to = node && vertex ? applyToPoint(getWorldMatrix(state.doc, node.id), vertex) : this.target(world, e, from, false);
       preview = { from, control: this.tangent ? add(from, this.tangent) : null, to };
     }
-    this.host.setCursor(pen ? 'crosshair' : 'default');
+    this.host.setCursor(state.tool === 'move' ? 'default' : 'crosshair');
     const changed = hit !== this.hoverVertex || preview !== null || this.preview !== null;
     this.hoverVertex = hit;
     this.preview = preview;
@@ -564,6 +606,23 @@ export class VectorTool {
     this.preview = pull ? { from: mode.pressWorld, control: null, to: add(mode.pressWorld, pull) } : null;
     this.state.updateGesture(() => setNetwork(mode.base, mode.id, network), [mode.id]);
     this.host.requestRender();
+  }
+
+  // ----------------------------------------------------------------- pencil
+
+  /** Starts a stroke. Every stroke is a layer of its own, in the frame it starts over, with round ends and corners like a pencil line. */
+  private pencilDown(e: PointerInput): void {
+    const state = this.state;
+    const world = this.toWorld(e);
+    state.beginGesture();
+    const created = addLayer(state.doc, 'VECTOR', containerAt(state.doc, state.pageId, world), { strokeCap: 'ROUND', strokeJoin: 'ROUND' });
+    this.mode = { kind: 'pencil', base: created.doc, id: created.id, points: [world], lastScreen: { x: e.x, y: e.y } };
+  }
+
+  /** The stroke so far in the coordinates of the layer it is drawn into. */
+  private strokeLocal(mode: Extract<VectorMode, { kind: 'pencil' }>): Point[] {
+    const toLocal = invert(getWorldMatrix(mode.base, mode.id));
+    return mode.points.map((p) => applyToPoint(toLocal, p));
   }
 
   // ---------------------------------------------------------- editing points

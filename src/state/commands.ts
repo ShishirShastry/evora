@@ -521,6 +521,17 @@ export const COMMANDS: readonly Command[] = [
   toolCommand('star', 'Star'),
   toolCommand('text', 'Text', 'KeyT'),
   toolCommand('pen', 'Pen', 'KeyP'),
+  {
+    id: 'tool.pencil',
+    label: 'Pencil',
+    group: 'Tools',
+    shortcut: 'Shift+P',
+    keys: [{ code: 'KeyP', shift: true }],
+    run: ({ store, app }) => {
+      app.cancelInteraction();
+      store.getState().setTool('pencil');
+    },
+  },
 
   {
     id: 'file.save',

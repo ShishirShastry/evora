@@ -41,6 +41,23 @@ async function drag(page: Page, from: [number, number], to: [number, number]): P
   await page.mouse.up();
 }
 
+/** Presses at the first point, moves through the rest one by one, and releases: a freehand stroke. */
+async function strokeThrough(page: Page, points: readonly [number, number][]): Promise<void> {
+  const [startX, startY] = await at(page, points[0] as [number, number]);
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  for (const point of points.slice(1)) {
+    const [x, y] = await at(page, point);
+    await page.mouse.move(x, y);
+  }
+  await page.mouse.up();
+}
+
+async function set(page: Page, label: string, value: string): Promise<void> {
+  await field(page, label).fill(value);
+  await field(page, label).press('Enter');
+}
+
 /** Lets a double-click's time window pass, so the next click is a single one. */
 const settle = (page: Page): Promise<void> => page.waitForTimeout(450);
 
@@ -248,6 +265,53 @@ test('flatten a shape to a vector and open it with a double-click', async ({ pag
   await page.keyboard.press('Control+z');
   await expect(page.getByRole('button', { name: 'Edit points' })).toHaveCount(0);
   await expect(layer(page, 'Ellipse 1')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
+test('pencil: a hand-drawn stroke becomes a smooth path, and a loop becomes a shape', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await canvas(page).focus();
+  await page.keyboard.press('Shift+P');
+  await expect(page.getByRole('button', { name: 'Pencil', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  // A wave, drawn with sixty small moves of the pointer.
+  const wave = Array.from({ length: 61 }, (_, i) => [200 + i * 5, Math.round(300 + Math.sin(i / 6) * 50)] as [number, number]);
+  await strokeThrough(page, wave);
+  await expect(layer(page, 'Vector 1')).toBeVisible();
+  expect(Math.abs(Number(await field(page, 'Width').inputValue()) - 300)).toBeLessThan(2);
+  // The pencil stays in hand.
+  await expect(page.getByRole('button', { name: 'Pencil', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  // Make the line thick and red, so that it can be found in the pixels: it runs through the points that were drawn.
+  await set(page, 'Stroke weight', '10');
+  await set(page, 'Stroke 1 colour hex', 'FF0000');
+  for (const i of [0, 12, 25, 38, 50, 60]) {
+    const [x, y] = wave[i] as [number, number];
+    expectNear(await pixel(page, x, y), [255, 0, 0]);
+  }
+  expectNear(await pixel(page, 350, 200), PAGE);
+  expectNear(await pixel(page, 350, 400), PAGE);
+
+  // A stroke that comes back to where it began is closed, so it can be filled.
+  const loop = Array.from({ length: 88 }, (_, i) => {
+    const angle = (i / 90) * Math.PI * 2;
+    return [Math.round(350 + Math.cos(angle) * 60), Math.round(130 + Math.sin(angle) * 60)] as [number, number];
+  });
+  await strokeThrough(page, loop);
+  await expect(layer(page, 'Vector 2')).toBeVisible();
+  expectNear(await pixel(page, 350, 130), PAGE);
+  await page.getByRole('button', { name: 'Add fill' }).click();
+  expectNear(await pixel(page, 350, 130), GREY);
+  expectNear(await pixel(page, 350, 50), PAGE);
+
+  // Each stroke is one undo step.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await expect(layer(page, 'Vector 2')).toHaveCount(0);
+  await expect(layer(page, 'Vector 1')).toBeVisible();
 
   expect(errors).toEqual([]);
 });

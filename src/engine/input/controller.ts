@@ -485,7 +485,7 @@ export class InteractionController {
   idleCursor(): string {
     if (this.spaceDown || this.state.tool === 'hand') return 'grab';
     if (this.state.tool === 'text') return 'text';
-    if (this.state.tool === 'pen') return 'crosshair';
+    if (this.state.tool === 'pen' || this.state.tool === 'pencil') return 'crosshair';
     return SHAPE_TOOLS[this.state.tool] ? 'crosshair' : 'default';
   }
 

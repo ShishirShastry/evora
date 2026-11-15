@@ -17,7 +17,7 @@ import {
 } from '../core';
 import { DEFAULT_VIEWPORT, type Size, type Viewport } from '../engine/viewport';
 
-export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'text' | 'pen';
+export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'text' | 'pen' | 'pencil';
 
 /** Point-level editing of one vector layer: which layer, and which of its points are selected. */
 export interface VectorEdit {
