@@ -4,9 +4,10 @@
  */
 export interface Preferences {
   snapping: boolean;
+  showLayoutGrids: boolean;
 }
 
-export const DEFAULT_PREFERENCES: Preferences = { snapping: true };
+export const DEFAULT_PREFERENCES: Preferences = { snapping: true, showLayoutGrids: true };
 
 const KEY = 'open-design:preferences';
 
@@ -22,7 +23,8 @@ export function loadPreferences(storage: Storage | undefined = safeLocalStorage(
   if (!storage) return { ...DEFAULT_PREFERENCES };
   try {
     const parsed = JSON.parse(storage.getItem(KEY) ?? '{}') as Partial<Preferences>;
-    return { snapping: typeof parsed.snapping === 'boolean' ? parsed.snapping : DEFAULT_PREFERENCES.snapping };
+    const flag = (key: keyof Preferences): boolean => (typeof parsed[key] === 'boolean' ? (parsed[key] as boolean) : DEFAULT_PREFERENCES[key]);
+    return { snapping: flag('snapping'), showLayoutGrids: flag('showLayoutGrids') };
   } catch {
     return { ...DEFAULT_PREFERENCES };
   }

@@ -3,7 +3,10 @@ import { freshKeys } from '../order';
 import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
 import {
   BLEND_MODES,
+  CONSTRAINT_TYPES,
   CONTAINER_TYPES,
+  LAYOUT_GRID_ALIGNMENTS,
+  LAYOUT_GRID_PATTERNS,
   GRADIENT_TYPES,
   IMAGE_SCALE_MODES,
   LAYER_TYPES,
@@ -23,6 +26,7 @@ import {
   type GradientType,
   type LayerNode,
   type LayerType,
+  type LayoutGrid,
   type NodeId,
   type PageNode,
   type Paint,
@@ -169,6 +173,27 @@ function dashes(value: unknown): number[] {
   return out.some((length) => length > 0) ? out : [];
 }
 
+function layoutGrids(value: unknown): LayoutGrid[] {
+  if (!Array.isArray(value)) return [];
+  const out: LayoutGrid[] = [];
+  for (const item of value) {
+    if (!isObject(item) || !(LAYOUT_GRID_PATTERNS as readonly unknown[]).includes(item.pattern)) continue;
+    out.push({
+      pattern: item.pattern as LayoutGrid['pattern'],
+      size: finite(item.size, 10, 1, 10000),
+      count: Math.round(finite(item.count, 5, 1, 200)),
+      gutter: finite(item.gutter, 20, 0, 10000),
+      offset: finite(item.offset, 0, -10000, 10000),
+      alignment: oneOf(item.alignment, LAYOUT_GRID_ALIGNMENTS, 'STRETCH'),
+      sectionSize: finite(item.sectionSize, 100, 0, 100000),
+      color: rgb(item.color, { r: 1, g: 0, b: 0 }),
+      opacity: finite(item.opacity, 0.1, 0, 1),
+      visible: item.visible !== false,
+    });
+  }
+  return out;
+}
+
 function cornerRadii(value: unknown): CornerRadii | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   return value.map((item) => finite(item, 0, 0)) as CornerRadii;
@@ -219,12 +244,17 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     dashPattern: dashes(raw.dashPattern),
     effects: effects(raw.effects),
     blendMode: oneOf(raw.blendMode, BLEND_MODES, 'NORMAL'),
+    constraints: {
+      horizontal: oneOf(isObject(raw.constraints) ? raw.constraints.horizontal : undefined, CONSTRAINT_TYPES, 'MIN'),
+      vertical: oneOf(isObject(raw.constraints) ? raw.constraints.vertical : undefined, CONSTRAINT_TYPES, 'MIN'),
+    },
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
     layer.clipsContent = raw.clipsContent !== false;
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
+    layer.layoutGrids = layoutGrids(raw.layoutGrids);
   } else if (layer.type === 'RECTANGLE') {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);

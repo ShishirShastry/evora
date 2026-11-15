@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **5**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, and version 5 image paints with the document's asset table. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **6**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, and version 6 constraints and layout grids. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -145,6 +145,9 @@ interface LayerBase extends NodeBase {
   dashPattern: number[];     // alternating dash and gap lengths; [] is a solid stroke
   effects: Effect[];         // applied in order, first at the bottom
   blendMode: BlendMode;      // how the layer and everything in it mixes with what is beneath
+
+  // Version 6
+  constraints: { horizontal: ConstraintType; vertical: ConstraintType };
 }
 ```
 
@@ -156,6 +159,7 @@ interface FrameNode extends LayerBase {
   clipsContent: boolean;     // children are clipped to the frame's box
   cornerRadius: number;      // ≥ 0
   cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
+  layoutGrids: LayoutGrid[]; // version 6
 }
 
 interface GroupNode extends LayerBase {
@@ -281,6 +285,29 @@ type BlendMode = 'NORMAL' | 'DARKEN' | 'MULTIPLY' | 'COLOR_BURN' | 'LIGHTEN' | '
   | 'OVERLAY' | 'SOFT_LIGHT' | 'HARD_LIGHT' | 'DIFFERENCE' | 'EXCLUSION' | 'HUE' | 'SATURATION' | 'COLOR' | 'LUMINOSITY';
 ```
 
+### 5.6 Constraints and layout grids (version 6)
+
+```ts
+type ConstraintType = 'MIN' | 'CENTER' | 'MAX' | 'STRETCH' | 'SCALE';
+
+interface LayoutGrid {
+  pattern: 'GRID' | 'COLUMNS' | 'ROWS';
+  size: number;              // GRID: the size of each square cell
+  count: number;             // COLUMNS / ROWS: how many
+  gutter: number;            // COLUMNS / ROWS: the space between them
+  offset: number;            // margin at both ends (STRETCH) or offset from the aligned edge (MIN, MAX)
+  alignment: 'MIN' | 'CENTER' | 'MAX' | 'STRETCH';
+  sectionSize: number;       // width of a column or height of a row when not stretched
+  color: RGB;
+  opacity: number;
+  visible: boolean;
+}
+```
+
+**Constraints** say what a layer does, on each axis, when the frame it is *directly* inside changes size: keep its distance to the near edge (`MIN`: left or top — the default, and what layers did before version 6), to the far edge (`MAX`), or to the centre; keep both distances by stretching (`STRETCH`); or keep its position and size as a proportion of the frame (`SCALE`). They are applied when the frame is resized, as part of the same edit, so the stored geometry is always the result and nothing is computed at paint time. They use the layer's unrotated box. A layer whose size changes this way passes the change on: a nested frame applies its own children's constraints, and a group scales its contents. Constraints have no effect on a layer in a group or directly on a page.
+
+**Layout grids** are guides drawn over a frame while designing and offered as snap lines. They are not part of the design: they are never painted into it and never exported.
+
 Opacity, blend mode, layer blur and drop shadows apply to a layer as a whole, children included. Spread is honoured on rectangles, ellipses and frames; other shapes cast a shadow of their exact outline. Inner shadows apply to shapes and frames, not to text or groups.
 
 ---
@@ -334,6 +361,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   3: addVersion4Defaults,
   // 4 -> 5: adds image paints and Document.assets. Older documents use no images: assets is {}.
   4: (file) => ({ ...file, schemaVersion: 5, document: { ...file.document, assets: {} } }),
+  // 5 -> 6: every layer gets constraints { horizontal: 'MIN', vertical: 'MIN' }; frames get layoutGrids [].
+  5: addVersion6Defaults,
 };
 ```
 
@@ -343,6 +372,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 2 | 3 | `TEXT` layer type added | `src/core/text/layout.test.ts` ("text in the file format") |
 | 3 | 4 | Gradient paints; stroke cap, join and dashes; per-corner radii; effects; blend modes | `src/appearance.test.ts` ("version 3 files") |
 | 4 | 5 | Image paints; `Document.assets`; `assetData` in exported files | `src/images.test.ts` ("opens a version 4 file") |
+| 5 | 6 | Constraints on every layer; layout grids on frames | `src/layout.test.ts` ("version 5 files") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -371,7 +401,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | Per-range text styles, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5.) |
+| 2 | Per-range text styles, `flipX/flipY`, page `guides[]`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6.) |
 | 3 | `VECTOR` (vector network: vertices, segments with Bézier handles, regions), `BOOLEAN_OPERATION`, arc data on ellipses. |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |

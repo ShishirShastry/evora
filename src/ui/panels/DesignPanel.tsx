@@ -15,6 +15,7 @@ import {
   TYPE_LABELS,
   type BlendMode,
   type CornerRadii,
+  type FrameNode,
   type LayerNode,
   type LayerPatch,
   type NodeId,
@@ -34,6 +35,7 @@ import { ColorField, MIXED, NumberField, type Mixed } from '../components/Fields
 import { Icon, type IconName } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 import { EffectsSection } from './EffectsSection';
+import { ConstraintsSection, LayoutGridSection } from './LayoutSections';
 import { PaintList } from './PaintList';
 import { applyLive, Row, Section, SelectField, shared } from './panelParts';
 
@@ -334,7 +336,9 @@ export function DesignPanel() {
   const allLines = layers.every((layer) => layer.type === 'LINE');
   const anyLine = layers.some((layer) => layer.type === 'LINE');
   const radiusLayers = layers.filter(hasCornerRadius);
-  const frames = layers.filter((layer) => layer.type === 'FRAME');
+  const frames = layers.filter((layer): layer is FrameNode => layer.type === 'FRAME');
+  // Constraints only do something for a layer that sits directly inside a frame.
+  const insideFrames = layers.every((layer) => doc.nodes[layer.parentId]?.type === 'FRAME');
   const pointLayers = layers.filter((layer) => layer.type === 'POLYGON' || layer.type === 'STAR');
   // Groups have no appearance of their own, so they are left out of fills and strokes.
   const paintable = layers.filter((layer) => layer.type !== 'GROUP');
@@ -500,13 +504,17 @@ export function DesignPanel() {
             <input
               type="checkbox"
               className="accent-[var(--od-accent)]"
-              checked={frames.every((frame) => frame.type === 'FRAME' && frame.clipsContent)}
+              checked={frames.every((frame) => frame.clipsContent)}
               onChange={(event) => set('Change clip content', { clipsContent: event.currentTarget.checked })}
             />
             Clip content
           </label>
         )}
       </Section>
+
+      {insideFrames && <ConstraintsSection layers={layers} />}
+
+      {frames.length === layers.length && <LayoutGridSection frames={frames} />}
 
       {textLayers.length === layers.length && <TextSection layers={textLayers} />}
 

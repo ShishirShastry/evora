@@ -113,6 +113,7 @@ export function CanvasView() {
         hoveredId: state.hoveredId,
         marquee: controller.marquee,
         guides: controller.guides,
+        showLayoutGrids: state.showLayoutGrids,
         showHandles: !controller.isTransforming && state.editingTextId === null,
       });
       controller.labels = result.labels;

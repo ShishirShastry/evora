@@ -6,6 +6,8 @@ import type {
   GradientType,
   ImagePaint,
   LayerNode,
+  LayoutGrid,
+  LayoutGridPattern,
   LayerPatch,
   LayerType,
   NodeId,
@@ -84,6 +86,22 @@ export function imagePaint(imageHash: string): ImagePaint {
   return { type: 'IMAGE', imageHash, scaleMode: 'FILL', crop: { x: 0, y: 0, width: 1, height: 1 }, tileScale: 1, opacity: 1, visible: true };
 }
 
+/** A new layout grid of the given kind, in the customary translucent red. */
+export function layoutGrid(pattern: LayoutGridPattern = 'GRID'): LayoutGrid {
+  return {
+    pattern,
+    size: 10,
+    count: pattern === 'ROWS' ? 4 : 5,
+    gutter: 20,
+    offset: 0,
+    alignment: 'STRETCH',
+    sectionSize: 100,
+    color: { r: 1, g: 0, b: 0 },
+    opacity: 0.1,
+    visible: true,
+  };
+}
+
 export function dropShadow(): ShadowEffect {
   return { type: 'DROP_SHADOW', color: { ...BLACK }, opacity: 0.25, offsetX: 0, offsetY: 4, blur: 8, spread: 0, visible: true };
 }
@@ -137,11 +155,12 @@ export function createLayer(
     dashPattern: [] as number[],
     effects: [] as LayerNode['effects'],
     blendMode: 'NORMAL' as const,
+    constraints: { horizontal: 'MIN' as const, vertical: 'MIN' as const },
   };
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [] };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };

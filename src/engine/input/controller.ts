@@ -185,7 +185,7 @@ export class InteractionController {
     if (this.snapCache && this.snapCache.doc === doc && this.snapCache.key === key) return this.snapCache.targets;
     const targets: SnapTargets = { xs: [], ys: [] };
     for (const id of new Set(containerIds)) {
-      const part = collectSnapTargets(doc, id, exclude);
+      const part = collectSnapTargets(doc, id, exclude, { layoutGrids: this.state.showLayoutGrids });
       targets.xs.push(...part.xs);
       targets.ys.push(...part.ys);
     }

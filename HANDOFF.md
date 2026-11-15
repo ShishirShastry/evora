@@ -1,6 +1,6 @@
 # OPEN DESIGN — Handoff note
 
-Last updated: 2026-11-15, after five slices of Phase 2 (groups and arranging; text; snapping; appearance; images).
+Last updated: 2026-11-15, after six slices of Phase 2 (groups and arranging; text; snapping; appearance; images; constraints and layout grids).
 
 ## Where the project stands
 
@@ -8,7 +8,7 @@ Last updated: 2026-11-15, after five slices of Phase 2 (groups and arranging; te
 |---|---|
 | 0 — Planning | Partly done, then stopped at the owner's request. `PROJECT_ARCHITECTURE.md` and `DOCUMENT_SCHEMA.md` exist. The other four planning documents were **not written**. |
 | 1 — Editor foundation | **Implemented and tested.** Acceptance criterion met (see below). |
-| 2 — Design functionality | **In progress.** Done and tested: groups, align, distribute, flip, text layers, snapping to objects with smart guides, gradients, stroke caps / joins / dashes, per-corner radii, shadows, blurs, blend modes, images. **Not started:** clipping masks, rulers, draggable guides, layout grids, constraints. The Phase 2 acceptance criterion is **not** met. |
+| 2 — Design functionality | **In progress.** Done and tested: groups, align, distribute, flip, text layers, snapping to objects with smart guides, gradients, stroke caps / joins / dashes, per-corner radii, shadows, blurs, blend modes, images, constraints, layout grids. **Not started:** clipping masks, rulers, draggable guides. The Phase 2 acceptance criterion is **not** met. |
 | 3 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
 
 How to run and check the project: [README.md](README.md).
@@ -35,11 +35,13 @@ All of this is wired to the real document model, is undoable, and is saved autom
 - **Snapping (Phase 2).** While moving, resizing or drawing, edges and centre lines snap to the other layers in the same frame and to the frame's own edges and centre, within 6 screen pixels, and the lines snapped to are shown as guides. An axis locked with Shift is not snapped. "Snap to objects" in the View menu switches it off; the choice is remembered on this device.
 - **Appearance (Phase 2).** Fills and strokes can be solid or a linear, radial, angular or diamond gradient with any number of colour stops (colour, position, opacity) and an angle. Strokes have flat / round / square ends, sharp / cut / round corners and dashes with a gap. Frames and rectangles can have a different radius on each corner. Effects: drop shadow and inner shadow (offset, blur, spread, colour, opacity), layer blur and background blur, stacked, each hideable. Sixteen blend modes. Opacity, blend mode, blur and shadow apply to a layer as a whole, children included.
 - **Images (Phase 2).** Place PNG, JPEG, WebP, GIF or SVG files from File → Place image… (Ctrl+Shift+K), by dropping them on the canvas, or by pasting from the clipboard. An image becomes a rectangle with an image fill, at its natural size unless that would not fit in the view, inside the frame it lands on. Any shape's fill can be an image: Fill, Fit, Crop (choose the part shown) and Tile (choose the tile size), with opacity; the image can be replaced without touching the layer. Image bytes are stored once per device by content hash, and "Save a copy to disk" bundles them into the file, checked against their hashes when the file is imported.
+- **Constraints (Phase 2).** A layer directly inside a frame can keep to the left, right or centre, stretch between both edges, or scale, and the same vertically. Resizing the frame — by its handles, in the properties panel, or as part of a larger resize — moves and resizes its children accordingly, in the same undo step; nested frames and groups pass it on.
+- **Layout grids (Phase 2).** Frames can carry any number of uniform grids, columns and rows (count, gutter, margin or offset, stretched or aligned with a fixed size, colour and opacity). They are drawn over the design as guides, never into it; layers snap to their lines; View → Show layout grids (Shift+G) hides and shows them all.
 - **Menus and shortcuts.** Main menu (File, Edit, View, Object, Help), context menus and a shortcut reference, all generated from one command table, so a menu item and its shortcut cannot disagree.
 
 ## What is tested
 
-Run on 2026-11-15: TypeScript clean; **241 unit tests** and **13 browser acceptance tests** pass; production build succeeds.
+Run on 2026-11-15: TypeScript clean; **261 unit tests** and **15 browser acceptance tests** pass; production build succeeds.
 
 - `src/core/core.test.ts`, `src/core/document/validate.test.ts` — document operations, transforms, ordering, hit testing, selection rules, history diff, validation and repair, file format and version handling.
 - `src/state/editor.test.ts` — the real store and the real tools driven with pointer sequences: drawing, selecting, moving, nesting, resizing, rotating, pan and zoom, commands, pages, history.
@@ -49,6 +51,8 @@ Run on 2026-11-15: TypeScript clean; **241 unit tests** and **13 browser accepta
 - `e2e/phase1.spec.ts` — the Phase 1 acceptance criterion end to end in Microsoft Edge with real mouse and keyboard, including a reload and reopening from the file browser.
 - `src/core/ops/arrange.test.ts`, `src/state/arrange.test.ts` — groups (fit, nesting, scaling, removal when empty), align, distribute, flip, and opening a version 1 file in the version 2 format.
 - `src/core/text/layout.test.ts`, `src/state/text.test.ts` — line breaking, alignment, auto-sizing with the anchored edge, the text tool, editing, resizing rules, validation of text properties, and opening a version 2 file in the version 3 format.
+- `src/layout.test.ts` — every constraint on both axes, nested frames, groups, resizing by handle with undo, layout grid geometry for each alignment, grid lines as snap targets, validation and repair, and opening a version 5 file in version 6.
+- `e2e/layout.spec.ts` — constraints through the properties panel and by dragging a frame's edge, with a reload; layout grids checked on the overlay's pixels: columns, colour, alignment, hiding, Shift+G, and that the design underneath is untouched.
 - `src/images.test.ts` — hashing and base64, where each fit mode puts an image, crop limits, validation and repair of image paints and the asset table, the image cache, importing and placing (size, position, nesting in a frame, undo), exported files that carry their images and refuse tampered ones, asset storage in IndexedDB, what the renderer draws for each fit mode, and opening a version 4 file in version 5.
 - `e2e/images.spec.ts` — a generated PNG placed through the real file chooser, pixel checks for Fill / Fit / Crop / Tile, replacing the image, a reload; drop and paste; plain Ctrl+C / Ctrl+V of layers; refusing non-images and broken images.
 - `src/appearance.test.ts` — gradient construction and conversion, validation and repair of paints, effects, dashes and corner radii, corner-radius fitting, culling bounds with effects, which layers the renderer composites as a whole, and opening a version 3 file in version 4.
@@ -61,7 +65,8 @@ Not covered by automated tests: the native save/open file dialogs (`src/persiste
 
 ## Known limitations and rough edges
 
-- No rulers, draggable guides, layout grids, constraints or Auto Layout yet: those are the rest of Phase 2 and later.
+- No rulers, draggable guides, clipping masks or Auto Layout yet: those are the rest of Phase 2 and later.
+- Constraints use a layer's unrotated box, so a rotated child follows its frame only approximately. There are no minimum or maximum sizes yet, and no "fixed position when scrolling".
 - Images: crop is set with numbers, not by dragging on the canvas. No image adjustments (exposure, contrast and so on), no "use as mask", no PDF import. An animated GIF shows its first frame. SVG is placed as a picture, not converted into editable vector layers. Image fills are not drawn on strokes or text. Deleting a file does not yet remove images that no other file uses; they stay in the browser's storage.
 - Gradients are edited in the properties panel only (type, angle, stops); there are no draggable gradient handles on the canvas, and no eyedropper. On text and strokes, radial and angular gradients are circular rather than stretched to the box, and diamond falls back to radial.
 - Shadow spread works on rectangles, ellipses and frames only. Inner shadows are not drawn on text or groups. A drop shadow shows through a translucent fill. Background blur does not see through a group that is itself being composited (one with a blend mode, blur or partial opacity).
@@ -97,6 +102,6 @@ Phase 2 (static design), suggested order, each to be finished with tests before 
 3. ~~Appearance: gradients, strokes with dash/cap/join, independent corner radii, shadows and blurs, blend modes.~~ Done. Still to do here: gradient handles on the canvas, eyedropper, RGB/HSL entry, arrowheads.
 4. ~~Text layers with inline editing and font properties.~~ Done, with the limits listed above. Still to do for text: per-range styles, lists, bundled open-licence fonts, justified text.
 5. ~~Images: import (file, drag-and-drop, paste), fill modes, crop, asset store.~~ Done. Still to do here: cropping by dragging, image adjustments, masks, removing unused assets, SVG import as editable vectors (needs Phase 3).
-6. Constraints and layout grids.
+6. ~~Constraints and layout grids.~~ Done.
 
-Each schema addition needs a version bump and a migration with a fixture test (see `MIGRATIONS` in `src/core/document/serialize.ts`). The schema is currently at version 5.
+Each schema addition needs a version bump and a migration with a fixture test (see `MIGRATIONS` in `src/core/document/serialize.ts`). The schema is currently at version 6.

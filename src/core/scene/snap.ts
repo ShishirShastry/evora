@@ -1,4 +1,5 @@
 import { isFrame, isLayer, type Document, type NodeId } from '../document/schema';
+import { layoutGridSnapLines } from '../layout/grids';
 import type { Point, Rect } from '../math/geometry';
 import { getChildIds, getWorldBounds, getWorldRotation } from './tree';
 
@@ -40,12 +41,29 @@ function addRect(targets: SnapTargets, r: Rect): void {
  * visible children, except the layers in `exclude` (the ones being moved).
  * Snapping works along the page axes, so a rotated container offers nothing.
  */
-export function collectSnapTargets(doc: Document, containerId: NodeId, exclude: ReadonlySet<NodeId>): SnapTargets {
+export function collectSnapTargets(
+  doc: Document,
+  containerId: NodeId,
+  exclude: ReadonlySet<NodeId>,
+  options: { layoutGrids?: boolean } = {},
+): SnapTargets {
   const targets: SnapTargets = { xs: [], ys: [] };
   const container = doc.nodes[containerId];
   if (!container) return targets;
   if (isLayer(container) && getWorldRotation(doc, containerId) !== 0) return targets;
-  if (isFrame(container)) addRect(targets, getWorldBounds(doc, containerId));
+  if (isFrame(container)) {
+    const bounds = getWorldBounds(doc, containerId);
+    addRect(targets, bounds);
+    // The frame's layout grids: column and row edges, and the lines of a uniform grid.
+    if (options.layoutGrids !== false) {
+      for (const grid of container.layoutGrids) {
+        if (!grid.visible) continue;
+        const lines = layoutGridSnapLines(grid, container.width, container.height);
+        for (const x of lines.xs) targets.xs.push({ value: bounds.x + x, from: bounds.y, to: bounds.y + bounds.height });
+        for (const y of lines.ys) targets.ys.push({ value: bounds.y + y, from: bounds.x, to: bounds.x + bounds.width });
+      }
+    }
+  }
   for (const id of getChildIds(doc, containerId)) {
     const node = doc.nodes[id];
     if (!isLayer(node) || !node.visible || exclude.has(id)) continue;

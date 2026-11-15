@@ -61,6 +61,8 @@ export interface EditorState {
   editingTextId: NodeId | null;
   /** Whether moving, resizing and drawing snap to nearby layers. A user preference. */
   snapping: boolean;
+  /** Whether frames' layout grids are drawn (and snapped to). A user preference. */
+  showLayoutGrids: boolean;
 
   // History.
   undoStack: HistoryEntry[];
@@ -107,6 +109,7 @@ export interface EditorActions {
   setRenaming(id: NodeId | null): void;
   setEditingText(id: NodeId | null): void;
   setSnapping(snapping: boolean): void;
+  setShowLayoutGrids(show: boolean): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
   /**
@@ -152,6 +155,8 @@ export interface EditorOptions {
   measurer?: TextMeasurer;
   /** Initial value of the snapping preference. On unless told otherwise. */
   snapping?: boolean;
+  /** Initial value of the "show layout grids" preference. On unless told otherwise. */
+  showLayoutGrids?: boolean;
 }
 
 export function createEditorStore(doc: Document, session?: Partial<SessionState>, options: EditorOptions = {}): EditorStore {
@@ -197,6 +202,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       renamingId: null,
       editingTextId: null,
       snapping: options.snapping ?? true,
+      showLayoutGrids: options.showLayoutGrids ?? true,
       undoStack: [],
       redoStack: [],
       gesture: null,
@@ -349,6 +355,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setSnapping(snapping) {
         if (get().snapping !== snapping) set({ snapping });
+      },
+
+      setShowLayoutGrids(show) {
+        if (get().showLayoutGrids !== show) set({ showLayoutGrids: show });
       },
 
       setEditingText(id) {

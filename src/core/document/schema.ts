@@ -1,12 +1,12 @@
 /**
- * OPEN DESIGN document schema, version 5.
+ * OPEN DESIGN document schema, version 6 (adds constraints and layout grids).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
  * modes, and version 5 image paints with the document's asset table.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -175,6 +175,44 @@ export function isShadow(effect: Effect): effect is ShadowEffect {
   return effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW';
 }
 
+/**
+ * What a layer does along one axis when the frame it is in changes size:
+ * keep its distance to the near edge (MIN: left or top), to the far edge
+ * (MAX: right or bottom), to the centre, to both edges by stretching, or
+ * keep its position and size as a proportion of the frame.
+ */
+export type ConstraintType = 'MIN' | 'CENTER' | 'MAX' | 'STRETCH' | 'SCALE';
+export const CONSTRAINT_TYPES: readonly ConstraintType[] = ['MIN', 'CENTER', 'MAX', 'STRETCH', 'SCALE'];
+
+export interface Constraints {
+  horizontal: ConstraintType;
+  vertical: ConstraintType;
+}
+
+export type LayoutGridPattern = 'GRID' | 'COLUMNS' | 'ROWS';
+export type LayoutGridAlignment = 'MIN' | 'CENTER' | 'MAX' | 'STRETCH';
+export const LAYOUT_GRID_PATTERNS: readonly LayoutGridPattern[] = ['GRID', 'COLUMNS', 'ROWS'];
+export const LAYOUT_GRID_ALIGNMENTS: readonly LayoutGridAlignment[] = ['MIN', 'CENTER', 'MAX', 'STRETCH'];
+
+/** A guide grid shown over a frame while designing. It is not part of the design and is never exported. */
+export interface LayoutGrid {
+  pattern: LayoutGridPattern;
+  /** GRID: the size of each square cell. */
+  size: number;
+  /** COLUMNS and ROWS: how many. */
+  count: number;
+  /** COLUMNS and ROWS: the space between them. */
+  gutter: number;
+  /** COLUMNS and ROWS: the margin at both ends (STRETCH) or the offset from the aligned edge (MIN, MAX). */
+  offset: number;
+  alignment: LayoutGridAlignment;
+  /** COLUMNS and ROWS that do not stretch: the width of each column or height of each row. */
+  sectionSize: number;
+  color: RGB;
+  opacity: number;
+  visible: boolean;
+}
+
 /** Corner radii in the order top-left, top-right, bottom-right, bottom-left. */
 export type CornerRadii = [number, number, number, number];
 
@@ -219,6 +257,8 @@ interface LayerBase extends NodeBase {
   effects: Effect[];
   /** How the layer, with everything in it, is mixed with what is beneath it. */
   blendMode: BlendMode;
+  /** How the layer responds when the frame it is directly inside is resized. */
+  constraints: Constraints;
 }
 
 export interface FrameNode extends LayerBase {
@@ -227,6 +267,7 @@ export interface FrameNode extends LayerBase {
   cornerRadius: number;
   /** One radius per corner; when null, `cornerRadius` applies to all four. */
   cornerRadii: CornerRadii | null;
+  layoutGrids: LayoutGrid[];
 }
 
 /**
@@ -365,6 +406,7 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   clipsContent?: boolean;
   cornerRadius?: number;
   cornerRadii?: CornerRadii | null;
+  layoutGrids?: LayoutGrid[];
   pointCount?: number;
   innerRadius?: number;
 } & Partial<Omit<TextNode, keyof LayerBase>>;

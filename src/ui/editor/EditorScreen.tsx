@@ -50,7 +50,7 @@ export function EditorScreen({ storage, fileId, onExit }: EditorScreenProps) {
         }
         const store = createEditorStore(opened.doc, loadSession(opened.doc.id), {
           measurer: getBrowserMeasurer() ?? undefined,
-          snapping: loadPreferences().snapping,
+          ...loadPreferences(),
         });
         setLoad({ status: 'ready', store, meta: opened.meta, repairs: opened.repairs });
       })
@@ -170,7 +170,9 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     let sessionTimer: ReturnType<typeof setTimeout> | null = null;
     const writeSession = (): void => saveSession(docId, getSession(store.getState()));
     const unsubscribe = store.subscribe((state, previous) => {
-      if (state.snapping !== previous.snapping) savePreferences({ snapping: state.snapping });
+      if (state.snapping !== previous.snapping || state.showLayoutGrids !== previous.showLayoutGrids) {
+        savePreferences({ snapping: state.snapping, showLayoutGrids: state.showLayoutGrids });
+      }
       if (state.viewport === previous.viewport && state.pageId === previous.pageId) return;
       if (sessionTimer !== null) clearTimeout(sessionTimer);
       sessionTimer = setTimeout(writeSession, 300);

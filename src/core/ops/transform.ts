@@ -1,5 +1,5 @@
 import { patchNodes } from '../document/mutate';
-import { isLayer, type Document, type LayerPatch, type NodeId } from '../document/schema';
+import { isLayer, type ConstraintType, type Document, type LayerPatch, type NodeId } from '../document/schema';
 import { normalizeAngle, rotatePoint, type Point, type Rect } from '../math/geometry';
 import { applyToPoint, applyToVector, invert } from '../math/matrix';
 import { getChildIds, getWorldMatrix, getWorldRotation, topLevelIds } from '../scene/tree';
@@ -228,6 +228,68 @@ export function setLayerBox(doc: Document, id: NodeId, box: Partial<Box>): Docum
     const sx = box.width !== undefined && node.width > 0 ? box.width / node.width : 1;
     const sy = box.height !== undefined && node.height > 0 ? box.height / node.height : 1;
     next = scaleChildren(next, id, sx, sy);
+  } else if (node.type === 'FRAME') {
+    next = applyConstraints(next, id, node.width, node.height, box.width ?? node.width, box.height ?? node.height);
+  }
+  return next;
+}
+
+/** New position and size along one axis for a child, given how its frame's length changed. */
+function constrainAxis(
+  constraint: ConstraintType,
+  start: number,
+  size: number,
+  before: number,
+  after: number,
+): { start: number; size: number } {
+  const delta = after - before;
+  switch (constraint) {
+    case 'MIN':
+      return { start, size };
+    case 'MAX':
+      return { start: start + delta, size };
+    case 'CENTER':
+      return { start: start + delta / 2, size };
+    case 'STRETCH':
+      // Both edges keep their distance to the frame's edges. A layer that had some size keeps at least a pixel.
+      return { start, size: Math.max(size >= MIN_SIZE ? MIN_SIZE : 0, size + delta) };
+    case 'SCALE': {
+      if (before <= 0) return { start, size };
+      const factor = after / before;
+      return { start: start * factor, size: size * factor };
+    }
+  }
+}
+
+/**
+ * Repositions and resizes the direct children of a frame after the frame's
+ * size changed from `beforeWidth × beforeHeight` to `afterWidth × afterHeight`,
+ * each according to its constraints. A child whose size changes is resized
+ * with `setLayerBox`, so nested frames apply their own children's constraints
+ * in turn and groups scale their contents. Children are measured by their
+ * unrotated boxes.
+ */
+export function applyConstraints(
+  doc: Document,
+  frameId: NodeId,
+  beforeWidth: number,
+  beforeHeight: number,
+  afterWidth: number,
+  afterHeight: number,
+): Document {
+  if (beforeWidth === afterWidth && beforeHeight === afterHeight) return doc;
+  let next = doc;
+  for (const childId of getChildIds(doc, frameId)) {
+    const child = doc.nodes[childId];
+    if (!isLayer(child)) continue;
+    const h = constrainAxis(child.constraints.horizontal, child.x, child.width, beforeWidth, afterWidth);
+    const v = constrainAxis(child.constraints.vertical, child.y, child.height, beforeHeight, afterHeight);
+    const box: Partial<Box> = {};
+    if (h.start !== child.x) box.x = clean(h.start);
+    if (v.start !== child.y) box.y = clean(v.start);
+    if (h.size !== child.width) box.width = clean(h.size);
+    if (v.size !== child.height) box.height = clean(v.size);
+    if (Object.keys(box).length > 0) next = setLayerBox(next, childId, box);
   }
   return next;
 }

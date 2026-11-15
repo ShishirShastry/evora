@@ -54,6 +54,25 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   // Version 5 adds image paints and the document's table of image assets.
   // Older documents use no images, so their table is empty.
   4: (file) => ({ ...file, schemaVersion: 5, document: { ...(isObject(file.document) ? file.document : {}), assets: {} } }),
+  // Version 6 adds constraints to every layer and layout grids to frames.
+  // Left and top constraints are what layers already did when a frame was
+  // resized, and a frame without grids looks as it did.
+  5: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node) || node.type === 'PAGE') {
+        upgraded[id] = node;
+        continue;
+      }
+      const next: Raw = { constraints: { horizontal: 'MIN', vertical: 'MIN' }, ...node };
+      if (node.type === 'FRAME' && !('layoutGrids' in node)) next.layoutGrids = [];
+      upgraded[id] = next;
+    }
+    return { ...file, schemaVersion: 6, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

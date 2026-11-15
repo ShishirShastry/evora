@@ -615,6 +615,16 @@ export const COMMANDS: readonly Command[] = [
   },
 
   {
+    id: 'view.layoutGrids',
+    label: 'Show layout grids',
+    group: 'View',
+    shortcut: 'Shift+G',
+    keys: [{ code: 'KeyG', shift: true }],
+    checked: (state) => state.showLayoutGrids,
+    run: ({ store }) => store.getState().setShowLayoutGrids(!store.getState().showLayoutGrids),
+  },
+
+  {
     id: 'object.front',
     label: 'Bring to front',
     group: 'Object',

@@ -211,14 +211,19 @@ describe('preferences', () => {
     };
   }
 
-  it('remembers the snapping preference and defaults to on', () => {
+  it('remembers each preference, defaults to on, and ignores damaged values', () => {
     const storage = fakeStorage();
-    expect(loadPreferences(storage)).toEqual({ snapping: true });
-    savePreferences({ snapping: false }, storage);
-    expect(loadPreferences(storage)).toEqual({ snapping: false });
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true });
+    savePreferences({ snapping: false, showLayoutGrids: true }, storage);
+    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true });
+    savePreferences({ snapping: true, showLayoutGrids: false }, storage);
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false });
     storage.setItem('open-design:preferences', 'broken');
-    expect(loadPreferences(storage)).toEqual({ snapping: true });
-    storage.setItem('open-design:preferences', '{"snapping":"yes"}');
-    expect(loadPreferences(storage)).toEqual({ snapping: true });
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true });
+    // A value of the wrong type falls back to its default; values saved by an older version are kept.
+    storage.setItem('open-design:preferences', '{"snapping":"yes","showLayoutGrids":false}');
+    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false });
+    storage.setItem('open-design:preferences', '{"snapping":false}');
+    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true });
   });
 });

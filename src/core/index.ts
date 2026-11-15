@@ -22,3 +22,4 @@ export * from './ops/pages';
 export * from './ops/clipboard';
 export * from './history/diff';
 export * from './text/layout';
+export * from './layout/grids';

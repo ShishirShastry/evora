@@ -1,5 +1,6 @@
 import {
   getChildIds,
+  layoutGridGeometry,
   getWorldCorners,
   getWorldMatrix,
   getWorldRotation,
@@ -8,6 +9,7 @@ import {
   rectToPolygon,
   type Document,
   type NodeId,
+  type NodeMap,
   type Point,
   type Rect,
   type SnapGuide,
@@ -49,7 +51,37 @@ export interface OverlayInput {
   showHandles: boolean;
   /** Smart guides to draw while something is snapped. */
   guides?: readonly SnapGuide[];
+  /** Draw the layout grids of frames. On by default. */
+  showLayoutGrids?: boolean;
 }
+
+const gridFrameCache = new WeakMap<NodeMap, Map<NodeId, NodeId[]>>();
+
+/** The visible frames on a page that have layout grids, outermost first. Cached per document snapshot. */
+function framesWithGrids(doc: Document, pageId: NodeId): NodeId[] {
+  let perPage = gridFrameCache.get(doc.nodes);
+  if (!perPage) {
+    perPage = new Map();
+    gridFrameCache.set(doc.nodes, perPage);
+  }
+  const cached = perPage.get(pageId);
+  if (cached) return cached;
+  const out: NodeId[] = [];
+  const walk = (parentId: NodeId): void => {
+    for (const id of getChildIds(doc, parentId)) {
+      const node = doc.nodes[id];
+      if (!isLayer(node) || !node.visible) continue;
+      if (node.type === 'FRAME' && node.layoutGrids.some((grid) => grid.visible)) out.push(id);
+      if (node.type === 'FRAME' || node.type === 'GROUP') walk(id);
+    }
+  };
+  walk(pageId);
+  perPage.set(pageId, out);
+  return out;
+}
+
+/** A uniform grid finer than this on screen is not drawn: it would be a solid wash. */
+const MIN_GRID_CELL_PX = 4;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -81,6 +113,45 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
   ctx.clearRect(0, 0, Math.round(size.width * dpr), Math.round(size.height * dpr));
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.lineJoin = 'miter';
+
+  // Layout grids: guides over frames, never part of the design itself.
+  if (input.showLayoutGrids !== false) {
+    const z = viewport.zoom;
+    for (const id of framesWithGrids(doc, pageId)) {
+      const frame = doc.nodes[id];
+      if (!isFrame(frame)) continue;
+      const m = getWorldMatrix(doc, id);
+      ctx.save();
+      ctx.transform(m[0] * z, m[1] * z, m[2] * z, m[3] * z, (m[4] - viewport.x) * z, (m[5] - viewport.y) * z);
+      ctx.beginPath();
+      ctx.rect(0, 0, frame.width, frame.height);
+      ctx.clip();
+      for (const grid of frame.layoutGrids) {
+        if (!grid.visible || grid.opacity <= 0) continue;
+        const geometry = layoutGridGeometry(grid, frame.width, frame.height);
+        const colour = `rgba(${Math.round(grid.color.r * 255)}, ${Math.round(grid.color.g * 255)}, ${Math.round(grid.color.b * 255)}, ${grid.opacity})`;
+        if (grid.pattern === 'GRID') {
+          if (grid.size * z < MIN_GRID_CELL_PX) continue;
+          ctx.strokeStyle = colour;
+          ctx.lineWidth = 1 / z;
+          ctx.beginPath();
+          for (const x of geometry.xs) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, frame.height);
+          }
+          for (const y of geometry.ys) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(frame.width, y);
+          }
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = colour;
+          for (const band of geometry.bands) ctx.fillRect(band.x, band.y, band.width, band.height);
+        }
+      }
+      ctx.restore();
+    }
+  }
 
   // Names of top-level frames.
   ctx.font = LABEL_FONT;
