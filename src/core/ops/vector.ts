@@ -12,6 +12,7 @@ import {
 } from '../document/schema';
 import { applyToPoint, invert, multiply } from '../math/matrix';
 import { getChildIds, getWorldMatrix, sortByPaintOrder, topLevelIds } from '../scene/tree';
+import { booleanNetworks, type BooleanOperand, type BooleanOperation } from '../vector/boolean';
 import { fitVectorNode } from '../vector/fit';
 import { mapNetwork } from '../vector/network';
 import { combineNetworks, hasOutline, shapeNetwork } from '../vector/shapes';
@@ -114,35 +115,90 @@ export function flattenNodes(doc: Document, ids: readonly NodeId[]): { doc: Docu
     return { doc: setNodes(doc, { [first.id]: fitVectorNode({ ...vector, id: first.id }) }), id: first.id };
   }
 
-  // The new layer goes into the parent of the top-most selected layer, directly above it.
+  const outlines = outlinesOf(doc, ids, members);
+  if (!outlines) return null;
+  return replaceWithVector(doc, members, outlines, combineNetworks(outlines.operands.map((operand) => operand.network)), {
+    name: nextLayerName(doc, 'VECTOR'),
+  });
+}
+
+interface Outlines {
+  /** Where the layer that replaces the shapes goes: the parent of the top-most selected layer, directly above it. */
+  parentId: NodeId;
+  index: number;
+  /** The shapes' outlines in that parent's coordinates, bottom-most first. */
+  operands: BooleanOperand[];
+}
+
+function outlinesOf(doc: Document, ids: readonly NodeId[], members: readonly NodeId[]): Outlines | null {
   const roots = sortByPaintOrder(doc, topLevelIds(doc, ids)).filter((id) => isLayer(doc.nodes[id]));
   const top = doc.nodes[roots[roots.length - 1] as NodeId];
   if (!isLayer(top)) return null;
   const parentId = top.parentId;
   const toParent = invert(getWorldMatrix(doc, parentId));
-
-  const networks: VectorNetwork[] = [];
+  const operands: BooleanOperand[] = [];
   for (const id of members) {
     const node = doc.nodes[id] as LayerNode;
     const network = shapeNetwork(node);
     if (!network) continue;
     const matrix = multiply(toParent, getWorldMatrix(doc, id));
-    networks.push(mapNetwork(network, (p) => applyToPoint(matrix, p)));
+    operands.push({
+      network: mapNetwork(network, (p) => applyToPoint(matrix, p)),
+      windingRule: node.type === 'VECTOR' ? node.windingRule : 'NONZERO',
+    });
   }
+  return { parentId, index: getChildIds(doc, parentId).indexOf(top.id) + 1, operands };
+}
 
-  const index = getChildIds(doc, parentId).indexOf(top.id) + 1;
-  const { keys, rekeyed } = insertionKeys(doc, parentId, index, 1);
-  const vector = createLayer('VECTOR', parentId, keys[0] as string, {
-    ...appearanceOf(first),
-    name: nextLayerName(doc, 'VECTOR'),
+/** Puts one vector holding `network` in the place of the given shapes. It looks like the bottom-most of them did. */
+function replaceWithVector(
+  doc: Document,
+  members: readonly NodeId[],
+  outlines: Outlines,
+  network: VectorNetwork,
+  props: LayerPatch,
+): { doc: Document; id: NodeId } {
+  const { keys, rekeyed } = insertionKeys(doc, outlines.parentId, outlines.index, 1);
+  const vector = createLayer('VECTOR', outlines.parentId, keys[0] as string, {
+    ...appearanceOf(doc.nodes[members[0] as NodeId] as LayerNode),
     x: 0,
     y: 0,
     rotation: 0,
-    network: combineNetworks(networks),
+    ...props,
+    network,
   }) as VectorNode;
-
   const changes: Record<NodeId, DesignNode | null> = { [vector.id]: fitVectorNode(vector) };
   for (const id of members) changes[id] = null;
   // Groups that gave up everything they held go too.
   return { doc: normalizeGroups(setNodes(patchNodes(doc, rekeyed), changes)), id: vector.id };
+}
+
+export const BOOLEAN_NAMES: Record<BooleanOperation, string> = {
+  UNION: 'Union',
+  SUBTRACT: 'Subtract',
+  INTERSECT: 'Intersect',
+  EXCLUDE: 'Exclude',
+};
+
+/** Can `booleanNodes` do anything with this selection? It needs at least two shapes. */
+export function canBoolean(doc: Document, ids: readonly NodeId[]): boolean {
+  return flattenMembers(doc, ids).length >= 2;
+}
+
+/**
+ * Combines shapes into one vector layer: their union, the bottom-most with
+ * the others taken out of it, what they all share, or what an odd number of
+ * them cover. The shapes are replaced by the result, which takes the
+ * appearance of the bottom-most. Returns null when there are fewer than two
+ * shapes or when nothing is left (shapes that do not overlap have no
+ * intersection), in which case the document is not changed.
+ */
+export function booleanNodes(doc: Document, ids: readonly NodeId[], operation: BooleanOperation): { doc: Document; id: NodeId } | null {
+  const members = flattenMembers(doc, ids);
+  if (members.length < 2) return null;
+  const outlines = outlinesOf(doc, ids, members);
+  if (!outlines) return null;
+  const network = booleanNetworks(outlines.operands, operation);
+  if (network.segments.length === 0) return null;
+  return replaceWithVector(doc, members, outlines, network, { name: BOOLEAN_NAMES[operation], windingRule: 'NONZERO' });
 }

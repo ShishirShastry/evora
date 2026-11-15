@@ -29,4 +29,5 @@ export * from './vector/network';
 export * from './vector/shapes';
 export * from './vector/fit';
 export * from './vector/fitCurve';
+export * from './vector/boolean';
 export * from './ops/vector';

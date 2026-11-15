@@ -3,6 +3,9 @@ import {
   addSegment,
   alignNodes,
   applyToVector,
+  BOOLEAN_NAMES,
+  booleanNodes,
+  canBoolean,
   cornerVertex,
   getWorldMatrix,
   invert,
@@ -36,6 +39,7 @@ import {
   ungroupNodes,
   unionRects,
   type AlignMode,
+  type BooleanOperation,
   type ClipboardPayload,
   type DistributeAxis,
   type FlipAxis,
@@ -162,6 +166,31 @@ export function flattenSelection(store: EditorStore): void {
     return out.doc;
   });
   if (created.length > 0) store.getState().setSelection(created);
+}
+
+/** Combines the selected shapes into one vector layer by a boolean operation. */
+export function booleanSelection(store: EditorStore, operation: BooleanOperation): void {
+  const { selection, apply } = store.getState();
+  const created: NodeId[] = [];
+  apply(BOOLEAN_NAMES[operation], (doc) => {
+    const out = booleanNodes(doc, selection, operation);
+    if (!out) return doc;
+    created.push(out.id);
+    return out.doc;
+  });
+  if (created.length > 0) store.getState().setSelection(created);
+}
+
+function booleanCommand(operation: BooleanOperation, label: string, code: string): Command {
+  return {
+    id: `object.${operation.toLowerCase()}`,
+    label,
+    group: 'Object',
+    shortcut: `Ctrl+Alt+${code.replace('Key', '')}`,
+    keys: [{ code, ctrl: true, alt: true }],
+    enabled: (state) => canBoolean(state.doc, state.selection),
+    run: ({ store }) => booleanSelection(store, operation),
+  };
 }
 
 /** The single selected vector layer whose points could be edited, if that is what is selected. */
@@ -804,6 +833,10 @@ export const COMMANDS: readonly Command[] = [
     enabled: (state) => canFlatten(state.doc, state.selection),
     run: ({ store }) => flattenSelection(store),
   },
+  booleanCommand('UNION', 'Union selection', 'KeyU'),
+  booleanCommand('SUBTRACT', 'Subtract selection', 'KeyS'),
+  booleanCommand('INTERSECT', 'Intersect selection', 'KeyI'),
+  booleanCommand('EXCLUDE', 'Exclude selection', 'KeyX'),
   {
     id: 'object.flipHorizontal',
     label: 'Flip horizontal',

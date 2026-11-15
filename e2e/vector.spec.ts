@@ -269,6 +269,73 @@ test('flatten a shape to a vector and open it with a double-click', async ({ pag
   expect(errors).toEqual([]);
 });
 
+test('boolean operations: subtract, intersect, exclude and union of a square and a circle', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await canvas(page).focus();
+  // A square from (200, 200) to (400, 400) and, over its corner, a circle of radius 100 about (400, 400).
+  await page.keyboard.press('r');
+  await drag(page, [200, 200], [400, 400]);
+  await page.keyboard.press('o');
+  await drag(page, [300, 300], [500, 500]);
+  await page.keyboard.press('Control+a');
+  await expect(layers(page).getByRole('treeitem')).toHaveCount(2);
+
+  // Four places: in the square only, in both, in the circle only, in neither.
+  const squareOnly: [number, number] = [220, 220];
+  const both: [number, number] = [350, 350];
+  const circleOnly: [number, number] = [450, 450];
+  const neither: [number, number] = [480, 220];
+  const expectPainted = async (painted: [number, number][], blank: [number, number][]): Promise<void> => {
+    for (const [x, y] of painted) expectNear(await pixel(page, x, y), GREY);
+    for (const [x, y] of blank) expectNear(await pixel(page, x, y), PAGE);
+  };
+  await expectPainted([squareOnly, both, circleOnly], [neither]);
+
+  // Subtract: the square with the circle's bite out of it.
+  await page.keyboard.press('Control+Alt+s');
+  await expect(layer(page, 'Subtract')).toBeVisible();
+  await expect(layers(page).getByRole('treeitem')).toHaveCount(1);
+  await expectPainted([squareOnly], [both, circleOnly, neither]);
+  await expect(field(page, 'Width')).toHaveValue('200');
+  await page.keyboard.press('Control+z');
+  await expect(layers(page).getByRole('treeitem')).toHaveCount(2);
+  await expectPainted([squareOnly, both, circleOnly], [neither]);
+
+  // Intersect: only what they share, which fits in the square's corner.
+  await page.keyboard.press('Control+Alt+i');
+  await expect(layer(page, 'Intersect')).toBeVisible();
+  await expectPainted([both], [squareOnly, circleOnly, neither]);
+  await expect(field(page, 'Width')).toHaveValue('100');
+  await expect(field(page, 'Height')).toHaveValue('100');
+  await page.keyboard.press('Control+z');
+
+  // Exclude: everything but what they share.
+  await page.keyboard.press('Control+Alt+x');
+  await expect(layer(page, 'Exclude')).toBeVisible();
+  await expectPainted([squareOnly, circleOnly], [both, neither]);
+  await page.keyboard.press('Control+z');
+
+  // Union: one shape, from the Object menu this time.
+  await page.getByRole('button', { name: 'Main menu' }).click();
+  await page.getByRole('menuitem', { name: 'Object' }).click();
+  await page.getByRole('menuitem', { name: 'Union selection' }).click();
+  await expect(layer(page, 'Union')).toBeVisible();
+  await expectPainted([squareOnly, both, circleOnly], [neither]);
+  await expect(field(page, 'Width')).toHaveValue('300');
+  await expect(field(page, 'Height')).toHaveValue('300');
+
+  // The result is an ordinary vector: its points can be opened, and it is saved.
+  await expect(page.getByRole('button', { name: 'Edit points' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await expect.poll(() => pixel(page, 450, 450)).toEqual(GREY);
+  await expect(layer(page, 'Union')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
 test('pencil: a hand-drawn stroke becomes a smooth path, and a loop becomes a shape', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
