@@ -28,7 +28,7 @@ import {
   type TextStyleRange,
 } from './core';
 import { renderScene } from './engine/render/scene';
-import { updateLayers } from './state/commands';
+import { getCommand, runCommand, styleText, updateLayers, type AppActions, type Command } from './state/commands';
 import { createEditorStore } from './state/editorStore';
 
 /**
@@ -186,6 +186,63 @@ describe('styled ranges', () => {
     expect(textOf(store.getState().doc, id).styleRanges).toEqual([{ start: 6, end: 8, fontWeight: 700 }]);
     store.getState().apply('Shorten', (d) => patchNode(d, id, { characters: 'Hi' }));
     expect(textOf(store.getState().doc, id).styleRanges).toEqual([]);
+  });
+});
+
+describe('styling the selected part of text that is being edited', () => {
+  const app: AppActions = {
+    cancelInteraction: () => false,
+    openShortcuts: () => undefined,
+    saveNow: () => undefined,
+    saveAs: () => undefined,
+    placeImage: () => undefined,
+    goHome: () => undefined,
+  };
+
+  it('restyles the part while one is selected, and the whole layer otherwise', () => {
+    const { doc, id } = text({ characters: 'Hello bold world' });
+    const store = createEditorStore(doc);
+    // Not being edited: a selection cannot be recorded, and a font weight is the layer's.
+    store.getState().setTextSelection({ start: 6, end: 10 });
+    expect(store.getState().textSelection).toBeNull();
+    styleText(store, 'Change font weight', [id], { fontWeight: 300 });
+    expect(textOf(store.getState().doc, id)).toMatchObject({ fontWeight: 300, styleRanges: [] });
+
+    // Being edited, with "bold" selected (given backwards, as a selection made right to left is).
+    store.getState().setSelection([id]);
+    store.getState().setEditingText(id);
+    store.getState().setTextSelection({ start: 10, end: 6 });
+    expect(store.getState().textSelection).toEqual({ start: 6, end: 10 });
+    styleText(store, 'Change font weight', [id], { fontWeight: 700 });
+    styleText(store, 'Change text colour', [id], { color: RED });
+    expect(textOf(store.getState().doc, id)).toMatchObject({ fontWeight: 300, styleRanges: [{ start: 6, end: 10, fontWeight: 700, color: RED }] });
+    expect(store.getState().undoStack.map((entry) => entry.label).slice(-2)).toEqual(['Change font weight', 'Change text colour']);
+    // The text is still being edited and the same part is still selected.
+    expect(store.getState()).toMatchObject({ editingTextId: id, textSelection: { start: 6, end: 10 } });
+    styleText(store, 'Change text colour', [id], { color: null });
+    expect(textOf(store.getState().doc, id).styleRanges).toEqual([{ start: 6, end: 10, fontWeight: 700 }]);
+
+    // With only a caret, the whole layer is restyled, which also replaces what its parts had.
+    store.getState().setTextSelection({ start: 3, end: 3 });
+    styleText(store, 'Change font weight', [id], { fontWeight: 500 });
+    expect(textOf(store.getState().doc, id)).toMatchObject({ fontWeight: 500, styleRanges: [] });
+    // A colour for the whole layer is its fill, not this.
+    const fills = textOf(store.getState().doc, id).fills;
+    styleText(store, 'Change text colour', [id], { color: RED });
+    expect(textOf(store.getState().doc, id)).toMatchObject({ fills, styleRanges: [] });
+  });
+
+  it('forgets the selection when editing ends, and ends editing with Escape before anything else', () => {
+    const { doc, id } = text({ characters: 'Hello' });
+    const store = createEditorStore(doc);
+    store.getState().setSelection([id]);
+    store.getState().setEditingText(id);
+    store.getState().setTextSelection({ start: 1, end: 3 });
+    runCommand(getCommand('edit.deselect') as Command, { store, app });
+    // The layer is still selected: that Escape only closed the text.
+    expect(store.getState()).toMatchObject({ editingTextId: null, textSelection: null, selection: [id] });
+    runCommand(getCommand('edit.deselect') as Command, { store, app });
+    expect(store.getState().selection).toEqual([]);
   });
 });
 

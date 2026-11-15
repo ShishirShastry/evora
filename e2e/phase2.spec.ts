@@ -142,7 +142,7 @@ test('text: create, type, restyle, edit again, undo, and reopen', async ({ page 
   const editor = page.getByRole('textbox', { name: 'Edit text' });
   await expect(editor).toBeFocused();
   await page.keyboard.type('Get started');
-  await expect(editor).toHaveValue('Get started');
+  await expect(editor).toHaveText('Get started');
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
 
@@ -179,7 +179,7 @@ test('text: create, type, restyle, edit again, undo, and reopen', async ({ page 
   // Double-click the text to edit it again; clicking elsewhere commits.
   await click(page, [160, y + 20], { clickCount: 2 });
   await expect(editor).toBeFocused();
-  await expect(editor).toHaveValue('Get started');
+  await expect(editor).toHaveText('Get started');
   await page.keyboard.press('End');
   await page.keyboard.type(' today');
   await click(page, [700, 600]);

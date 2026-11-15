@@ -76,6 +76,11 @@ export interface EditorState {
   renamingId: NodeId | null;
   /** Text layer whose characters are being edited in place on the canvas. */
   editingTextId: NodeId | null;
+  /**
+   * The part of that text that is selected, as positions in its characters;
+   * `start` equals `end` for a caret. Null while no text is being edited.
+   */
+  textSelection: { start: number; end: number } | null;
   /** The vector layer whose points are being edited on the canvas. It is always the whole selection. */
   vectorEdit: VectorEdit | null;
   /** The gradient (or cropped image) of the selected layer whose handles are shown on the canvas. */
@@ -133,6 +138,8 @@ export interface EditorActions {
   setCollapsed(id: NodeId, collapsed: boolean): void;
   setRenaming(id: NodeId | null): void;
   setEditingText(id: NodeId | null): void;
+  /** Records which part of the text being edited is selected. */
+  setTextSelection(selection: { start: number; end: number } | null): void;
   /** Starts point editing of a vector layer (which becomes the selection), changes which points are selected, or with null ends it. */
   setVectorEdit(edit: VectorEdit | null): void;
   /** Shows the handles of one of a layer's paints on the canvas (the layer becomes the selection), or with null hides them. */
@@ -265,6 +272,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       collapsed: {},
       renamingId: null,
       editingTextId: null,
+      textSelection: null,
       vectorEdit: null,
       paintEdit: null,
       snapping: options.snapping ?? true,
@@ -447,8 +455,25 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const state = get();
         const valid = id !== null && state.doc.nodes[id]?.type === 'TEXT' ? id : null;
         if (state.editingTextId !== valid) {
-          set({ editingTextId: valid, hoveredId: null, vectorEdit: valid === null ? state.vectorEdit : null, paintEdit: valid === null ? state.paintEdit : null });
+          set({
+            editingTextId: valid,
+            textSelection: null,
+            hoveredId: null,
+            vectorEdit: valid === null ? state.vectorEdit : null,
+            paintEdit: valid === null ? state.paintEdit : null,
+          });
         }
+      },
+
+      setTextSelection(selection) {
+        const state = get();
+        const next =
+          selection && state.editingTextId !== null
+            ? { start: Math.max(0, Math.min(selection.start, selection.end)), end: Math.max(0, selection.start, selection.end) }
+            : null;
+        const current = state.textSelection;
+        if (current === next || (current && next && current.start === next.start && current.end === next.end)) return;
+        set({ textSelection: next });
       },
 
       setVectorEdit(edit) {

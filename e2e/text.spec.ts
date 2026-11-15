@@ -118,6 +118,120 @@ test('lists: bullets and numbers in front of each paragraph, with the text set i
   expect(errors).toEqual([]);
 });
 
+test('part of a text layer in a style of its own: from the panel, with shortcuts, kept and edited on', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const box = await newFile(page);
+  const editor = page.getByRole('textbox', { name: 'Edit text' });
+  /** The stretches the editor shows, each with its text, weight, size and colour. */
+  const stretches = (): Promise<string[][]> =>
+    editor.locator('span').evaluateAll((spans) =>
+      spans.map((span) => {
+        const style = (span as HTMLElement).style;
+        return [span.textContent ?? '', style.fontWeight, style.fontSize, style.color];
+      }),
+    );
+  const region: [number, number, number, number] = [150, 150, 520, 270];
+
+  await page.keyboard.press('t');
+  await page.mouse.click(box.x + 200, box.y + 200);
+  await expect(editor).toBeFocused();
+  await page.keyboard.type('Hello bold world');
+
+  // Select "bold" with the keyboard; the Text section now speaks for that part.
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowRight');
+  await expect(page.getByText('Text (selected part)')).toBeVisible();
+
+  // A weight, a size and a colour from the panel go to that part only, and the text stays open.
+  await page.getByRole('combobox', { name: 'Font weight' }).selectOption('700');
+  await set(page, 'Font size', '40');
+  await set(page, 'Selected text colour hex', 'FF0000');
+  await expect(editor).toHaveCount(1);
+  expect((await stretches()).map((stretch) => stretch.slice(0, 3))).toEqual([
+    ['Hello ', '400', '16px'],
+    ['bold', '700', '40px'],
+    [' world', '400', '16px'],
+  ]);
+  expect((await stretches())[1]?.[3]).toBe('rgb(255, 0, 0)');
+  await expect(field(page, 'Font size')).toHaveValue('40');
+  await expect(page.getByRole('combobox', { name: 'Font weight' })).toHaveValue('700');
+
+  // Pressing on the layer in the layers panel ends the edit. The layer is as tall as its largest text.
+  await page.getByRole('tree', { name: 'Layers' }).getByRole('treeitem').first().click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByRole('tree', { name: 'Layers' }).getByRole('treeitem', { name: 'Hello bold world', exact: true })).toBeVisible();
+  await expect(field(page, 'Height')).toHaveValue('48');
+  // For the layer as a whole the size is mixed.
+  await expect(field(page, 'Font size')).toHaveValue('');
+  await expect(field(page, 'Font size')).toHaveAttribute('placeholder', 'Mixed');
+
+  // On the canvas the red ink is the large word, between the two plain ones.
+  const red = await ink(page, region);
+  expect(red.count).toBeGreaterThan(150);
+  expect(red.left).toBeGreaterThan(225);
+  expect(red.right).toBeLessThan(350);
+  expect(red.bottom - red.top).toBeGreaterThan(22);
+
+  // It is in the file.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await expect.poll(async () => (await ink(page, region)).count).toBe(red.count);
+  await page.getByRole('tree', { name: 'Layers' }).getByRole('treeitem').first().click();
+  await expect(field(page, 'Height')).toHaveValue('48');
+
+  // A size for the whole layer is the size of all its text; the word keeps its colour. Undo brings the large word back.
+  await set(page, 'Font size', '20');
+  await expect(field(page, 'Height')).toHaveValue('24');
+  expect((await ink(page, region)).count).toBeGreaterThan(40);
+  expect((await ink(page, region)).count).toBeLessThan(red.count);
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Height')).toHaveValue('48');
+
+  // Open the text again: the stretches are there. Ctrl+A, Ctrl+B makes all of it bold, and again takes that off.
+  await page.mouse.dblclick(box.x + 208, box.y + 215);
+  await expect(editor).toBeFocused();
+  expect((await stretches()).map((stretch) => stretch[0])).toEqual(['Hello ', 'bold', ' world']);
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+b');
+  expect((await stretches()).map((stretch) => stretch[1])).toEqual(['700', '700', '700']);
+  await page.keyboard.press('Control+b');
+  expect((await stretches()).map((stretch) => stretch[1])).toEqual(['400', '400', '400']);
+
+  // Typed at the end, new characters are plain like the word before them; typing can be undone and redone in place.
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('!');
+  expect((await stretches()).map((stretch) => stretch[0])).toEqual(['Hello ', 'bold', ' world!']);
+  await page.keyboard.press('Control+z');
+  expect((await stretches()).map((stretch) => stretch[0])).toEqual(['Hello ', 'bold', ' world']);
+  await page.keyboard.press('Control+Shift+z');
+  expect((await stretches()).map((stretch) => stretch[0])).toEqual(['Hello ', 'bold', ' world!']);
+  // Typed inside the styled word, they are part of it.
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('L');
+  expect((await stretches()).map((stretch) => stretch.slice(0, 3))).toEqual([
+    ['Hello ', '400', '16px'],
+    ['boLld', '400', '40px'],
+    [' world!', '400', '16px'],
+  ]);
+
+  // The colour of a part can be given back to the layer's fill.
+  await page.keyboard.press('Control+a');
+  await page.getByRole('button', { name: "Use the layer's fill for the selected text" }).click();
+  await expect(editor).toHaveCount(1);
+  expect((await stretches()).every((stretch) => stretch[3] !== 'rgb(255, 0, 0)')).toBe(true);
+  await editor.click();
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByRole('tree', { name: 'Layers' }).getByRole('treeitem', { name: 'Hello boLld world!', exact: true })).toBeVisible();
+  expect((await ink(page, region)).count).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test('justified text: wrapped lines reach both edges, the last line does not', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

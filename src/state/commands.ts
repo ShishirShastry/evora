@@ -37,6 +37,7 @@ import {
   pasteNodes,
   patchNodes,
   setTextStyle,
+  styleTextRange,
   rectCenter,
   rectsIntersect,
   reorderNodes,
@@ -49,6 +50,7 @@ import {
   type FlipAxis,
   type LayerPatch,
   type NodeId,
+  type RangeStylePatch,
   type Rect,
   type ReorderMode,
 } from '../core';
@@ -334,6 +336,25 @@ export function updateLayers(store: EditorStore, label: string, ids: readonly No
     // A text layer given a font, a size, fills and so on has them for all of its text, styled parts included.
     return setTextStyle(patchNodes(doc, patches), ids, patch);
   });
+}
+
+/**
+ * Gives text a font, a size, a weight and so on. While part of the text that
+ * is being edited is selected, only that part gets it; otherwise the layers
+ * do, as a whole. One undo step either way.
+ */
+export function styleText(store: EditorStore, label: string, ids: readonly NodeId[], patch: RangeStylePatch): void {
+  const state = store.getState();
+  const editing = state.editingTextId;
+  const selected = state.textSelection;
+  if (editing !== null && selected && selected.end > selected.start && ids.length === 1 && ids[0] === editing) {
+    state.apply(label, (doc) => styleTextRange(doc, editing, selected.start, selected.end, patch));
+    return;
+  }
+  // A colour for a whole layer is its fill, which has its own controls.
+  const { color: _color, ...whole } = patch;
+  void _color;
+  if (Object.keys(whole).length > 0) updateLayers(store, label, ids, whole);
 }
 
 // ------------------------------------------------------------------ arrange
@@ -738,7 +759,9 @@ export const COMMANDS: readonly Command[] = [
     run: ({ store, app }) => {
       if (app.cancelInteraction()) return;
       const state = store.getState();
-      if (state.tool !== 'move') state.setTool('move');
+      // Text that is being edited while the keyboard is elsewhere (in the properties panel) is finished first.
+      if (state.editingTextId !== null) state.setEditingText(null);
+      else if (state.tool !== 'move') state.setTool('move');
       else if (state.paintEdit) state.setPaintEdit(null);
       // Out of point editing one step at a time: first the points, then the editing itself.
       else if (state.vectorEdit) state.setVectorEdit(state.vectorEdit.vertices.length > 0 ? { id: state.vectorEdit.id, vertices: [] } : null);

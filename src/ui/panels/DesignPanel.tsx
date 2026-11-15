@@ -10,14 +10,17 @@ import {
   isPage,
   lineBox,
   lineEndpoints,
+  paintColor,
   patchNodes,
   resizeFromTopLeft,
   setLayerBox,
+  stylesBetween,
   TYPE_LABELS,
   type ArrowType,
   type BlendMode,
   type BooleanOperation,
   type BooleanOperationNode,
+  type CharacterStyle,
   type CornerRadii,
   type EllipseNode,
   type FrameNode,
@@ -25,6 +28,7 @@ import {
   type LayerPatch,
   type LineNode,
   type NodeId,
+  type RangeStylePatch,
   type StrokeAlign,
   type StrokeCap,
   type StrokeJoin,
@@ -38,7 +42,7 @@ import {
   type VerticalAlign,
 } from '../../core';
 import { availableFonts } from '../../engine/text/measure';
-import { getCommand, updateLayers, type Command } from '../../state/commands';
+import { getCommand, styleText, updateLayers, type Command } from '../../state/commands';
 import { ColorField } from '../components/ColorField';
 import { MIXED, NumberField, type Mixed } from '../components/Fields';
 import { Icon, type IconName } from '../components/Icon';
@@ -208,23 +212,48 @@ function ToggleGroup<T extends string>({
 /** Font and paragraph settings for the selected text layers. */
 function TextSection({ layers }: { layers: TextNode[] }) {
   const { store } = useEditorContext();
+  const editingId = useEditor((s) => s.editingTextId);
+  const textSelection = useEditor((s) => s.textSelection);
   const ids = layers.map((layer) => layer.id);
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
-  const family = shared(layers, (l) => (l as TextNode).fontFamily);
-  const weight = shared(layers, (l) => (l as TextNode).fontWeight);
+  // While part of the text being edited is selected, the font settings are those of that part and change only it.
+  const part = layers.length === 1 && layers[0]?.id === editingId && textSelection !== null && textSelection.end > textSelection.start ? textSelection : null;
+  const style = (label: string, patch: RangeStylePatch): void => styleText(store, label, ids, patch);
+  /** A font property over the text in question: its one value, or mixed where stretches of it differ. */
+  const font = <T,>(pick: (found: CharacterStyle) => T): T | Mixed => {
+    let value: T | undefined;
+    let first = true;
+    for (const layer of layers) {
+      for (const found of stylesBetween(layer, part ? part.start : 0, part ? part.end : layer.characters.length)) {
+        const next = pick(found);
+        if (first) value = next;
+        else if (next !== value) return MIXED;
+        first = false;
+      }
+    }
+    return value as T;
+  };
+  const family = font((s) => s.fontFamily);
+  const weight = font((s) => s.fontWeight);
   const lineHeight = shared(layers, (l) => (l as TextNode).lineHeight);
-  const fontSize = shared(layers, (l) => (l as TextNode).fontSize);
+  const fontSize = font((s) => s.fontSize);
+  const decoration = font((s) => s.textDecoration);
+  // The colour of the selected part: its own, or else what the layer's fill gives it.
+  const partStyles = part && layers[0] ? stylesBetween(layers[0], part.start, part.end) : [];
+  const ownColour = partStyles.find((found) => found.color !== null)?.color ?? null;
+  const layerFill = layers[0]?.fills.find((paint) => paint.visible);
+  const partColour = ownColour ?? (layerFill ? paintColor(layerFill) : BLACK);
   const fonts = availableFonts(family === MIXED ? undefined : family);
   const autoLine = lineHeight === null;
 
   return (
-    <Section title="Text">
+    <Section title={part ? 'Text (selected part)' : 'Text'}>
       <Row>
         <select
           aria-label="Font family"
           className="od-field flex-1"
           value={family}
-          onChange={(event) => set('Change font', { fontFamily: event.currentTarget.value })}
+          onChange={(event) => style('Change font', { fontFamily: event.currentTarget.value })}
         >
           {family === MIXED && <option value={MIXED}>Mixed</option>}
           {fonts.map((font) => (
@@ -239,7 +268,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
           aria-label="Font weight"
           className="od-field flex-1"
           value={weight}
-          onChange={(event) => set('Change font weight', { fontWeight: Number(event.currentTarget.value) })}
+          onChange={(event) => style('Change font weight', { fontWeight: Number(event.currentTarget.value) })}
         >
           {weight === MIXED && <option value={MIXED}>Mixed</option>}
           {FONT_WEIGHTS.map(([value, name]) => (
@@ -249,7 +278,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
           ))}
         </select>
         <div className="w-[76px] flex-none">
-          <NumberField label="Font size" min={1} max={2000} value={fontSize} onCommit={(value) => set('Change font size', { fontSize: value })} />
+          <NumberField label="Font size" min={1} max={2000} value={fontSize} onCommit={(value) => style('Change font size', { fontSize: value })} />
         </div>
       </Row>
       <Row>
@@ -275,8 +304,8 @@ function TextSection({ layers }: { layers: TextNode[] }) {
           prefix="Space"
           min={-200}
           max={2000}
-          value={shared(layers, (l) => (l as TextNode).letterSpacing)}
-          onCommit={(value) => set('Change letter spacing', { letterSpacing: value })}
+          value={font((s) => s.letterSpacing)}
+          onCommit={(value) => style('Change letter spacing', { letterSpacing: value })}
         />
       </Row>
       <Row>
@@ -344,21 +373,36 @@ function TextSection({ layers }: { layers: TextNode[] }) {
         <select
           aria-label="Text decoration"
           className="od-field flex-1"
-          value={shared(layers, (l) => (l as TextNode).textDecoration)}
-          onChange={(event) => set('Change text decoration', { textDecoration: event.currentTarget.value as TextDecoration })}
+          value={decoration}
+          onChange={(event) => style('Change text decoration', { textDecoration: event.currentTarget.value as TextDecoration })}
         >
-          {shared(layers, (l) => (l as TextNode).textDecoration) === MIXED && <option value={MIXED}>Mixed</option>}
+          {decoration === MIXED && <option value={MIXED}>Mixed</option>}
           <option value="NONE">No decoration</option>
           <option value="UNDERLINE">Underline</option>
           <option value="STRIKETHROUGH">Strikethrough</option>
         </select>
       </Row>
+      {part && (
+        <Row>
+          <ColorField label="Selected text colour" value={partColour} onChange={(color, phase) => phase === 'commit' && style('Change text colour', { color })} />
+          <button
+            type="button"
+            className="od-icon-button !h-[26px] !w-14 text-[11px]"
+            aria-label="Use the layer's fill for the selected text"
+            title="Use the layer's fill for the selected text"
+            disabled={ownColour === null}
+            onClick={() => style('Change text colour', { color: null })}
+          >
+            Reset
+          </button>
+        </Row>
+      )}
       <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
           className="accent-[var(--od-accent)]"
-          checked={layers.every((layer) => layer.italic)}
-          onChange={(event) => set('Change italic', { italic: event.currentTarget.checked })}
+          checked={font((s) => s.italic) === true}
+          onChange={(event) => style('Change italic', { italic: event.currentTarget.checked })}
         />
         Italic
       </label>
@@ -416,7 +460,7 @@ export function DesignPanel() {
 
   if (layers.length === 0) {
     return (
-      <aside aria-label="Design properties" className="h-full overflow-y-auto">
+      <aside aria-label="Design properties" className="h-full overflow-y-auto" data-text-tools>
         <PageProperties />
       </aside>
     );
@@ -484,7 +528,7 @@ export function DesignPanel() {
   const title = layers.length === 1 ? TYPE_LABELS[first.type] : `${layers.length} layers`;
 
   return (
-    <aside aria-label="Design properties" className="h-full overflow-y-auto">
+    <aside aria-label="Design properties" className="h-full overflow-y-auto" data-text-tools>
       <div className="flex h-9 items-center border-b border-line px-3 font-medium">{title}</div>
       <ArrangeBar />
       <BooleanBar />

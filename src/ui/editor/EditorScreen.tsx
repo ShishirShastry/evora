@@ -245,6 +245,11 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       if ((event.code === 'Enter' || event.code === 'NumpadEnter') && onControl(event.target)) return;
       const command = commandForKey(event);
       if (!command) return;
+      // While text is being edited and the keyboard is in the properties panel, only Escape acts on the design.
+      if (store.getState().editingTextId !== null && command.id !== 'edit.deselect') {
+        if (event.ctrlKey || event.metaKey || event.altKey) event.preventDefault();
+        return;
+      }
       // Ctrl+V is left to the browser so that it raises a paste event, which
       // is the only way to see whether the clipboard holds an image.
       if (command.id === 'edit.paste') return;

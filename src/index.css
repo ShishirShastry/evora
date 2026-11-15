@@ -151,3 +151,8 @@ select {
   background: var(--od-accent);
   filter: brightness(1.08);
 }
+
+/* The selected part of a text layer, while the keyboard focus is in the properties panel. */
+::highlight(od-text-selection) {
+  background-color: rgba(25, 194, 179, 0.4);
+}
