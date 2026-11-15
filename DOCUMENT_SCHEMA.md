@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **12**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups and version 12 adjustments on image paints (also a Phase 2 item finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **13**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints and version 13 justified text, lists and styles on parts of a text layer (Phase 2 items finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -222,15 +222,38 @@ interface TextNode extends LayerBase {
   italic: boolean;
   lineHeight: number | null; // pixels; null = automatic (1.2 × fontSize, rounded)
   letterSpacing: number;     // pixels added after each character
-  textAlign: 'LEFT' | 'CENTER' | 'RIGHT';
+  textAlign: 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED';   // JUSTIFIED: version 13
   verticalAlign: 'TOP' | 'MIDDLE' | 'BOTTOM';
   textAutoResize: 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'NONE';
   textDecoration: 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
   textCase: 'ORIGINAL' | 'UPPER' | 'LOWER' | 'TITLE';
+  listType: 'NONE' | 'BULLETED' | 'NUMBERED';   // version 13
+  styleRanges: TextStyleRange[];                // version 13
+}
+
+// Version 13. A stretch of the characters, from start up to but not including end (string indices,
+// that is UTF-16 code units), with what it has that differs from the layer. An absent key means
+// "as the layer has it".
+interface TextStyleRange {
+  start: number;
+  end: number;
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: number;
+  italic?: boolean;
+  letterSpacing?: number;
+  textDecoration?: 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
+  color?: RGB;               // a solid colour for these glyphs, in place of the layer's fills
 }
 ```
 
-**Text.** One style applies to the whole layer; styling a range of characters differently is not part of version 3. `textAutoResize` says which dimensions follow the content: both (auto width, never wraps), the height only (wraps at the layer's width), or neither (fixed box). The editor refits those dimensions after every edit (`fitTextLayers`), keeping the edge the text is aligned to in place, so the stored `width` and `height` are always the laid-out size as measured on the machine that last edited the text. A machine without the font falls back to another and may lay the text out differently until it is next edited.
+**Styled ranges.** The layer's own font properties are the style of all of its text; `styleRanges` lists the parts that differ. The list is always in one form: in order, not overlapping, not empty, inside the text, each range changing at least one thing, no two neighbours alike, and keys in the order shown above. Every operation that changes `characters` moves the ranges with their characters (`replaceText`, `setTextCharacters`); characters typed in take the style of the one before them. Giving the whole layer a value for a property (`setTextStyle`) removes that property from every range, and new fills remove the ranges' colours. A line is as tall as its tallest run unless `lineHeight` is set, and runs of different sizes share a baseline.
+
+**Lists.** With `listType` other than `NONE` every paragraph is an item: a bullet or the paragraph's number is drawn in front of its first line and all of its lines are set in by the same amount (one and a half times the font size, or more if the widest number needs it). A marker is drawn in the style of the first character of its item. The list is a property of the whole layer; there are no nested levels.
+
+**Justified text.** `JUSTIFIED` spreads the words of every line that was cut short by wrapping across the layer's width, by widening the gaps between words. The last line of each paragraph, and text that sets its own width, are left as they are.
+
+**Text.** A layer has one style of its own, with ranges for the parts that differ (see above). `textAutoResize` says which dimensions follow the content: both (auto width, never wraps), the height only (wraps at the layer's width), or neither (fixed box). The editor refits those dimensions after every edit (`fitTextLayers`), keeping the edge the text is aligned to in place, so the stored `width` and `height` are always the laid-out size as measured on the machine that last edited the text. A machine without the font falls back to another and may lay the text out differently until it is next edited.
 
 ```ts
 interface VectorNode extends LayerBase {
@@ -409,6 +432,7 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 8 | `pointCount` is an integer ≥ 3; `innerRadius` is within 0..1. | Clamp. |
 | 9 | Every segment of a vector network starts and ends at an existing point of that network; coordinates and tangents are finite. | Drop segments that point nowhere; reset bad numbers to 0. |
 | 10 | A vector layer's box is the bounding box of its curves. | Refit the box, without moving the curves on the page. |
+| 11 | A text layer's `styleRanges` are in order, do not overlap, are not empty, lie inside `characters`, each change something, and no two neighbours are alike; their values are within the limits of the layer's own font properties. | Drop bad values (that part of the text falls back to the layer's style), then cut, clamp, order and join the ranges. |
 
 Repair never silently discards user content except under rule 7, and every repair is surfaced to the user when a file is opened.
 
@@ -444,6 +468,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // 11 -> 12: every image paint (in fills and strokes) gets exposure 0, contrast 0 and saturation 0,
   // placed after tileScale, where a version 12 file has them.
   11: addImageAdjustments,
+  // 12 -> 13: every text layer gets listType 'NONE' and styleRanges [].
+  12: addTextListAndRanges,
 };
 ```
 
@@ -460,6 +486,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 9 | 10 | Masks (`isMask` on every layer) | `src/masks.test.ts` ("survives flattening, validation and older files") |
 | 10 | 11 | `BOOLEAN_OPERATION` layer type added | `src/boolean.test.ts` ("opens a version 10 file") |
 | 11 | 12 | Image adjustments (`exposure`, `contrast`, `saturation` on image paints) | `src/imageedit.test.ts` ("are kept in range in a file, and are zero in a file from before they existed") |
+| 12 | 13 | Text: `JUSTIFIED` alignment, `listType`, `styleRanges` | `src/richtext.test.ts` ("opens a version 12 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -488,7 +515,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | Per-range text styles, `flipX/flipY`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
+| 2 | `flipX/flipY`. (Done: per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |

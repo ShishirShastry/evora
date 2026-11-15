@@ -1,5 +1,6 @@
 /**
- * OPEN DESIGN document schema, version 12 (adds image adjustments; version 11 added boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
+ * OPEN DESIGN document schema, version 13 (adds justified text, lists and styles on parts of a text layer;
+ * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
@@ -7,7 +8,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -347,22 +348,51 @@ export interface StarNode extends LayerBase {
   innerRadius: number;
 }
 
-export type TextAlign = 'LEFT' | 'CENTER' | 'RIGHT';
+export type TextAlign = 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED';
 export type VerticalAlign = 'TOP' | 'MIDDLE' | 'BOTTOM';
 /** Which of the layer's dimensions follow its content: both, the height only, or neither. */
 export type TextAutoResize = 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'NONE';
 export type TextDecoration = 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
 export type TextCase = 'ORIGINAL' | 'UPPER' | 'LOWER' | 'TITLE';
+/** Whether the paragraphs of a text layer are the items of a list, and what stands in front of each. */
+export type TextListType = 'NONE' | 'BULLETED' | 'NUMBERED';
 
-export const TEXT_ALIGNS: readonly TextAlign[] = ['LEFT', 'CENTER', 'RIGHT'];
+export const TEXT_ALIGNS: readonly TextAlign[] = ['LEFT', 'CENTER', 'RIGHT', 'JUSTIFIED'];
+export const TEXT_LIST_TYPES: readonly TextListType[] = ['NONE', 'BULLETED', 'NUMBERED'];
 export const VERTICAL_ALIGNS: readonly VerticalAlign[] = ['TOP', 'MIDDLE', 'BOTTOM'];
 export const TEXT_AUTO_RESIZES: readonly TextAutoResize[] = ['WIDTH_AND_HEIGHT', 'HEIGHT', 'NONE'];
 export const TEXT_DECORATIONS: readonly TextDecoration[] = ['NONE', 'UNDERLINE', 'STRIKETHROUGH'];
 export const TEXT_CASES: readonly TextCase[] = ['ORIGINAL', 'UPPER', 'LOWER', 'TITLE'];
 
 /**
- * A text layer. One style applies to the whole layer; per-range styling is not
- * part of this version. Its fills colour the glyphs.
+ * What part of a text layer can have that differs from the rest of it. A key
+ * that is absent means "as the layer has it".
+ */
+export interface TextRangeStyle {
+  fontFamily?: string;
+  fontSize?: number;
+  fontWeight?: number;
+  italic?: boolean;
+  letterSpacing?: number;
+  textDecoration?: TextDecoration;
+  /** A solid colour for the glyphs, in place of the layer's fills. */
+  color?: RGB;
+}
+
+/**
+ * A stretch of a text layer's characters with a style of its own, from
+ * `start` up to but not including `end`, counted as string indices are
+ * (UTF-16 code units).
+ */
+export interface TextStyleRange extends TextRangeStyle {
+  start: number;
+  end: number;
+}
+
+/**
+ * A text layer. Its font properties are the style of all of its text, except
+ * where a range in `styleRanges` changes some of them. Its fills colour the
+ * glyphs that have no colour of their own.
  */
 export interface TextNode extends LayerBase {
   type: 'TEXT';
@@ -381,6 +411,14 @@ export interface TextNode extends LayerBase {
   textAutoResize: TextAutoResize;
   textDecoration: TextDecoration;
   textCase: TextCase;
+  /** A list makes every paragraph an item, with a bullet or its number in front and its lines set in. */
+  listType: TextListType;
+  /**
+   * The parts of the text that differ from the layer's own style: in order,
+   * not overlapping, not empty, inside the text, each changing something,
+   * and no two neighbours alike.
+   */
+  styleRanges: TextStyleRange[];
 }
 
 /** A point of a vector layer, in the layer's own space: (0, 0) is the top-left corner of its box. */

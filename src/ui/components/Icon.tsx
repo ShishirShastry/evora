@@ -38,6 +38,7 @@ export type IconName =
   | 'textLeft'
   | 'textCenter'
   | 'textRight'
+  | 'textJustify'
   | 'textTop'
   | 'textMiddle'
   | 'textBottom'
@@ -114,6 +115,7 @@ const PATHS: Record<IconName, ReactNode> = {
   textLeft: <path {...s} d="M2.5 4h11M2.5 8h7M2.5 12h9" />,
   textCenter: <path {...s} d="M2.5 4h11M4.5 8h7M3.5 12h9" />,
   textRight: <path {...s} d="M2.5 4h11M6.5 8h7M4.5 12h9" />,
+  textJustify: <path {...s} d="M2.5 4h11M2.5 8h11M2.5 12h11" />,
   textTop: <path {...s} d="M2.5 2.5h11M8 13.5V6M5.5 8.5L8 6l2.5 2.5" />,
   textMiddle: <path {...s} d="M2.5 8h11M8 2v3.5M6.3 4L8 5.5 9.7 4M8 14v-3.5M6.3 12L8 10.5 9.7 12" />,
   textBottom: <path {...s} d="M2.5 13.5h11M8 2.5V10M5.5 7.5L8 10l2.5-2.5" />,

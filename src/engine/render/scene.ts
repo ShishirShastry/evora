@@ -25,6 +25,7 @@ import {
   type StrokeJoin,
   type TextMeasurer,
   type TextNode,
+  type TextRun,
 } from '../../core';
 import type { ImageSource } from '../images/imageCache';
 import { applyTextStyle } from '../text/measure';
@@ -192,29 +193,60 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.shadowOffsetY = (shadow.offsetX * sin + shadow.offsetY * cos) * scale;
   };
 
-  const textLines = (target: Ctx, node: TextNode, draw: (text: string, x: number, baseline: number, width: number) => void): void => {
+  /**
+   * Calls `draw` for the runs of a text layer that are wanted, list markers
+   * included, with the font of each set on the context.
+   */
+  const textRuns = (target: Ctx, node: TextNode, wanted: (run: TextRun) => boolean, draw: (run: TextRun, baseline: number) => void): void => {
     const layout = layoutText(node, measurer);
-    applyTextStyle(target, node);
     target.textBaseline = 'alphabetic';
     target.textAlign = 'left';
-    for (const line of layout.lines) if (line.text !== '') draw(line.text, line.x, line.baseline, line.width);
+    let style: TextRun['style'] | null = null;
+    for (const line of layout.lines) {
+      for (const run of line.marker ? [line.marker, ...line.runs] : line.runs) {
+        if (run.text === '' || !wanted(run)) continue;
+        if (run.style !== style) {
+          applyTextStyle(target, run.style);
+          style = run.style;
+        }
+        draw(run, line.baseline);
+      }
+    }
   };
 
-  /** Paints a text layer: its fills colour the glyphs, its strokes outline them. */
+  /** Fills the glyphs of one run, and its underline or strikethrough, with whatever the context is set to fill with. */
+  const fillRun = (target: Ctx, run: TextRun, baseline: number): void => {
+    target.fillText(run.text, run.x, baseline);
+    const size = run.style.fontSize;
+    const offset = run.style.textDecoration === 'UNDERLINE' ? size * 0.12 : run.style.textDecoration === 'STRIKETHROUGH' ? -size * 0.3 : null;
+    if (offset !== null) target.fillRect(run.x, baseline + offset, run.width, Math.max(1, size / 16));
+  };
+
+  /** Paints a text layer: its fills colour the glyphs, except those with a colour of their own; its strokes outline them. */
   const drawText = (target: Ctx, node: TextNode): void => {
-    const thickness = Math.max(1, node.fontSize / 16);
-    const decorationOffset =
-      node.textDecoration === 'UNDERLINE' ? node.fontSize * 0.12 : node.textDecoration === 'STRIKETHROUGH' ? -node.fontSize * 0.3 : null;
     const alpha = target.globalAlpha;
     for (const paint of node.fills) {
       if (!paint.visible || paint.opacity <= 0) continue;
       target.globalAlpha = alpha * paint.opacity;
       target.fillStyle = paintStyle(target, paint, node.width, node.height);
-      textLines(target, node, (text, x, baseline, width) => {
-        target.fillText(text, x, baseline);
-        if (decorationOffset !== null) target.fillRect(x, baseline + decorationOffset, width, thickness);
-      });
+      textRuns(
+        target,
+        node,
+        (run) => run.style.color === null,
+        (run, baseline) => fillRun(target, run, baseline),
+      );
     }
+    // Parts with a colour of their own are painted in it once, whatever the layer's fills are.
+    target.globalAlpha = alpha;
+    textRuns(
+      target,
+      node,
+      (run) => run.style.color !== null,
+      (run, baseline) => {
+        if (run.style.color) target.fillStyle = rgbToCss(run.style.color);
+        fillRun(target, run, baseline);
+      },
+    );
     if (node.strokeWeight > 0) {
       for (const paint of node.strokes) {
         if (!paint.visible || paint.opacity <= 0) continue;
@@ -223,7 +255,12 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
         target.lineWidth = node.strokeWeight;
         target.lineJoin = 'round';
         target.setLineDash([]);
-        textLines(target, node, (text, x, baseline) => target.strokeText(text, x, baseline));
+        textRuns(
+          target,
+          node,
+          () => true,
+          (run, baseline) => target.strokeText(run.text, run.x, baseline),
+        );
       }
     }
     target.globalAlpha = alpha;
@@ -301,7 +338,12 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.fillStyle = '#000';
     target.strokeStyle = '#000';
     if (node.type === 'TEXT') {
-      textLines(target, node, (text, x, baseline) => target.fillText(text, x, baseline));
+      textRuns(
+        target,
+        node,
+        () => true,
+        (run, baseline) => target.fillText(run.text, run.x, baseline),
+      );
     } else {
       const filled = node.type !== 'LINE' && hasVisiblePaint(node.fills);
       const stroked = node.strokeWeight > 0 && hasVisiblePaint(node.strokes);

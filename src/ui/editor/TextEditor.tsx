@@ -1,17 +1,21 @@
 import { useLayoutEffect, useRef } from 'react';
 import {
+  approximateMeasurer,
   deleteNodes,
   fontString,
   getWorldMatrix,
   isText,
+  layoutText,
   paintColor,
   patchNode,
   resolveLineHeight,
+  setTextCharacters,
   textLayerName,
   type Document,
   type NodeId,
 } from '../../core';
 import { rgbToCss } from '../../engine/render/paint';
+import { getBrowserMeasurer } from '../../engine/text/measure';
 import { useEditor, useEditorContext } from './EditorContext';
 
 interface TextEditorProps {
@@ -74,7 +78,8 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
         current.created || !isText(original) || original.name === textLayerName(original.characters) || /^Text \d+$/.test(original.name);
       if (namedByContent) {
         const name = textLayerName(edited.characters);
-        state.updateGesture(() => patchNode(current.base, id, { characters: edited.characters, name }));
+        const now = state.doc;
+        state.updateGesture(() => patchNode(now, id, { name }));
       }
       store.getState().commitGesture(current.created ? 'Create text' : 'Edit text');
     }
@@ -89,6 +94,8 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
   const lineHeight = resolveLineHeight(node);
   const autoWidth = node.textAutoResize === 'WIDTH_AND_HEIGHT';
   const fill = node.fills.find((paint) => paint.visible);
+  // A list's text is set in from the left to make room for its markers, which are not shown while typing.
+  const indent = layoutText(node, getBrowserMeasurer() ?? approximateMeasurer).indent;
 
   return (
     <textarea
@@ -110,7 +117,9 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
         font: fontString(node),
         lineHeight: `${lineHeight}px`,
         letterSpacing: `${node.letterSpacing}px`,
-        textAlign: node.textAlign.toLowerCase() as 'left' | 'center' | 'right',
+        textAlign: node.textAlign === 'JUSTIFIED' ? 'justify' : (node.textAlign.toLowerCase() as 'left' | 'center' | 'right'),
+        boxSizing: 'border-box',
+        paddingLeft: indent,
         textTransform: TEXT_TRANSFORM[node.textCase],
         textDecoration: node.textDecoration === 'UNDERLINE' ? 'underline' : node.textDecoration === 'STRIKETHROUGH' ? 'line-through' : 'none',
         // A gradient fill is shown in its first colour while typing.
@@ -120,7 +129,9 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
         overflow: 'hidden',
         resize: 'none',
         border: 0,
-        padding: 0,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
         margin: 0,
         background: 'transparent',
         outline: '1px solid var(--od-accent)',
@@ -137,7 +148,8 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
           current.created = false;
         }
         const base = current.base;
-        store.getState().updateGesture(() => patchNode(base, id, { characters }));
+        // Styled parts stay on the characters they were on.
+        store.getState().updateGesture(() => setTextCharacters(base, id, characters));
       }}
       onBlur={finish}
       onKeyDown={(event) => {

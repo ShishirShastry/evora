@@ -141,6 +141,18 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 12, document: { ...body, nodes: upgraded } };
   },
+  // Version 13 adds justified text, lists and styles on parts of a text layer.
+  // Older text is not a list and is in one style throughout.
+  12: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type === 'TEXT' ? { listType: 'NONE', styleRanges: [], ...node } : node;
+    }
+    return { ...file, schemaVersion: 13, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

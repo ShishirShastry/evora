@@ -29,6 +29,7 @@ import {
   type StrokeCap,
   type StrokeJoin,
   type TextAlign,
+  type TextListType,
   type TextAutoResize,
   type TextCase,
   type TextDecoration,
@@ -287,6 +288,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
             { value: 'LEFT', label: 'Align text left', icon: 'textLeft' },
             { value: 'CENTER', label: 'Align text centre', icon: 'textCenter' },
             { value: 'RIGHT', label: 'Align text right', icon: 'textRight' },
+            { value: 'JUSTIFIED', label: 'Justify text', icon: 'textJustify' },
           ]}
         />
         <ToggleGroup<VerticalAlign>
@@ -299,6 +301,19 @@ function TextSection({ layers }: { layers: TextNode[] }) {
             { value: 'BOTTOM', label: 'Align text bottom', icon: 'textBottom' },
           ]}
         />
+      </Row>
+      <Row>
+        <select
+          aria-label="List"
+          className="od-field flex-1"
+          value={shared(layers, (l) => (l as TextNode).listType)}
+          onChange={(event) => set('Change list', { listType: event.currentTarget.value as TextListType })}
+        >
+          {shared(layers, (l) => (l as TextNode).listType) === MIXED && <option value={MIXED}>Mixed</option>}
+          <option value="NONE">No list</option>
+          <option value="BULLETED">Bulleted list</option>
+          <option value="NUMBERED">Numbered list</option>
+        </select>
       </Row>
       <Row>
         <select

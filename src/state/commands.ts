@@ -36,6 +36,7 @@ import {
   moveNodesBy,
   pasteNodes,
   patchNodes,
+  setTextStyle,
   rectCenter,
   rectsIntersect,
   reorderNodes,
@@ -327,9 +328,12 @@ export function renameNode(store: EditorStore, id: NodeId, name: string): void {
 
 /** Applies the same property patch to several layers as one undo step. */
 export function updateLayers(store: EditorStore, label: string, ids: readonly NodeId[], patch: LayerPatch): void {
-  const patches: Record<NodeId, LayerPatch> = {};
-  for (const id of ids) patches[id] = patch;
-  store.getState().apply(label, (doc) => patchNodes(doc, patches));
+  store.getState().apply(label, (doc) => {
+    const patches: Record<NodeId, LayerPatch> = {};
+    for (const id of ids) if (doc.nodes[id]?.type !== 'TEXT') patches[id] = patch;
+    // A text layer given a font, a size, fills and so on has them for all of its text, styled parts included.
+    return setTextStyle(patchNodes(doc, patches), ids, patch);
+  });
 }
 
 // ------------------------------------------------------------------ arrange

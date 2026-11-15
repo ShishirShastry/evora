@@ -222,6 +222,8 @@ export function createLayer(
         verticalAlign: 'TOP',
         textAutoResize: 'WIDTH_AND_HEIGHT',
         textDecoration: 'NONE',
+        listType: 'NONE',
+        styleRanges: [],
         textCase: 'ORIGINAL',
       };
       break;

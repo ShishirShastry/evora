@@ -1,0 +1,168 @@
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+/**
+ * Text beyond one plain style, in the real browser: lists, justified
+ * alignment, and parts of a layer in a style of their own. Text is made red
+ * so that its glyphs can be found on the design canvas's pixels.
+ */
+
+const canvas = (page: Page): Locator => page.getByRole('application', { name: 'Design canvas' });
+const field = (page: Page, label: string): Locator => page.getByRole('textbox', { name: label, exact: true });
+const select = (page: Page, label: string): Locator => page.getByRole('combobox', { name: label, exact: true });
+
+async function set(page: Page, label: string, value: string): Promise<void> {
+  await field(page, label).fill(value);
+  await field(page, label).press('Enter');
+}
+
+interface Ink {
+  count: number;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** Where the pixels of one colour family are inside a region of the design canvas. */
+async function ink(page: Page, region: [number, number, number, number], colour: 'red' | 'blue' = 'red'): Promise<Ink> {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  return page.evaluate(
+    ([x0, y0, x1, y1, which]) => {
+      const element = document.querySelector('canvas');
+      const ctx = element?.getContext('2d');
+      if (!element || !ctx) throw new Error('design canvas not found');
+      const width = (x1 as number) - (x0 as number);
+      const height = (y1 as number) - (y0 as number);
+      const data = ctx.getImageData(x0 as number, y0 as number, width, height).data;
+      const found = { count: 0, left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          const [r, g, b] = [data[i] as number, data[i + 1] as number, data[i + 2] as number];
+          const hit = which === 'red' ? r > 170 && g < 80 && b < 80 : b > 170 && r < 80 && g < 80;
+          if (!hit) continue;
+          found.count++;
+          found.left = Math.min(found.left, (x0 as number) + x);
+          found.right = Math.max(found.right, (x0 as number) + x);
+          found.top = Math.min(found.top, (y0 as number) + y);
+          found.bottom = Math.max(found.bottom, (y0 as number) + y);
+        }
+      }
+      return found;
+    },
+    [...region, colour] as [number, number, number, number, string],
+  );
+}
+
+async function newFile(page: Page): Promise<{ x: number; y: number }> {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New design file' }).click();
+  await expect(canvas(page)).toBeVisible();
+  await canvas(page).focus();
+  const box = await canvas(page).boundingBox();
+  if (!box) throw new Error('canvas not visible');
+  return box;
+}
+
+test('lists: bullets and numbers in front of each paragraph, with the text set in', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const box = await newFile(page);
+
+  // Two paragraphs of text that sets its own width, made red.
+  await page.keyboard.press('t');
+  await page.mouse.click(box.x + 200, box.y + 200);
+  await page.keyboard.type('one');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two');
+  await page.keyboard.press('Escape');
+  await set(page, 'Fill 1 colour hex', 'FF0000');
+  await expect(select(page, 'List')).toHaveValue('NONE');
+  const region: [number, number, number, number] = [150, 170, 330, 250];
+  const plain = await ink(page, region);
+  expect(plain.count).toBeGreaterThan(40);
+  const width = Number(await field(page, 'Width').inputValue());
+  const left = Number(await field(page, 'X position').inputValue());
+
+  // A bulleted list: the layer is 24 wider (one and a half times the 16px font) and stays where it is;
+  // the leftmost ink is now a bullet, some way in, and there is more ink than before.
+  await select(page, 'List').selectOption('BULLETED');
+  await expect(field(page, 'Width')).toHaveValue(String(width + 24));
+  await expect(field(page, 'X position')).toHaveValue(String(left));
+  const bulleted = await ink(page, region);
+  expect(bulleted.left).toBeGreaterThanOrEqual(plain.left + 6);
+  expect(bulleted.left).toBeLessThanOrEqual(plain.left + 16);
+  expect(bulleted.right).toBeGreaterThanOrEqual(plain.right + 22);
+  expect(bulleted.count).toBeGreaterThan(plain.count + 8);
+  // Nothing is drawn between the bullets and the text.
+  expect((await ink(page, [plain.left + 18, 170, plain.left + 23, 250])).count).toBe(0);
+
+  // A numbered list: the numbers start further left than the bullets did.
+  await select(page, 'List').selectOption('NUMBERED');
+  const numbered = await ink(page, region);
+  expect(numbered.left).toBeLessThan(bulleted.left);
+  expect(numbered.left).toBeGreaterThanOrEqual(plain.left);
+  expect(numbered.right).toBe(bulleted.right);
+  expect(numbered.count).toBeGreaterThan(bulleted.count);
+
+  // It is part of the file: there after a reload, and one undo takes it off again.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await expect.poll(async () => (await ink(page, region)).count).toBe(numbered.count);
+  await page.getByRole('tree', { name: 'Layers' }).getByRole('treeitem').first().click();
+  await expect(select(page, 'List')).toHaveValue('NUMBERED');
+  await select(page, 'List').selectOption('NONE');
+  await expect(field(page, 'Width')).toHaveValue(String(width));
+  expect((await ink(page, region)).count).toBe(plain.count);
+  expect(errors).toEqual([]);
+});
+
+test('justified text: wrapped lines reach both edges, the last line does not', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const box = await newFile(page);
+
+  // A box 200 wide: three of these words fit on a line, the fourth wraps.
+  await page.keyboard.press('t');
+  await page.mouse.move(box.x + 200, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 400, box.y + 360, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.type('mmmm mmmm mmmm mmmm');
+  await page.keyboard.press('Escape');
+  await set(page, 'Fill 1 colour hex', 'FF0000');
+  await expect(field(page, 'Width')).toHaveValue('200');
+  const all = await ink(page, [190, 290, 420, 380]);
+  expect(all.count).toBeGreaterThan(100);
+  const lineHeight = (all.bottom - all.top + 1) / 2;
+  const first: [number, number, number, number] = [190, all.top - 2, 420, Math.round(all.top + lineHeight - 2)];
+  const second: [number, number, number, number] = [190, Math.round(all.top + lineHeight + 2), 420, all.bottom + 2];
+
+  // Aligned left, the first line stops well short of the right edge.
+  const ragged = await ink(page, first);
+  const lastLine = await ink(page, second);
+  expect(ragged.right).toBeLessThan(385);
+  expect(lastLine.right).toBeLessThan(270);
+
+  // Justified, it reaches the edge; its left end and the last line stay where they were.
+  await page.getByRole('radio', { name: 'Justify text' }).click();
+  const justified = await ink(page, first);
+  expect(justified.right).toBeGreaterThanOrEqual(396);
+  expect(justified.right).toBeLessThanOrEqual(401);
+  expect(justified.left).toBe(ragged.left);
+  // The same three words, so about the same ink (their glyphs now fall on other fractions of a pixel).
+  expect(Math.abs(justified.count - ragged.count)).toBeLessThan(ragged.count * 0.15);
+  expect(await ink(page, second)).toEqual(lastLine);
+
+  // Kept across a reload; undone with one step.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await expect.poll(async () => (await ink(page, first)).right).toBe(justified.right);
+  await page.getByRole('tree', { name: 'Layers' }).getByRole('treeitem').first().click();
+  await expect(page.getByRole('radio', { name: 'Justify text' })).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('radio', { name: 'Align text left' }).click();
+  expect((await ink(page, first)).right).toBe(ragged.right);
+  expect(errors).toEqual([]);
+});

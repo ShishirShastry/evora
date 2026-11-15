@@ -19,6 +19,7 @@ import {
   TEXT_AUTO_RESIZES,
   TEXT_CASES,
   TEXT_DECORATIONS,
+  TEXT_LIST_TYPES,
   VERTICAL_ALIGNS,
   WINDING_RULES,
   type AssetInfo,
@@ -37,11 +38,15 @@ import {
   type Paint,
   type RGB,
   type StrokeAlign,
+  type TextStyleRange,
   type VectorNetwork,
   type VectorSegment,
 } from './schema';
 
 type Raw = Record<string, unknown>;
+
+/** Imported late in the file's own order only to keep the schema imports together. */
+import { normalizeRanges } from '../text/ranges';
 
 export interface RepairResult {
   doc: Document;
@@ -67,6 +72,32 @@ const BLACK_RGB: RGB = { r: 0, g: 0, b: 0 };
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+/**
+ * The styled ranges of a text layer. A value that is not what it should be
+ * is left out, so that part of the text falls back to the layer's own style;
+ * the ranges are then put into their one stored form.
+ */
+function styleRanges(value: unknown, length: number): TextStyleRange[] {
+  const ranges: TextStyleRange[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!isObject(item)) continue;
+      const number = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+      if (!number(item.start) || !number(item.end)) continue;
+      const range: TextStyleRange = { start: item.start, end: item.end };
+      if (typeof item.fontFamily === 'string' && item.fontFamily.trim()) range.fontFamily = item.fontFamily;
+      if (number(item.fontSize)) range.fontSize = finite(item.fontSize, 12, 1, 2000);
+      if (number(item.fontWeight)) range.fontWeight = Math.round(finite(item.fontWeight, 400, 100, 900) / 100) * 100;
+      if (typeof item.italic === 'boolean') range.italic = item.italic;
+      if (number(item.letterSpacing)) range.letterSpacing = finite(item.letterSpacing, 0, -200, 2000);
+      if (TEXT_DECORATIONS.includes(item.textDecoration as (typeof TEXT_DECORATIONS)[number])) range.textDecoration = item.textDecoration as TextStyleRange['textDecoration'];
+      if (isObject(item.color)) range.color = rgb(item.color, BLACK_RGB);
+      ranges.push(range);
+    }
+  }
+  return normalizeRanges(ranges, length);
 }
 
 function unitPoint(value: unknown, fallback: { x: number; y: number }): { x: number; y: number } {
@@ -330,6 +361,8 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.textAutoResize = oneOf(raw.textAutoResize, TEXT_AUTO_RESIZES, 'WIDTH_AND_HEIGHT');
     layer.textDecoration = oneOf(raw.textDecoration, TEXT_DECORATIONS, 'NONE');
     layer.textCase = oneOf(raw.textCase, TEXT_CASES, 'ORIGINAL');
+    layer.listType = oneOf(raw.listType, TEXT_LIST_TYPES, 'NONE');
+    layer.styleRanges = styleRanges(raw.styleRanges, layer.characters.length);
   } else if (layer.type === 'VECTOR') {
     layer.network = vectorNetwork(raw.network);
     layer.windingRule = oneOf(raw.windingRule, WINDING_RULES, 'NONZERO');

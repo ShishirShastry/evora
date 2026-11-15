@@ -25,6 +25,7 @@ export * from './ops/pages';
 export * from './ops/clipboard';
 export * from './history/diff';
 export * from './text/layout';
+export * from './text/ranges';
 export * from './layout/grids';
 export * from './vector/bezier';
 export * from './vector/network';
