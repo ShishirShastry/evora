@@ -112,7 +112,7 @@ Not covered by automated tests: the native save/open file dialogs for `.opendesi
 5. Canvas: equal-spacing snapping with distance read-outs, a switch for pixel snapping, guides relative to a frame, arrowheads on lines.
 6. Housekeeping: resizable sidebars, a light theme, virtualised layers list, flip that mirrors asymmetric content (a real flip property).
 
-**Phase 3 (vector editing), in progress.** Done: the `VECTOR` layer and its maths (`src/core/vector/`, `src/core/ops/vector.ts`), rendering, hit testing, flatten. Still to do, in this order: (1) the Pen tool and a point-editing mode (select and move points, drag handles, add and delete points, close and join paths), with the overlay drawing points and handles; (2) the Pencil tool with curve fitting; (3) boolean operations (union, subtract, intersect, exclude); (4) arcs on ellipses, arrowheads, outline stroke.
+**Phase 3 (vector editing), in progress.** Done: the `VECTOR` layer and its maths (`src/core/vector/`, `src/core/ops/vector.ts`), rendering, hit testing, flatten. An **unfinished, untested draft** of the Pen tool and point editing is parked in `wip/vectorTool.draft.ts` (outside `src`, so it is not compiled): it is not wired into the controller, the store has no `vectorEdit` state or `pen` tool yet, and nothing in the application uses it. Still to do, in this order: (1) the Pen tool and a point-editing mode (select and move points, drag handles, add and delete points, close and join paths), with the overlay drawing points and handles; (2) the Pencil tool with curve fitting; (3) boolean operations (union, subtract, intersect, exclude); (4) arcs on ellipses, arrowheads, outline stroke.
 
 Rules that have held so far and should keep holding:
 
