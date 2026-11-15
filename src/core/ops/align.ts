@@ -1,5 +1,5 @@
 import { patchNodes } from '../document/mutate';
-import { isContainer, isFrame, isLayer, type Document, type LayerPatch, type NodeId } from '../document/schema';
+import { isContainer, isFrame, isLayer, isShadow, type CornerRadii, type Document, type LayerNode, type LayerPatch, type NodeId, type Paint } from '../document/schema';
 import { normalizeAngle, transformedBounds, unionRects, type Rect } from '../math/geometry';
 import { getChildIds, getLocalMatrix, getWorldBounds, sortByPaintOrder, topLevelIds } from '../scene/tree';
 import { mirrorNetwork } from '../vector/shapes';
@@ -78,12 +78,65 @@ export function distributeNodes(doc: Document, ids: readonly NodeId[], axis: Dis
 export type FlipAxis = 'horizontal' | 'vertical';
 
 /**
+ * What of a layer's own look has to change for the layer to be its own mirror
+ * image, once its position has been mirrored and its rotation negated: the
+ * things that are not the same on both sides. The handles of a gradient
+ * change sides, the radii of the corners are swapped, the slice of an ellipse
+ * is mirrored, the arrowheads of a line change ends, a shadow falls the
+ * other way, and the curves of a vector are mirrored. The glyphs of text and
+ * the picture of an image fill cannot be mirrored and stay as they are.
+ */
+function mirroredLook(node: LayerNode, axis: FlipAxis): LayerPatch {
+  // A polygon or a star flipped top to bottom is given a half turn (it is the same left and right),
+  // which leaves left and right to be swapped in its own space.
+  const local: FlipAxis = axis === 'vertical' && (node.type === 'POLYGON' || node.type === 'STAR') ? 'horizontal' : axis;
+  const across = local === 'horizontal';
+  const patch: LayerPatch = {};
+
+  const mirrorPaints = (paints: readonly Paint[]): Paint[] | null => {
+    let changed = false;
+    const next = paints.map((paint) => {
+      if (paint.type === 'SOLID' || paint.type === 'IMAGE') return paint;
+      changed = true;
+      const flip = (p: { x: number; y: number }): { x: number; y: number } => (across ? { x: clean(1 - p.x), y: p.y } : { x: p.x, y: clean(1 - p.y) });
+      return { ...paint, from: flip(paint.from), to: flip(paint.to) };
+    });
+    return changed ? next : null;
+  };
+  const fills = mirrorPaints(node.fills);
+  if (fills) patch.fills = fills;
+  const strokes = mirrorPaints(node.strokes);
+  if (strokes) patch.strokes = strokes;
+
+  if (node.effects.some(isShadow)) {
+    patch.effects = node.effects.map((effect) =>
+      isShadow(effect) ? (across ? { ...effect, offsetX: 0 - effect.offsetX } : { ...effect, offsetY: 0 - effect.offsetY }) : effect,
+    );
+  }
+
+  if ((node.type === 'FRAME' || node.type === 'RECTANGLE') && node.cornerRadii) {
+    const [tl, tr, br, bl] = node.cornerRadii;
+    patch.cornerRadii = (across ? [tr, tl, bl, br] : [bl, br, tr, tl]) as CornerRadii;
+  }
+  if (node.type === 'ELLIPSE' && (node.arcSweep < 360 || node.arcStart !== 0)) {
+    // Angles run clockwise from three o'clock: mirrored, the slice starts where it used to end.
+    const end = node.arcStart + node.arcSweep;
+    patch.arcStart = clean((((across ? 180 - end : -end) % 360) + 360) % 360);
+  }
+  if (node.type === 'LINE' && across && node.startArrow !== node.endArrow) {
+    patch.startArrow = node.endArrow;
+    patch.endArrow = node.startArrow;
+  }
+  if (node.type === 'VECTOR') patch.network = mirrorNetwork(node.network, node.width, node.height, axis);
+  return patch;
+}
+
+/**
  * Mirrors the contents of a container inside its own box, recursively. The
  * basic shapes are symmetric about their own vertical axis, so their mirror
- * image is exactly "position mirrored, rotation negated" (plus a half turn
- * for a vertical flip of shapes that have a top, such as triangles and
- * stars). A vector's curves are mirrored themselves. Text and image fills
- * are not mirrored.
+ * image is "position mirrored, rotation negated" (plus a half turn for a
+ * vertical flip of shapes that have a top, such as triangles and stars),
+ * with whatever of their look is not symmetric mirrored as well.
  */
 function flipInside(doc: Document, containerId: NodeId, axis: FlipAxis, patches: Record<NodeId, LayerPatch>): void {
   const container = doc.nodes[containerId];
@@ -97,8 +150,8 @@ function flipInside(doc: Document, containerId: NodeId, axis: FlipAxis, patches:
       x: clean(mirrored.x - child.width / 2),
       y: clean(mirrored.y - child.height / 2),
       rotation: mirroredRotation(child.type, child.rotation, axis),
+      ...mirroredLook(child, axis),
     };
-    if (child.type === 'VECTOR') (patches[childId] as LayerPatch).network = mirrorNetwork(child.network, child.width, child.height, axis);
     if (isContainer(child)) flipInside(doc, childId, axis, patches);
   }
 }
@@ -145,8 +198,8 @@ export function flipNodes(doc: Document, ids: readonly NodeId[], axis: FlipAxis)
         x: clean(mirrored.x - node.width / 2),
         y: clean(mirrored.y - node.height / 2),
         rotation: mirroredRotation(node.type, node.rotation, axis),
+        ...mirroredLook(node, axis),
       };
-      if (node.type === 'VECTOR') (patches[id] as LayerPatch).network = mirrorNetwork(node.network, node.width, node.height, axis);
       if (isContainer(node)) flipInside(doc, id, axis, patches);
     }
   }

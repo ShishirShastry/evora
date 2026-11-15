@@ -200,6 +200,53 @@ test('copied layers go on the system clipboard and are pasted in another window'
   expect(errors).toEqual([]);
 });
 
+test('flip mirrors what a layer is painted with: a gradient changes sides', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const box = await newFile(page);
+  const set = async (label: string, value: string): Promise<void> => {
+    await field(page, label).fill(value);
+    await field(page, label).press('Enter');
+  };
+  const pixel = async (x: number, y: number): Promise<number[]> => {
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    return page.evaluate(([px, py]) => [...(document.querySelector('canvas')?.getContext('2d')?.getImageData(px as number, py as number, 1, 1).data ?? [])].slice(0, 3), [x, y]);
+  };
+
+  // A rectangle from (200, 200) to (400, 300): red on the left running to blue on the right.
+  await page.keyboard.press('r');
+  await page.mouse.move(box.x + 200, box.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 400, box.y + 300, { steps: 4 });
+  await page.mouse.up();
+  await page.getByRole('combobox', { name: 'Fill 1 type', exact: true }).selectOption('GRADIENT_LINEAR');
+  await set('Fill 1 stop 1 colour hex', 'FF0000');
+  await set('Fill 1 stop 2 colour hex', '0000FF');
+  await set('Fill 1 stop 2 opacity', '100');
+  await set('Fill 1 angle', '0');
+  const [leftRed, , leftBlue] = (await pixel(205, 250)) as [number, number, number];
+  expect(leftRed).toBeGreaterThan(220);
+  expect(leftBlue).toBeLessThan(30);
+
+  // Flipped left to right, the blue end is on the left. The layer has not moved.
+  await canvas(page).focus();
+  await page.keyboard.press('Shift+h');
+  const flipped = (await pixel(205, 250)) as [number, number, number];
+  expect(flipped[0]).toBeLessThan(30);
+  expect(flipped[2]).toBeGreaterThan(220);
+  expect(((await pixel(395, 250)) as [number, number, number])[0]).toBeGreaterThan(220);
+  await expect(field(page, 'Fill 1 angle')).toHaveValue('180');
+  await expect(field(page, 'Width')).toHaveValue('200');
+  // Top to bottom changes nothing for a gradient that runs across, so it is not a step to undo:
+  // one undo takes back the flip left to right, and the red is on the left again.
+  await page.keyboard.press('Shift+v');
+  expect(((await pixel(205, 250)) as [number, number, number])[2]).toBeGreaterThan(220);
+  await page.keyboard.press('Control+z');
+  expect(((await pixel(205, 250)) as [number, number, number])[0]).toBeGreaterThan(220);
+  await expect(field(page, 'Fill 1 angle')).toHaveValue('0');
+  expect(errors).toEqual([]);
+});
+
 test('a frame with rounded corners is not selected where its corner is cut away', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

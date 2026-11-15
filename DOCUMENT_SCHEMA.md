@@ -412,7 +412,7 @@ Opacity, blend mode, layer blur and drop shadows apply to a layer as a whole, ch
 
 This is the convention CSS uses (`left/top/width/height` plus `transform: rotate()` about the centre), which keeps Developer Mode output direct (ADR-005).
 
-Skew is not representable. There is no flip flag either: the basic shapes are symmetric about their own vertical axis, so "Flip horizontal / vertical" is implemented as an exact geometric operation (mirror the position, negate the rotation, add a half turn for a vertical flip of polygons and stars, and recurse into containers), and a vector's curves are mirrored themselves. Text and image fills are not mirrored; they would need a `flipX` / `flipY` property.
+Skew is not representable. There is no flip flag either: the basic shapes are symmetric about their own vertical axis, so "Flip horizontal / vertical" is implemented as an exact geometric operation (mirror the position, negate the rotation, add a half turn for a vertical flip of polygons and stars, and recurse into containers), and a vector's curves are mirrored themselves. What else of a layer's look is not the same on both sides is mirrored with it: the handles of gradient paints, per-corner radii, the slice of an ellipse (`arcStart`), the arrowheads of a line (which change ends on a horizontal flip) and the offsets of shadows. The glyphs of text and the picture of an image fill are not mirrored; they would need a `flipX` / `flipY` property.
 
 ---
 
