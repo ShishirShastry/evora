@@ -143,6 +143,7 @@ export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0, par
       break;
     }
     case 'VECTOR':
+    case 'BOOLEAN_OPERATION':
       traceNetwork(ctx, node.network, part);
       break;
   }

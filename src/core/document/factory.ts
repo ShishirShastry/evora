@@ -33,6 +33,7 @@ export const TYPE_LABELS: Record<LayerType, string> = {
   STAR: 'Star',
   TEXT: 'Text',
   VECTOR: 'Vector',
+  BOOLEAN_OPERATION: 'Boolean',
 };
 
 export const DEFAULT_FONT_FAMILY = 'Arial';
@@ -228,6 +229,9 @@ export function createLayer(
         startArrow: 'NONE',
         endArrow: 'NONE',
       };
+      break;
+    case 'BOOLEAN_OPERATION':
+      node = { ...base, type, operation: 'UNION', network: { vertices: [], segments: [] } };
       break;
   }
   return { ...node, ...props } as LayerNode;

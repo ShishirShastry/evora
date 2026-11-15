@@ -11,7 +11,8 @@ export function hasOutline(node: LayerNode): boolean {
     node.type === 'LINE' ||
     node.type === 'POLYGON' ||
     node.type === 'STAR' ||
-    node.type === 'VECTOR'
+    node.type === 'VECTOR' ||
+    node.type === 'BOOLEAN_OPERATION'
   );
 }
 
@@ -62,6 +63,7 @@ export function shapeNetwork(node: LayerNode): VectorNetwork | null {
   const k = KAPPA;
   switch (node.type) {
     case 'VECTOR':
+    case 'BOOLEAN_OPERATION':
       return node.network;
     case 'RECTANGLE': {
       const [tl, tr, br, bl] = effectiveRadii(w, h, node.cornerRadius, node.cornerRadii);

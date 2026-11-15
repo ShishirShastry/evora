@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **10**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **11**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later) and version 11 boolean groups. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -102,7 +102,7 @@ A node may be a parent only if its type is a container type. The container types
 ## 5. Node types
 
 ```ts
-type NodeType = 'PAGE' | 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT' | 'VECTOR';
+type NodeType = 'PAGE' | 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT' | 'VECTOR' | 'BOOLEAN_OPERATION';
 ```
 
 `GROUP` exists from version 2 and `TEXT` from version 3; everything else from version 1.
@@ -263,6 +263,16 @@ interface VectorSegment {
 
 A vector's box is always the bounding box of its curves (the curves themselves, not their handles), in the layer's own, possibly rotated, frame of reference. The editor restores this after every edit (`fitVectors`) without moving anything on the page, and removes a vector that has no points left. Resizing a vector scales its points and handles; a vector that is flat in one direction (a straight line) cannot be resized in that direction. "Flatten to vector" turns rectangles, ellipses, lines, polygons and stars into vectors (text cannot be converted: the application has no access to glyph outlines).
 
+```ts
+interface BooleanOperationNode extends LayerBase {
+  type: 'BOOLEAN_OPERATION'; // version 11. A container: the shapes it combines are its children
+  operation: 'UNION' | 'SUBTRACT' | 'INTERSECT' | 'EXCLUDE';
+  network: VectorNetwork;    // derived: the result of the operation, in the group's own space
+}
+```
+
+**Boolean groups.** A boolean group holds shapes (rectangles, ellipses, lines, polygons, stars, vectors, groups of those, other boolean groups) and shows the result of combining them: `UNION` everything any of them covers, `SUBTRACT` the bottom-most with the others taken out, `INTERSECT` what all of them share, `EXCLUDE` what an odd number of them cover. The children are not painted; the group is, as one shape, with its own fills, strokes and effects. A group inside counts as the union of what is in it; hidden children, frames and text count for nothing. `network` and the group's box (the bounding box of the result, or of the children when nothing is left) are **derived data**: the editor recomputes them whenever a child changes (`refreshBoolean`, run with `normalizeGroups`) and nothing edits them directly. They are stored so that a file can be drawn, hit-tested and exported without redoing the geometry. A boolean group with no children is removed, like an empty group. Resizing one scales its children; ungrouping releases them; flattening replaces it with a `VECTOR` of its result.
+
 **Arcs.** An ellipse with `arcSweep` below 360 is a slice (the arc and two straight sides to the centre); with `arcRatio` above 0 the middle is cut out, which makes a ring, or with a sweep a piece of a ring. The layer's box is always that of the whole ellipse, whatever part of it is shown. Hit testing, flattening and boolean operations use the real outline.
 
 **Arrowheads.** `startArrow` and `endArrow` say what is drawn at the loose ends of a stroke: nothing, an open arrow, a filled triangle, a dot or a diamond, sized from the stroke weight and painted with the stroke's paints. On a vector they apply to every open run of segments: `startArrow` to the end the run begins at (the lower-numbered point), `endArrow` to the other, and only at ends that are not branch points; a closed path shows none. Under a triangle the stroke is drawn slightly shorter so that it does not show through the tip. Arrowheads are not part of a layer's box.
@@ -404,7 +414,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -426,6 +436,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   8: addVersion9Defaults,
   // 9 -> 10: every layer gets isMask false.
   9: addIsMask,
+  // 10 -> 11: adds the BOOLEAN_OPERATION type. Older files have no boolean groups.
+  10: (file) => ({ ...file, schemaVersion: 11 }),
 };
 ```
 
@@ -440,6 +452,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 7 | 8 | `VECTOR` layer type added | `src/vector.test.ts` ("opens a version 7 file") |
 | 8 | 9 | Arcs on ellipses; arrowheads on lines and vectors | `src/arcs.test.ts` ("opens a version 8 file") |
 | 9 | 10 | Masks (`isMask` on every layer) | `src/masks.test.ts` ("survives flattening, validation and older files") |
+| 10 | 11 | `BOOLEAN_OPERATION` layer type added | `src/boolean.test.ts` ("opens a version 10 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -469,7 +482,7 @@ These are reserved so that later versions extend the schema without restructurin
 | Phase | Addition |
 |---|---|
 | 2 | Per-range text styles, `flipX/flipY`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7.) |
-| 3 | `BOOLEAN_OPERATION` (a container that keeps the shapes a boolean operation combines; today the operations replace them with a `VECTOR`). (Done: `VECTOR` in version 8, arcs and arrowheads in version 9.) |
+| 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |

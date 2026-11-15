@@ -111,6 +111,8 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 10, document: { ...body, nodes: upgraded } };
   },
+  // Version 11 adds the BOOLEAN_OPERATION layer type. Older files contain none.
+  10: (file) => ({ ...file, schemaVersion: 11 }),
 };
 
 /**

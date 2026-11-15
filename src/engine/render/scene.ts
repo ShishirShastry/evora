@@ -117,7 +117,7 @@ export function getRenderBounds(doc: Document, id: NodeId): Rect {
   if (isLayer(node)) {
     if (node.strokeWeight > 0 && node.strokes.length > 0) {
       // The mitred tip of a sharp corner of a vector reaches well beyond the corner itself.
-      const sharp = node.type === 'VECTOR' && node.strokeJoin === 'MITER';
+      const sharp = (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') && node.strokeJoin === 'MITER';
       bounds = expandRect(bounds, node.strokeWeight * (sharp ? (strokeAlignOf(node) === 'OUTSIDE' ? 10 : 5) : 1));
       // Arrowheads reach beyond the ends of the stroke.
       const reach = arrowHeads(node).reduce((most, head) => Math.max(most, head.reach), 0);

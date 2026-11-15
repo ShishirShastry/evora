@@ -32,7 +32,10 @@ const TYPE_ICONS: Record<LayerNode['type'], IconName> = {
   STAR: 'star',
   TEXT: 'text',
   VECTOR: 'vector',
+  BOOLEAN_OPERATION: 'union',
 };
+
+const OPERATION_ICONS = { UNION: 'union', SUBTRACT: 'subtract', INTERSECT: 'intersect', EXCLUDE: 'exclude' } as const;
 
 /** Flattens the page's tree into the rows shown in the panel: top-most layer first. */
 export function buildRows(doc: Document, pageId: NodeId, collapsed: Readonly<Record<NodeId, true>>): Row[] {
@@ -232,7 +235,7 @@ export function LayersPanel() {
                 <Icon name={row.expanded ? 'chevronDown' : 'chevronRight'} size={10} />
               </button>
               <span className={`mr-1.5 flex-none ${isSelected ? 'text-accent' : 'text-dim'}`}>
-                <Icon name={node.isMask ? 'mask' : TYPE_ICONS[node.type]} size={13} />
+                <Icon name={node.isMask ? 'mask' : node.type === 'BOOLEAN_OPERATION' ? OPERATION_ICONS[node.operation] : TYPE_ICONS[node.type]} size={13} />
               </span>
               {renamingId === node.id ? (
                 <TextEdit

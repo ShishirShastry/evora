@@ -1,4 +1,4 @@
-import { isFrame, isLayer, type Document, type LayerNode, type NodeId } from '../document/schema';
+import { isFrame, isGroupLike, isLayer, type Document, type LayerNode, type NodeId } from '../document/schema';
 import {
   convexPolygonsIntersect,
   distanceToPolygonEdge,
@@ -87,6 +87,10 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
     case 'VECTOR':
       if (solid && pointInNetworkFill(node.network, p, node.windingRule)) return true;
       return distanceToNetwork(node.network, p) <= edge;
+    case 'BOOLEAN_OPERATION':
+      // What the group shows: the combination of its shapes.
+      if (solid && pointInNetworkFill(node.network, p, 'NONZERO')) return true;
+      return distanceToNetwork(node.network, p) <= edge;
   }
 }
 
@@ -138,6 +142,11 @@ export function hitTestDeepest(doc: Document, pageId: NodeId, point: Point, tole
         const child = search(id);
         if (child) return child;
         continue;
+      }
+      if (node.type === 'BOOLEAN_OPERATION') {
+        // Only what the group shows can be clicked; the shape of its that is there is the deeper target.
+        if (!hitsShape(node, local, tolerance)) continue;
+        return search(id) ?? id;
       }
       if (hitsShape(node, local, tolerance)) return id;
     }
@@ -258,7 +267,7 @@ export function enclosingFrameOrPage(doc: Document, containerId: NodeId): NodeId
   while (!seen.has(current)) {
     seen.add(current);
     const node = doc.nodes[current];
-    if (!isLayer(node) || node.type !== 'GROUP') break;
+    if (!isGroupLike(node)) break;
     current = node.parentId;
   }
   return current;

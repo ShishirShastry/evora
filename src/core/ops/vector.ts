@@ -2,6 +2,7 @@ import { createLayer, nextLayerName } from '../document/factory';
 import { patchNodes, setNodes } from '../document/mutate';
 import {
   isLayer,
+  type BooleanOperation,
   type DesignNode,
   type Document,
   type LayerNode,
@@ -11,12 +12,12 @@ import {
   type VectorNode,
 } from '../document/schema';
 import { applyToPoint, invert, multiply } from '../math/matrix';
-import { getChildIds, getWorldMatrix, sortByPaintOrder, topLevelIds } from '../scene/tree';
-import { booleanNetworks, type BooleanOperand, type BooleanOperation } from '../vector/boolean';
+import { getChildIds, getDescendantIds, getWorldMatrix, sortByPaintOrder, topLevelIds } from '../scene/tree';
+import type { BooleanOperand } from '../vector/boolean';
 import { fitVectorNode } from '../vector/fit';
 import { mapNetwork } from '../vector/network';
 import { combineNetworks, hasOutline, shapeNetwork } from '../vector/shapes';
-import { normalizeGroups } from './groups';
+import { groupNodes, normalizeGroups } from './groups';
 import { insertionKeys } from './ordering';
 
 /**
@@ -114,7 +115,10 @@ export function flattenNodes(doc: Document, ids: readonly NodeId[]): { doc: Docu
       rotation: first.rotation,
       network,
     }) as VectorNode;
-    return { doc: setNodes(doc, { [first.id]: fitVectorNode({ ...vector, id: first.id }) }), id: first.id };
+    const changes: Record<NodeId, DesignNode | null> = { [first.id]: fitVectorNode({ ...vector, id: first.id }) };
+    // A boolean group becomes its result; the shapes it was made of go.
+    for (const id of getDescendantIds(doc, first.id)) changes[id] = null;
+    return { doc: setNodes(doc, changes), id: first.id };
   }
 
   const outlines = outlinesOf(doc, ids, members);
@@ -170,7 +174,10 @@ function replaceWithVector(
     network,
   }) as VectorNode;
   const changes: Record<NodeId, DesignNode | null> = { [vector.id]: fitVectorNode(vector) };
-  for (const id of members) changes[id] = null;
+  for (const id of members) {
+    changes[id] = null;
+    for (const inside of getDescendantIds(doc, id)) changes[inside] = null;
+  }
   // Groups that gave up everything they held go too.
   return { doc: normalizeGroups(setNodes(patchNodes(doc, rekeyed), changes)), id: vector.id };
 }
@@ -182,25 +189,47 @@ export const BOOLEAN_NAMES: Record<BooleanOperation, string> = {
   EXCLUDE: 'Exclude',
 };
 
-/** Can `booleanNodes` do anything with this selection? It needs at least two shapes. */
+/** The selected layers a boolean operation can combine, bottom first: shapes, vectors, boolean groups, and groups that hold any. */
+function booleanRoots(doc: Document, ids: readonly NodeId[]): NodeId[] {
+  return sortByPaintOrder(doc, topLevelIds(doc, ids)).filter((id) => flattenMembers(doc, [id]).length > 0);
+}
+
+/** Can `booleanNodes` do anything with this selection? It needs at least two layers that have an outline. */
 export function canBoolean(doc: Document, ids: readonly NodeId[]): boolean {
-  return flattenMembers(doc, ids).length >= 2;
+  return booleanRoots(doc, ids).length >= 2;
 }
 
 /**
- * Combines shapes into one vector layer: their union, the bottom-most with
- * the others taken out of it, what they all share, or what an odd number of
- * them cover. The shapes are replaced by the result, which takes the
- * appearance of the bottom-most. Returns null when there are fewer than two
- * shapes or when nothing is left (shapes that do not overlap have no
- * intersection), in which case the document is not changed.
+ * Combines layers in a boolean group: their union, the bottom-most with the
+ * others taken out of it, what they all share, or what an odd number of them
+ * cover. The layers become the group's children, where they can still be
+ * moved and edited, and the group shows the result with the appearance of
+ * the bottom-most shape. Returns null when there are fewer than two layers
+ * to combine or when nothing would be left (shapes that do not overlap have
+ * no intersection), in which case the document is not changed.
  */
 export function booleanNodes(doc: Document, ids: readonly NodeId[], operation: BooleanOperation): { doc: Document; id: NodeId } | null {
-  const members = flattenMembers(doc, ids);
-  if (members.length < 2) return null;
-  const outlines = outlinesOf(doc, ids, members);
-  if (!outlines) return null;
-  const network = booleanNetworks(outlines.operands, operation);
-  if (network.segments.length === 0) return null;
-  return replaceWithVector(doc, members, outlines, network, { name: BOOLEAN_NAMES[operation], windingRule: 'NONZERO' });
+  const roots = booleanRoots(doc, ids);
+  if (roots.length < 2) return null;
+  const leaf = doc.nodes[flattenMembers(doc, [roots[0] as NodeId])[0] as NodeId];
+  const grouped = groupNodes(doc, roots);
+  const group = grouped ? grouped.doc.nodes[grouped.id] : undefined;
+  if (!grouped || !isLayer(group) || !isLayer(leaf)) return null;
+  const look = appearanceOf(leaf);
+  delete look.startArrow;
+  delete look.endArrow;
+  const node = createLayer('BOOLEAN_OPERATION', group.parentId, group.order, {
+    ...look,
+    name: BOOLEAN_NAMES[operation],
+    x: group.x,
+    y: group.y,
+    width: group.width,
+    height: group.height,
+    operation,
+  });
+  // The group that was just made becomes the boolean group; bringing it up to date works out its result.
+  const next = normalizeGroups(setNodes(grouped.doc, { [grouped.id]: { ...node, id: grouped.id } }));
+  const result = next.nodes[grouped.id];
+  if (!result || result.type !== 'BOOLEAN_OPERATION' || result.network.segments.length === 0) return null;
+  return { doc: next, id: grouped.id };
 }

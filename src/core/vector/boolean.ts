@@ -1,4 +1,4 @@
-import type { VectorNetwork, VectorSegment, VectorVertex, WindingRule } from '../document/schema';
+import type { BooleanOperation, VectorNetwork, VectorSegment, VectorVertex, WindingRule } from '../document/schema';
 import type { Point } from '../math/geometry';
 import { cubicAt, cubicBounds, cubicDerivative, flattenCubic, isStraight, reverseCubic, splitCubic, type Cubic } from './bezier';
 import { networkGeometry, stepCubic } from './network';
@@ -12,9 +12,6 @@ import { networkGeometry, stepCubic } from './network';
  * is dropped. The pieces that are kept are strung together into closed
  * outlines. Curves stay curves: nothing is turned into straight lines.
  */
-
-export type BooleanOperation = 'UNION' | 'SUBTRACT' | 'INTERSECT' | 'EXCLUDE';
-export const BOOLEAN_OPERATIONS: readonly BooleanOperation[] = ['UNION', 'SUBTRACT', 'INTERSECT', 'EXCLUDE'];
 
 /** One of the shapes an operation combines: its outline, and which parts of it count as inside. */
 export interface BooleanOperand {

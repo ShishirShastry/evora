@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import {
   BLACK,
   BLEND_MODES,
+  BOOLEAN_NAMES,
   clean,
   DEFAULT_SHAPE_FILL,
   hasCornerRadius,
@@ -15,6 +16,8 @@ import {
   TYPE_LABELS,
   type ArrowType,
   type BlendMode,
+  type BooleanOperation,
+  type BooleanOperationNode,
   type CornerRadii,
   type EllipseNode,
   type FrameNode,
@@ -55,6 +58,13 @@ const CAP_NAMES: readonly (readonly [StrokeCap, string])[] = [
   ['NONE', 'Flat ends'],
   ['ROUND', 'Round ends'],
   ['SQUARE', 'Square ends'],
+];
+
+const OPERATION_NAMES: readonly (readonly [BooleanOperation, string])[] = [
+  ['UNION', 'Union'],
+  ['SUBTRACT', 'Subtract'],
+  ['INTERSECT', 'Intersect'],
+  ['EXCLUDE', 'Exclude'],
 ];
 
 const ARROW_NAMES: readonly (readonly [ArrowType, string])[] = [
@@ -411,6 +421,7 @@ export function DesignPanel() {
   const stars = layers.filter((layer) => layer.type === 'STAR');
   const vectors = layers.filter((layer): layer is VectorNode => layer.type === 'VECTOR');
   const ellipses = layers.filter((layer): layer is EllipseNode => layer.type === 'ELLIPSE');
+  const booleans = layers.filter((layer): layer is BooleanOperationNode => layer.type === 'BOOLEAN_OPERATION');
   // Arrowheads go on strokes that have ends: lines, and vectors (where they show on open paths).
   const arrowLayers = layers.filter((layer): layer is LineNode | VectorNode => layer.type === 'LINE' || layer.type === 'VECTOR');
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
@@ -625,6 +636,26 @@ export function DesignPanel() {
       {textLayers.length === layers.length && <TextSection layers={textLayers} />}
 
       {vectors.length === layers.length && <VectorSection layers={vectors} />}
+
+      {booleans.length === layers.length && (
+        <Section title="Boolean group">
+          <Row>
+            <span className="w-20 flex-none text-dim">Operation</span>
+            <SelectField<BooleanOperation>
+              label="Boolean operation"
+              value={shared(booleans, (l) => (l.type === 'BOOLEAN_OPERATION' ? l.operation : 'UNION'))}
+              options={OPERATION_NAMES}
+              onChange={(operation) =>
+                setEach('Change boolean operation', booleans, (layer) => ({
+                  operation,
+                  // A group still called after its operation is renamed with it.
+                  ...(layer.type === 'BOOLEAN_OPERATION' && layer.name === BOOLEAN_NAMES[layer.operation] ? { name: BOOLEAN_NAMES[operation] } : {}),
+                }))
+              }
+            />
+          </Row>
+        </Section>
+      )}
 
       <Section title="Layer">
         <Row>

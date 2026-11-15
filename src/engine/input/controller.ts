@@ -18,6 +18,7 @@ import {
   getWorldRotation,
   invert,
   isLayer,
+  isGroupLike,
   isText,
   isVector,
   lineBox,
@@ -686,7 +687,7 @@ export class InteractionController {
       const first = mode.base.nodes[mode.ids[0] as NodeId];
       // Offer the frame under the pointer and, for a layer inside a group, its fellow group members.
       const containers = [containerAt(mode.base, pageId, world, exclude)];
-      if (first?.parentId && mode.base.nodes[first.parentId]?.type === 'GROUP') containers.push(first.parentId);
+      if (first?.parentId && isGroupLike(mode.base.nodes[first.parentId])) containers.push(first.parentId);
       const snap = snapRect(
         { x: bounds.x + dx, y: bounds.y + dy, width: bounds.width, height: bounds.height },
         this.snapTargets(mode.base, containers, exclude),

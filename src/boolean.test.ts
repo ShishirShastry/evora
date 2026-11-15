@@ -6,7 +6,11 @@ import {
   canBoolean,
   createDocument,
   createLayer,
+  CURRENT_SCHEMA_VERSION,
+  deeperTargetAt,
+  deleteNodes,
   flattenCubic,
+  flattenNodes,
   getChildIds,
   getPages,
   getWorldBounds,
@@ -14,24 +18,34 @@ import {
   hitTestDeepest,
   intersectCubics,
   mapNetwork,
+  moveNodesBy,
   NetworkBuilder,
   networkGeometry,
+  normalizeGroups,
+  parseFile,
+  patchNode,
   pointInNetworkFill,
   segmentCubic,
+  selectionTargetAt,
+  setLayerBox,
   shapeNetwork,
   solidPaint,
   stepCubic,
+  ungroupNodes,
   unionRects,
   validateDocument,
   type BooleanOperand,
+  type BooleanOperationNode,
   type Cubic,
   type CurveCrossing,
   type Document,
+  type LayerNode,
   type NodeId,
   type Point,
   type VectorNetwork,
-  type VectorNode,
 } from './core';
+import { InteractionController } from './engine/input/controller';
+import { renderScene } from './engine/render/scene';
 import { commandForKey, getCommand, runCommand, type AppActions, type Command } from './state/commands';
 import { createEditorStore } from './state/editorStore';
 
@@ -316,24 +330,30 @@ describe('boolean operations on layers', () => {
     goHome: () => undefined,
   };
 
-  it('replaces the shapes with one vector that looks like the bottom-most did', () => {
+  it('puts the shapes in a boolean group that looks like the bottom-most did', () => {
     const { doc, pageId } = setup();
     const frame = addLayer(doc, 'FRAME', pageId, { x: 100, y: 100, width: 500, height: 400 });
     const square = addLayer(frame.doc, 'RECTANGLE', frame.id, { x: 50, y: 50, width: 200, height: 200, fills: [solidPaint({ r: 1, g: 0, b: 0 })] });
     const disc = addLayer(square.doc, 'ELLIPSE', frame.id, { x: 150, y: 150, width: 200, height: 200 });
     const before = disc.doc;
     const out = booleanNodes(before, [disc.id, square.id], 'UNION') as { doc: Document; id: NodeId };
-    const vector = out.doc.nodes[out.id] as VectorNode;
-    expect(vector).toMatchObject({ type: 'VECTOR', name: 'Union', parentId: frame.id, windingRule: 'NONZERO', x: 50, y: 50, width: 300, height: 300 });
+    const vector = out.doc.nodes[out.id] as BooleanOperationNode;
+    expect(vector).toMatchObject({ type: 'BOOLEAN_OPERATION', operation: 'UNION', name: 'Union', parentId: frame.id, x: 50, y: 50, width: 300, height: 300 });
     expect(vector.fills).toEqual([solidPaint({ r: 1, g: 0, b: 0 })]);
     expect(getChildIds(out.doc, frame.id)).toEqual([out.id]);
+    // The shapes are still there, inside it, in the same order and in the same places on the page.
+    expect(getChildIds(out.doc, out.id)).toEqual([square.id, disc.id]);
+    expect(getWorldBounds(out.doc, disc.id)).toEqual(getWorldBounds(before, disc.id));
     expect(getWorldBounds(out.doc, out.id)).toEqual(unionRects([getWorldBounds(before, square.id), getWorldBounds(before, disc.id)]));
     expect(validateDocument(out.doc)).toEqual([]);
 
     // Subtract: the square with a bite out of its corner. The bite is not part of the layer any more.
     const bitten = booleanNodes(before, [square.id, disc.id], 'SUBTRACT') as { doc: Document; id: NodeId };
     expect(bitten.doc.nodes[bitten.id]).toMatchObject({ name: 'Subtract', x: 50, y: 50, width: 200, height: 200 });
-    expect(hitTestDeepest(bitten.doc, pageId, { x: 100 + 60, y: 100 + 60 })).toBe(bitten.id);
+    // A click selects the group; the shape under the pointer is one level further in.
+    expect(selectionTargetAt(bitten.doc, pageId, { x: 100 + 60, y: 100 + 60 }, [])).toBe(bitten.id);
+    expect(hitTestDeepest(bitten.doc, pageId, { x: 100 + 60, y: 100 + 60 })).toBe(square.id);
+    expect(deeperTargetAt(bitten.doc, pageId, { x: 100 + 60, y: 100 + 60 }, [bitten.id])).toBe(square.id);
     expect(hitTestDeepest(bitten.doc, pageId, { x: 100 + 240, y: 100 + 240 })).toBe(frame.id);
     // Intersect: the corner alone.
     const corner = booleanNodes(before, [square.id, disc.id], 'INTERSECT') as { doc: Document; id: NodeId };
@@ -347,14 +367,16 @@ describe('boolean operations on layers', () => {
     const grouped = groupNodes(b.doc, [b.id]) as { doc: Document; id: NodeId };
     expect(canBoolean(grouped.doc, [a.id, grouped.id])).toBe(true);
     const out = booleanNodes(grouped.doc, [a.id, grouped.id], 'UNION') as { doc: Document; id: NodeId };
-    // The group that held the second square is gone with it.
+    // The square and the group that holds the other one are both inside the boolean group now.
     expect(getChildIds(out.doc, pageId)).toEqual([out.id]);
+    expect(getChildIds(out.doc, out.id)).toEqual([a.id, grouped.id]);
     const bounds = getWorldBounds(out.doc, out.id);
     const half = Math.SQRT2 * 50;
-    expect(bounds.x).toBeCloseTo(0, 3);
-    expect(bounds.width).toBeCloseTo(100 + half, 3);
-    expect(bounds.y).toBeCloseTo(50 - half, 3);
-    expect(bounds.height).toBeCloseTo(half * 2, 3);
+    // (A layer's box is kept to a thousandth of a pixel.)
+    expect(bounds.x).toBeCloseTo(0, 2);
+    expect(bounds.width).toBeCloseTo(100 + half, 2);
+    expect(bounds.y).toBeCloseTo(50 - half, 2);
+    expect(bounds.height).toBeCloseTo(half * 2, 2);
   });
 
   it('does nothing when there is nothing to do', () => {
@@ -393,16 +415,184 @@ describe('boolean operations on layers', () => {
     const state = store.getState();
     expect(state.undoStack.map((entry) => entry.label)).toEqual(['Subtract']);
     expect(state.selection).toHaveLength(1);
-    const moon = state.doc.nodes[state.selection[0] as NodeId] as VectorNode;
-    expect(moon).toMatchObject({ type: 'VECTOR', name: 'Subtract', x: 0, y: 0, height: 100 });
+    const moon = state.doc.nodes[state.selection[0] as NodeId] as BooleanOperationNode;
+    expect(moon).toMatchObject({ type: 'BOOLEAN_OPERATION', operation: 'SUBTRACT', name: 'Subtract', x: 0, y: 0, height: 100 });
     // A crescent: it ends at its horns, where the two circles crossed, 80 across.
     expect(moon.width).toBeCloseTo(80, 1);
-    expect(state.doc.nodes[a.id]).toBeUndefined();
+    expect(state.doc.nodes[a.id]).toMatchObject({ parentId: moon.id });
 
     state.undo();
     expect(store.getState().doc).toEqual(b.doc);
     expect(store.getState().selection).toEqual([a.id, b.id]);
     store.getState().redo();
-    expect(Object.values(store.getState().doc.nodes).filter((node) => node.type === 'VECTOR')).toHaveLength(1);
+    expect(Object.values(store.getState().doc.nodes).filter((node) => node.type === 'BOOLEAN_OPERATION')).toHaveLength(1);
+  });
+});
+
+describe('boolean groups keep their shapes', () => {
+  function setup(): { doc: Document; pageId: NodeId } {
+    const doc = createDocument('Boolean groups');
+    return { doc, pageId: (getPages(doc)[0] as { id: NodeId }).id };
+  }
+
+  /** Two 100 × 100 squares, the second 50 to the right of the first, united. */
+  function united(): { doc: Document; pageId: NodeId; a: NodeId; b: NodeId; id: NodeId } {
+    const { doc, pageId } = setup();
+    const a = addLayer(doc, 'RECTANGLE', pageId, { x: 0, y: 0, fills: [solidPaint({ r: 1, g: 0, b: 0 })] });
+    const b = addLayer(a.doc, 'RECTANGLE', pageId, { x: 50, y: 0, fills: [solidPaint({ r: 0, g: 0, b: 1 })] });
+    const out = booleanNodes(b.doc, [a.id, b.id], 'UNION') as { doc: Document; id: NodeId };
+    return { doc: out.doc, pageId, a: a.id, b: b.id, id: out.id };
+  }
+
+  const group = (doc: Document, id: NodeId): BooleanOperationNode => doc.nodes[id] as BooleanOperationNode;
+
+  it('follows its shapes when they move', () => {
+    const { doc, a, b, id } = united();
+    expect(group(doc, id)).toMatchObject({ x: 0, y: 0, width: 150, height: 100 });
+    expect(area(group(doc, id).network)).toBeCloseTo(15000, 6);
+    // Nothing to bring up to date: the document is left exactly as it is.
+    expect(normalizeGroups(doc)).toBe(doc);
+
+    // Pull the second square clear of the first: two squares, side by side.
+    const apart = normalizeGroups(moveNodesBy(doc, [b], 100, 0));
+    expect(group(apart, id)).toMatchObject({ x: 0, y: 0, width: 250, height: 100 });
+    expect(outlines(group(apart, id).network)).toBe(2);
+    expect(area(group(apart, id).network)).toBeCloseTo(20000, 6);
+    // Move the first one left: the group's box follows, and the shapes stay where they are on the page.
+    const wider = normalizeGroups(moveNodesBy(apart, [a], -40, 10));
+    expect(group(wider, id)).toMatchObject({ x: -40, y: 0, width: 290, height: 110 });
+    expect(getWorldBounds(wider, a)).toEqual({ x: -40, y: 10, width: 100, height: 100 });
+    expect(getWorldBounds(wider, b)).toEqual({ x: 150, y: 0, width: 100, height: 100 });
+    expect(validateDocument(wider)).toEqual([]);
+  });
+
+  it('shows another result when its operation changes, or when a shape is hidden or removed', () => {
+    const { doc, a, b, id } = united();
+    const shared = normalizeGroups(patchNode(doc, id, { operation: 'INTERSECT' }));
+    expect(group(shared, id)).toMatchObject({ x: 50, y: 0, width: 50, height: 100 });
+    const cut = normalizeGroups(patchNode(doc, id, { operation: 'SUBTRACT' }));
+    expect(group(cut, id)).toMatchObject({ x: 0, y: 0, width: 50, height: 100 });
+    const either = normalizeGroups(patchNode(doc, id, { operation: 'EXCLUDE' }));
+    expect(area(group(either, id).network)).toBeCloseTo(10000, 6);
+
+    // A hidden shape takes no part.
+    const hidden = normalizeGroups(patchNode(doc, b, { visible: false }));
+    expect(group(hidden, id)).toMatchObject({ x: 0, y: 0, width: 100, height: 100 });
+    // Nor does one that is gone; and a group with nothing left in it goes too.
+    const one = normalizeGroups(deleteNodes(doc, [b]));
+    expect(group(one, id)).toMatchObject({ width: 100 });
+    const none = normalizeGroups(deleteNodes(one, [a]));
+    expect(none.nodes[id]).toBeUndefined();
+  });
+
+  it('is painted as one shape, and its shapes are not painted', () => {
+    const { doc, pageId } = united();
+    const fills: string[] = [];
+    const target: Record<string, unknown> = {};
+    const ctx = new Proxy(target, {
+      get(obj, prop: string) {
+        if (prop in obj) return obj[prop];
+        return () => {
+          if (prop === 'fill') fills.push(String(obj.fillStyle));
+        };
+      },
+      set(obj, prop: string, value) {
+        obj[prop] = value;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    const stats = renderScene(ctx, doc, pageId, { size: { width: 800, height: 600 }, dpr: 1, viewport: { x: 0, y: 0, zoom: 1 } });
+    // In the colour of the bottom-most shape.
+    expect(fills).toEqual(['rgb(255, 0, 0)']);
+    expect(stats.drawn).toBe(1);
+  });
+
+  it('scales its shapes when it is resized, and lets them go when it is ungrouped or flattened', () => {
+    const { doc, pageId, a, b, id } = united();
+    const bigger = normalizeGroups(setLayerBox(doc, id, { width: 300, height: 200 }));
+    expect(group(bigger, id)).toMatchObject({ x: 0, y: 0, width: 300, height: 200 });
+    expect(bigger.nodes[b]).toMatchObject({ x: 100, y: 0, width: 200, height: 200 });
+
+    const released = ungroupNodes(doc, [id]);
+    expect(released.ids).toEqual([a, b]);
+    expect(released.doc.nodes[id]).toBeUndefined();
+    expect(getChildIds(released.doc, pageId)).toEqual([a, b]);
+    expect(getWorldBounds(released.doc, b)).toEqual({ x: 50, y: 0, width: 100, height: 100 });
+
+    // Flattened, the group becomes a vector of its result and the shapes are gone.
+    const flat = flattenNodes(doc, [id]) as { doc: Document; id: NodeId };
+    expect(flat.id).toBe(id);
+    expect(flat.doc.nodes[id]).toMatchObject({ type: 'VECTOR', name: 'Union', width: 150, height: 100 });
+    expect(flat.doc.nodes[a]).toBeUndefined();
+    expect(flat.doc.nodes[b]).toBeUndefined();
+    expect(validateDocument(flat.doc)).toEqual([]);
+  });
+
+  it('can hold groups and other boolean groups', () => {
+    const { doc, pageId, id } = united();
+    // A third square over the middle of the union, taken out of it.
+    const c = addLayer(doc, 'RECTANGLE', pageId, { x: 50, y: 25, width: 50, height: 50 });
+    const out = booleanNodes(c.doc, [id, c.id], 'SUBTRACT') as { doc: Document; id: NodeId };
+    const outer = group(out.doc, out.id);
+    expect(outer).toMatchObject({ operation: 'SUBTRACT', x: 0, y: 0, width: 150, height: 100 });
+    expect(getChildIds(out.doc, out.id)).toEqual([id, c.id]);
+    expect(area(outer.network)).toBeCloseTo(15000 - 2500, 6);
+    expect(outlines(outer.network)).toBe(2);
+    // It looks like the bottom-most shape of all.
+    expect(outer.fills).toEqual([solidPaint({ r: 1, g: 0, b: 0 })]);
+    // Changing the inner group changes the outer one.
+    const inner = normalizeGroups(patchNode(out.doc, id, { operation: 'INTERSECT' }));
+    expect(area(group(inner, out.id).network)).toBeCloseTo(5000 - 2500, 6);
+  });
+
+  it('is edited through the editor: a shape dragged inside it stays inside, and undo restores the result', () => {
+    const { doc, a, b, id } = united();
+    const store = createEditorStore(doc);
+    store.getState().setCanvasSize({ width: 800, height: 600 });
+    const controller = new InteractionController(store, { requestRender: () => undefined, setCursor: () => undefined });
+    const ptr = (x: number, y: number, detail = 1) => ({ x, y, button: 0, shiftKey: false, altKey: false, ctrlKey: false, detail });
+    // A click selects the group; a double-click the shape in it.
+    controller.pointerDown(ptr(120, 50));
+    controller.pointerUp(ptr(120, 50));
+    expect(store.getState().selection).toEqual([id]);
+    controller.pointerDown(ptr(120, 50, 2));
+    controller.pointerUp(ptr(120, 50, 2));
+    expect(store.getState().selection).toEqual([b]);
+
+    controller.pointerDown(ptr(120, 50));
+    controller.pointerMove(ptr(170, 50));
+    controller.pointerMove(ptr(220, 50));
+    controller.pointerUp(ptr(220, 50));
+    const moved = store.getState().doc;
+    expect((moved.nodes[b] as LayerNode).parentId).toBe(id);
+    expect(getWorldBounds(moved, b)).toEqual({ x: 150, y: 0, width: 100, height: 100 });
+    expect(group(moved, id)).toMatchObject({ width: 250 });
+    expect(outlines(group(moved, id).network)).toBe(2);
+    expect(store.getState().undoStack.map((entry) => entry.label)).toEqual(['Move']);
+
+    store.getState().undo();
+    expect(store.getState().doc).toEqual(doc);
+    expect(group(store.getState().doc, id)).toMatchObject({ width: 150 });
+    expect((store.getState().doc.nodes[a] as LayerNode).parentId).toBe(id);
+  });
+
+  it('opens a version 10 file, which has no boolean groups', () => {
+    const { doc, pageId } = setup();
+    const rect = addLayer(doc, 'RECTANGLE', pageId, { x: 10, y: 20 });
+    const parsed = parseFile({
+      format: 'open-design',
+      schemaVersion: 10,
+      meta: { createdAt: '2026-11-16T15:00:00.000Z', updatedAt: '2026-11-16T15:00:00.000Z' },
+      document: JSON.parse(JSON.stringify(rect.doc)),
+    });
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
+    expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(parsed.repairs).toEqual([]);
+    expect(parsed.file.document).toEqual(rect.doc);
+    // And a file with a boolean group comes back as it was saved.
+    const saved = united().doc;
+    const again = parseFile({ format: 'open-design', schemaVersion: CURRENT_SCHEMA_VERSION, meta: {}, document: JSON.parse(JSON.stringify(saved)) });
+    expect(again.repairs).toEqual([]);
+    expect(again.file.document).toEqual(saved);
   });
 });

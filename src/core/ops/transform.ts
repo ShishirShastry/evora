@@ -211,7 +211,7 @@ function scaleChildren(doc: Document, groupId: NodeId, sx: number, sy: number): 
       const scaled = scaleNetwork(child.network, child.width > 0 ? width / child.width : 1, child.height > 0 ? height / child.height : 1);
       (patches[childId] as LayerPatch).network = scaled;
     }
-    if (child.type === 'GROUP') {
+    if (child.type === 'GROUP' || child.type === 'BOOLEAN_OPERATION') {
       nested.push([childId, child.width > 0 ? width / child.width : 1, child.height > 0 ? height / child.height : 1]);
     }
   }
@@ -240,7 +240,7 @@ export function setLayerBox(doc: Document, id: NodeId, box: Partial<Box>): Docum
     return patchNodes(doc, { [id]: patch });
   }
   let next = patchNodes(doc, { [id]: box });
-  if (node.type === 'GROUP') {
+  if (node.type === 'GROUP' || node.type === 'BOOLEAN_OPERATION') {
     const sx = box.width !== undefined && node.width > 0 ? box.width / node.width : 1;
     const sy = box.height !== undefined && node.height > 0 ? box.height / node.height : 1;
     next = scaleChildren(next, id, sx, sy);

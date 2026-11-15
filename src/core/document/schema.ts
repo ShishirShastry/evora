@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 10 (adds masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
+ * OPEN DESIGN document schema, version 11 (adds boolean groups; version 10 added masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
@@ -7,19 +7,19 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
 export type NodeId = string;
 
-export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT' | 'VECTOR';
+export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT' | 'VECTOR' | 'BOOLEAN_OPERATION';
 export type NodeType = 'PAGE' | LayerType;
 
-export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT', 'VECTOR'];
+export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT', 'VECTOR', 'BOOLEAN_OPERATION'];
 export const NODE_TYPES: readonly NodeType[] = ['PAGE', ...LAYER_TYPES];
 /** Types that may have children. */
-export const CONTAINER_TYPES: readonly NodeType[] = ['PAGE', 'FRAME', 'GROUP'];
+export const CONTAINER_TYPES: readonly NodeType[] = ['PAGE', 'FRAME', 'GROUP', 'BOOLEAN_OPERATION'];
 
 export interface RGB {
   r: number;
@@ -420,7 +420,36 @@ export interface VectorNode extends LayerBase {
   endArrow: ArrowType;
 }
 
-export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode | TextNode | VectorNode;
+/** How a boolean group combines the shapes in it. */
+export type BooleanOperation = 'UNION' | 'SUBTRACT' | 'INTERSECT' | 'EXCLUDE';
+export const BOOLEAN_OPERATIONS: readonly BooleanOperation[] = ['UNION', 'SUBTRACT', 'INTERSECT', 'EXCLUDE'];
+
+/**
+ * A boolean group shows the result of combining the shapes it holds: their
+ * union, the bottom-most with the others taken out of it, what they all
+ * share, or what an odd number of them cover. The shapes stay in it as its
+ * children and can still be moved and edited; they are not painted
+ * themselves. `network` is that result, in the group's own space, and the
+ * group's box is the result's bounding box; both are kept up to date
+ * automatically (see `refreshBoolean`) and are never edited directly.
+ */
+export interface BooleanOperationNode extends LayerBase {
+  type: 'BOOLEAN_OPERATION';
+  operation: BooleanOperation;
+  network: VectorNetwork;
+}
+
+export type LayerNode =
+  | FrameNode
+  | GroupNode
+  | RectangleNode
+  | EllipseNode
+  | LineNode
+  | PolygonNode
+  | StarNode
+  | TextNode
+  | VectorNode
+  | BooleanOperationNode;
 export type DesignNode = PageNode | LayerNode;
 
 export type NodeMap = Readonly<Record<NodeId, DesignNode>>;
@@ -476,8 +505,17 @@ export function isVector(node: DesignNode | undefined): node is VectorNode {
   return node !== undefined && node.type === 'VECTOR';
 }
 
-export function isContainer(node: DesignNode | undefined): node is PageNode | FrameNode | GroupNode {
-  return node !== undefined && (node.type === 'PAGE' || node.type === 'FRAME' || node.type === 'GROUP');
+export function isBoolean(node: DesignNode | undefined): node is BooleanOperationNode {
+  return node !== undefined && node.type === 'BOOLEAN_OPERATION';
+}
+
+/** Groups and boolean groups: containers whose box follows what is in them, and whose children move with them. */
+export function isGroupLike(node: DesignNode | undefined): node is GroupNode | BooleanOperationNode {
+  return node !== undefined && (node.type === 'GROUP' || node.type === 'BOOLEAN_OPERATION');
+}
+
+export function isContainer(node: DesignNode | undefined): node is PageNode | FrameNode | GroupNode | BooleanOperationNode {
+  return node !== undefined && (node.type === 'PAGE' || node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'BOOLEAN_OPERATION');
 }
 
 export function hasCornerRadius(node: DesignNode | undefined): node is FrameNode | RectangleNode {
@@ -494,6 +532,7 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   innerRadius?: number;
   network?: VectorNetwork;
   windingRule?: WindingRule;
+  operation?: BooleanOperation;
   arcStart?: number;
   arcSweep?: number;
   arcRatio?: number;

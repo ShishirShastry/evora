@@ -20,6 +20,7 @@ import {
   topLevelIds,
 } from '../scene/tree';
 import { reparentNodes } from './arrange';
+import { refreshBoolean } from './booleans';
 import { insertionKeys } from './ordering';
 import { clean } from './transform';
 
@@ -128,13 +129,18 @@ function fitGroup(doc: Document, id: NodeId): Document {
 }
 
 /**
- * Restores the invariants of groups after any edit: a group with no children
- * is removed, and every group's box is its children's bounding box. Runs
- * innermost groups first. Returns the same document when nothing needs doing.
+ * Restores the invariants of groups and boolean groups after any edit: one
+ * with no children is removed, every group's box is its children's bounding
+ * box, and every boolean group shows the combination of its children as they
+ * now are. Runs innermost first. Returns the same document when nothing
+ * needs doing.
  */
 export function normalizeGroups(doc: Document): Document {
   let groups: NodeId[] = [];
-  for (const id in doc.nodes) if (doc.nodes[id]?.type === 'GROUP') groups.push(id);
+  for (const id in doc.nodes) {
+    const type = doc.nodes[id]?.type;
+    if (type === 'GROUP' || type === 'BOOLEAN_OPERATION') groups.push(id);
+  }
   if (groups.length === 0) return doc;
 
   let next = doc;
@@ -150,6 +156,6 @@ export function normalizeGroups(doc: Document): Document {
   const depth = new Map<NodeId, number>();
   for (const id of groups) depth.set(id, getAncestorIds(next, id).length);
   groups.sort((a, b) => (depth.get(b) ?? 0) - (depth.get(a) ?? 0));
-  for (const id of groups) next = fitGroup(next, id);
+  for (const id of groups) next = next.nodes[id]?.type === 'BOOLEAN_OPERATION' ? refreshBoolean(next, id) : fitGroup(next, id);
   return next;
 }

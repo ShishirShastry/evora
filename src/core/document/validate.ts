@@ -5,6 +5,7 @@ import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
 import {
   ARROW_TYPES,
   BLEND_MODES,
+  BOOLEAN_OPERATIONS,
   CONSTRAINT_TYPES,
   CONTAINER_TYPES,
   LAYOUT_GRID_ALIGNMENTS,
@@ -333,6 +334,9 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.endArrow = oneOf(raw.endArrow, ARROW_TYPES, 'NONE');
     // The box of a vector is the bounding box of its curves.
     return fitVectorNode(layer);
+  } else if (layer.type === 'BOOLEAN_OPERATION') {
+    layer.operation = oneOf(raw.operation, BOOLEAN_OPERATIONS, 'UNION');
+    layer.network = vectorNetwork(raw.network);
   }
   return layer;
 }

@@ -295,7 +295,8 @@ test('boolean operations: subtract, intersect, exclude and union of a square and
   // Subtract, from the button in the properties panel: the square with the circle's bite out of it.
   await page.getByRole('toolbar', { name: 'Combine shapes' }).getByRole('button', { name: 'Subtract selection' }).click();
   await expect(layer(page, 'Subtract')).toBeVisible();
-  await expect(layers(page).getByRole('treeitem')).toHaveCount(1);
+  // The two shapes are still there, listed inside the group.
+  await expect(layers(page).getByRole('treeitem')).toHaveCount(3);
   await expectPainted([squareOnly], [both, circleOnly, neither]);
   await expect(field(page, 'Width')).toHaveValue('200');
   await canvas(page).focus();
@@ -326,13 +327,38 @@ test('boolean operations: subtract, intersect, exclude and union of a square and
   await expect(field(page, 'Width')).toHaveValue('300');
   await expect(field(page, 'Height')).toHaveValue('300');
 
-  // The result is an ordinary vector: its points can be opened, and it is saved.
-  await expect(page.getByRole('button', { name: 'Edit points' })).toBeVisible();
+  // The group keeps its shapes, so it can be told to combine them differently...
+  await expect(layer(page, 'Rectangle 1')).toBeVisible();
+  await expect(layer(page, 'Ellipse 1')).toBeVisible();
+  await page.getByRole('combobox', { name: 'Boolean operation', exact: true }).selectOption('INTERSECT');
+  await expect(layer(page, 'Intersect')).toBeVisible();
+  await expectPainted([both], [squareOnly, circleOnly, neither]);
+
+  // ...and moving one of them changes the result: 60 to the left, the circle covers more of the square.
+  const newlyCovered: [number, number] = [270, 380];
+  expectNear(await pixel(page, ...newlyCovered), PAGE);
+  await layer(page, 'Ellipse 1').click();
+  const x = Number(await field(page, 'X position').inputValue());
+  await field(page, 'X position').fill(String(x - 60));
+  await field(page, 'X position').press('Enter');
+  expectNear(await pixel(page, ...newlyCovered), GREY);
+  expectNear(await pixel(page, ...circleOnly), PAGE);
+
+  // It is saved as a group.
   await expect(page.getByRole('status')).toHaveText('Saved');
   await page.reload();
   await expect(canvas(page)).toBeVisible();
-  await expect.poll(() => pixel(page, 450, 450)).toEqual(GREY);
-  await expect(layer(page, 'Union')).toBeVisible();
+  await expect.poll(() => pixel(page, ...newlyCovered)).toEqual(GREY);
+  await expect(layer(page, 'Intersect')).toBeVisible();
+  await expect(layer(page, 'Ellipse 1')).toBeVisible();
+
+  // Flattened, it becomes an ordinary vector of its result, and the shapes are gone.
+  await layer(page, 'Intersect').click();
+  await canvas(page).focus();
+  await page.keyboard.press('Control+e');
+  await expect(page.getByRole('button', { name: 'Edit points' })).toBeVisible();
+  await expect(layers(page).getByRole('treeitem')).toHaveCount(1);
+  expectNear(await pixel(page, ...newlyCovered), GREY);
 
   expect(errors).toEqual([]);
 });
