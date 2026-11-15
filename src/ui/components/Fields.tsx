@@ -31,10 +31,11 @@ export function NumberField({ label, prefix, suffix, value, onCommit, min, max, 
   const [text, setText] = useState(shown);
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!editing) setText(shown);
-  }, [shown, editing]);
+  // While nobody is typing, the field shows the document's value directly, in
+  // the very render in which that value changes. (Copying it into state in an
+  // effect would rewrite the input a moment later, which loses the selection
+  // of someone who has already clicked into the field and started typing.)
+  const display = editing ? text : shown;
 
   const clamp = (n: number): number => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
 
@@ -60,8 +61,9 @@ export function NumberField({ label, prefix, suffix, value, onCommit, min, max, 
         spellCheck={false}
         disabled={disabled}
         placeholder={value === MIXED ? 'Mixed' : undefined}
-        value={text}
+        value={display}
         onFocus={(event) => {
+          setText(shown);
           setEditing(true);
           event.currentTarget.select();
         }}
@@ -130,10 +132,6 @@ export function ColorField({ label, value, onChange }: ColorFieldProps) {
   const latest = useRef(onChange);
   latest.current = onChange;
 
-  useEffect(() => {
-    if (!editing) setText(hex);
-  }, [hex, editing]);
-
   // React's onChange fires continuously for colour inputs; the native
   // "change" event fires once, when the picker is closed.
   useEffect(() => {
@@ -181,8 +179,10 @@ export function ColorField({ label, value, onChange }: ColorFieldProps) {
         className="h-full w-full min-w-0 border-0 bg-transparent px-2 uppercase outline-none"
         spellCheck={false}
         maxLength={7}
-        value={text}
+        // As in NumberField: the document's value, directly, while nobody is typing.
+        value={editing ? text : hex}
         onFocus={(event) => {
+          setText(hex);
           setEditing(true);
           event.currentTarget.select();
         }}

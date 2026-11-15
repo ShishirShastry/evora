@@ -1,5 +1,9 @@
 import {
+  applyToPoint,
   getChildIds,
+  getTangent,
+  handlesOf,
+  isVector,
   layoutGridGeometry,
   getWorldCorners,
   getWorldMatrix,
@@ -16,6 +20,7 @@ import {
   type SnapGuide,
 } from '../../core';
 import { getSelectionFrame } from '../input/selectionFrame';
+import type { VectorOverlay } from '../input/vectorTool';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
 import { traceLayerPath } from './paint';
 import { drawGuides, drawRulers } from './rulers';
@@ -57,6 +62,8 @@ export interface OverlayInput {
   showLayoutGrids?: boolean;
   /** Draw the rulers and the page's ruler guides. Off by default. */
   showRulers?: boolean;
+  /** The points, handles and pen preview of a vector that is being edited or drawn. */
+  vector?: VectorOverlay | null;
 }
 
 const gridFrameCache = new WeakMap<NodeMap, Map<NodeId, NodeId[]>>();
@@ -244,6 +251,8 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     }
   }
 
+  if (input.vector) drawVectorEditing(ctx, doc, viewport, input.vector);
+
   // Smart guides: the lines the selection is currently snapped to.
   if (input.guides && input.guides.length > 0) {
     ctx.strokeStyle = GUIDE_COLOR;
@@ -279,6 +288,70 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   return { labels };
+}
+
+const POINT_SIZE = 7;
+const HANDLE_RADIUS = 3;
+
+/**
+ * Draws a vector's points as squares (filled when selected), the handles of
+ * the selected points as round knobs on a line, and the segment the pen
+ * would add next. All in screen pixels.
+ */
+function drawVectorEditing(ctx: Ctx, doc: Document, viewport: Viewport, edit: VectorOverlay): void {
+  const node = edit.id ? doc.nodes[edit.id] : undefined;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  if (edit.preview) {
+    const from = worldToScreen(viewport, edit.preview.from);
+    const to = worldToScreen(viewport, edit.preview.to);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    if (edit.preview.control) {
+      const control = worldToScreen(viewport, edit.preview.control);
+      ctx.bezierCurveTo(control.x, control.y, to.x, to.y, to.x, to.y);
+    } else ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = ACCENT;
+    ctx.stroke();
+  }
+  const square = (p: Point, size: number, filled: boolean): void => {
+    ctx.beginPath();
+    ctx.rect(Math.round(p.x) - size / 2, Math.round(p.y) - size / 2, size, size);
+    ctx.fillStyle = filled ? ACCENT : '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = filled ? '#ffffff' : ACCENT;
+    ctx.stroke();
+  };
+  if (isVector(node)) {
+    const matrix = getWorldMatrix(doc, node.id);
+    const at = (p: Point): Point => worldToScreen(viewport, applyToPoint(matrix, p));
+    const selected = new Set(edit.selected);
+    for (const vertex of edit.selected) {
+      const point = node.network.vertices[vertex];
+      if (!point) continue;
+      const origin = at(point);
+      for (const ref of handlesOf(node.network, vertex)) {
+        const tangent = getTangent(node.network, ref);
+        if (tangent.x === 0 && tangent.y === 0) continue;
+        const tip = at({ x: point.x + tangent.x, y: point.y + tangent.y });
+        ctx.beginPath();
+        ctx.moveTo(origin.x, origin.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.strokeStyle = ACCENT;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, HANDLE_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+    node.network.vertices.forEach((point, index) => {
+      const emphasised = index === edit.hoverVertex || index === edit.penVertex;
+      square(at(point), emphasised ? POINT_SIZE + 2 : POINT_SIZE, selected.has(index));
+    });
+  }
+  if (edit.start) square(worldToScreen(viewport, edit.start), POINT_SIZE, true);
 }
 
 function formatSize(value: number): string {

@@ -52,9 +52,10 @@ export interface VectorToolHost {
   setMarquee(rect: Rect | null): void;
   /**
    * Puts a page-space point on whole pixels and, when snapping is on, on the
-   * lines of the layers in `containerId`, showing the guides it snapped to.
+   * lines of the layers in `containerId`. With `show`, the guides it snapped
+   * to are drawn until the interaction ends.
    */
-  snapPoint(world: Point, doc: Document, containerId: NodeId, exclude: ReadonlySet<NodeId>): Point;
+  snapPoint(world: Point, doc: Document, containerId: NodeId, exclude: ReadonlySet<NodeId>, show: boolean): Point;
 }
 
 /** What the overlay draws for a vector that is being edited or drawn. Positions are in page space. */
@@ -114,7 +115,8 @@ type VectorMode =
 
 const sub = (a: Point, b: Point): Point => ({ x: a.x - b.x, y: a.y - b.y });
 const add = (a: Point, b: Point): Point => ({ x: a.x + b.x, y: a.y + b.y });
-const negate = (a: Point): Point => ({ x: -a.x, y: -a.y });
+// Subtracting from zero rather than negating keeps -0 out of the document.
+const negate = (a: Point): Point => ({ x: 0 - a.x, y: 0 - a.y });
 
 /**
  * The Pen tool and point editing. Like the controller that owns it, it keeps
@@ -208,13 +210,13 @@ export class VectorTool {
   private vertexAt(node: VectorNode, matrix: Matrix, world: Point): number | null {
     let best: number | null = null;
     let bestDistance = this.tolerance(POINT_HIT_PX);
-    node.network.vertices.forEach((vertex, index) => {
-      const d = distance(applyToPoint(matrix, vertex), world);
+    for (let index = 0; index < node.network.vertices.length; index++) {
+      const d = distance(applyToPoint(matrix, node.network.vertices[index] as Point), world);
       if (d <= bestDistance) {
         best = index;
         bestDistance = d;
       }
-    });
+    }
     return best;
   }
 
@@ -313,7 +315,7 @@ export class VectorTool {
     }
   }
 
-  pointerUp(e: PointerInput): void {
+  pointerUp(): void {
     const mode = this.mode;
     this.mode = { kind: 'idle' };
     const state = this.state;
@@ -355,7 +357,6 @@ export class VectorTool {
         break;
     }
     this.depth = this.store.getState().undoStack.length;
-    this.hover(e);
     this.host.requestRender();
   }
 
@@ -409,7 +410,7 @@ export class VectorTool {
     const from = pen ? this.fromWorld() : null;
     if (from) {
       const vertex = node && hit !== null ? node.network.vertices[hit] : undefined;
-      const to = node && vertex ? applyToPoint(getWorldMatrix(state.doc, node.id), vertex) : this.target(world, e, from);
+      const to = node && vertex ? applyToPoint(getWorldMatrix(state.doc, node.id), vertex) : this.target(world, e, from, false);
       preview = { from, control: this.tangent ? add(from, this.tangent) : null, to };
     }
     this.host.setCursor(pen ? 'crosshair' : 'default');
@@ -420,7 +421,7 @@ export class VectorTool {
   }
 
   /** Where a press at `world` puts a new point: on whole pixels, snapped to nearby layers, or with Shift at a multiple of 45° from the last point. */
-  private target(world: Point, e: PointerInput, from: Point | null): Point {
+  private target(world: Point, e: PointerInput, from: Point | null, show: boolean): Point {
     const state = this.state;
     if (e.shiftKey && from) {
       const p = snapAngle(from, world, 45);
@@ -428,7 +429,7 @@ export class VectorTool {
     }
     const node = this.editing();
     const container = node ? node.parentId : containerAt(state.doc, state.pageId, world);
-    return this.host.snapPoint(world, state.doc, container, new Set(node ? [node.id] : []));
+    return this.host.snapPoint(world, state.doc, container, new Set(node ? [node.id] : []), show);
   }
 
   // -------------------------------------------------------------------- pen
@@ -482,7 +483,7 @@ export class VectorTool {
       }
     }
 
-    const point = this.target(world, e, this.fromWorld());
+    const point = this.target(world, e, this.fromWorld(), true);
     if (!this.from) {
       // The first point of a path. Nothing is added to the document until there is a second.
       this.from = { kind: 'start', world: point };
@@ -646,7 +647,7 @@ export class VectorTool {
     if (grabbed && !e.shiftKey) {
       // The point under the pointer is the one that lands on whole pixels and snaps to other layers.
       const before = applyToPoint(matrix, grabbed);
-      const after = this.host.snapPoint(add(before, delta), mode.base, node.parentId, new Set([mode.id]));
+      const after = this.host.snapPoint(add(before, delta), mode.base, node.parentId, new Set([mode.id]), true);
       delta = sub(after, before);
     } else delta = { x: Math.round(delta.x), y: Math.round(delta.y) };
     const local = applyToVector(invert(matrix), delta);

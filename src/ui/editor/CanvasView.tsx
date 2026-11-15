@@ -115,7 +115,9 @@ export function CanvasView() {
         guides: controller.guides,
         showLayoutGrids: state.showLayoutGrids,
         showRulers: state.showRulers,
-        showHandles: !controller.isTransforming && state.editingTextId === null,
+        // A vector whose points are being edited shows those instead of the box handles.
+        showHandles: !controller.isTransforming && state.editingTextId === null && state.vectorEdit === null,
+        vector: controller.vectorOverlay(),
       });
       controller.labels = result.labels;
     };

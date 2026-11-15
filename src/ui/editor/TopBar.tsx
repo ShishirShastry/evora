@@ -17,6 +17,7 @@ const TOOLS: { tool: ToolId; icon: IconName }[] = [
   { tool: 'polygon', icon: 'polygon' },
   { tool: 'star', icon: 'star' },
   { tool: 'text', icon: 'text' },
+  { tool: 'pen', icon: 'pen' },
 ];
 
 const SAVE_LABELS: Record<SaveStatus, string> = {

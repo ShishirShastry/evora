@@ -18,6 +18,7 @@ import {
   invert,
   isLayer,
   isText,
+  isVector,
   lineBox,
   lineEndpoints,
   moveNodesBy,
@@ -55,6 +56,7 @@ import { hitFrameLabel, type FrameLabel } from '../render/overlay';
 import { RULER_SIZE } from '../render/rulers';
 import { panBy, screenToWorld, zoomAt } from '../viewport';
 import { getSelectionFrame, handleCursor, hitHandle, pointInSelectionFrame, type SelectionFrame } from './selectionFrame';
+import { VectorTool, type VectorOverlay } from './vectorTool';
 
 /** A pointer event reduced to what the tools need. Coordinates are CSS pixels relative to the canvas. */
 export interface PointerInput {
@@ -136,7 +138,9 @@ type Mode =
   /** Text tool: a click places auto-width text, a drag sets the width of a text box. */
   | { kind: 'text'; startScreen: Point; startWorld: Point }
   /** A ruler guide being pulled out of a ruler (`index` null) or moved (its index in the page's guides). */
-  | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document };
+  | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document }
+  /** The Pen tool or point editing has the pointer; see `VectorTool`. */
+  | { kind: 'vector' };
 
 export interface ControllerHost {
   /** Called when the overlay (marquee, handles) needs repainting without a store change. */
@@ -162,15 +166,38 @@ export class InteractionController {
   /** Snap lines of the container being worked in, kept for the length of one interaction. */
   private snapCache: { doc: Document; key: string; targets: SnapTargets } | null = null;
 
+  /** The Pen tool and the editing of a vector's points. */
+  readonly vector: VectorTool;
+
   constructor(
     private readonly store: EditorStore,
     private readonly host: ControllerHost,
-  ) {}
+  ) {
+    this.vector = new VectorTool(store, {
+      requestRender: () => host.requestRender(),
+      setCursor: (cursor) => host.setCursor(cursor),
+      setMarquee: (rect) => {
+        this.marquee = rect;
+      },
+      snapPoint: (world, doc, containerId, exclude, show) => {
+        const whole = { x: Math.round(world.x), y: Math.round(world.y) };
+        const snapped = this.snapWorldPoint(whole, doc, [containerId], exclude, { x: true, y: true });
+        if (!show) this.guides = [];
+        return snapped;
+      },
+    });
+  }
 
   /** True while the selection is being moved, resized, rotated or drawn. */
   get isTransforming(): boolean {
     const kind = this.mode.kind;
+    if (kind === 'vector') return this.vector.isTransforming;
     return kind === 'move' || kind === 'resize' || kind === 'rotate' || kind === 'line-end' || kind === 'draw';
+  }
+
+  /** What the overlay draws for the vector being edited or drawn, if any. */
+  vectorOverlay(): VectorOverlay | null {
+    return this.vector.overlay();
   }
 
   get isBusy(): boolean {
@@ -282,6 +309,12 @@ export class InteractionController {
       if (tool === 'move' && ruler !== 'corner') this.beginGuide(ruler, null);
       return;
     }
+    if (this.vector.wantsPointer) {
+      this.vector.pointerDown(e);
+      if (this.vector.isBusy) this.mode = { kind: 'vector' };
+      this.host.requestRender();
+      return;
+    }
     const shape = SHAPE_TOOLS[tool];
     if (shape) this.beginDraw(shape, e);
     else if (tool === 'text') {
@@ -332,6 +365,9 @@ export class InteractionController {
         return;
       case 'guide':
         this.updateGuide(mode, e);
+        return;
+      case 'vector':
+        this.vector.pointerMove(e);
         return;
       case 'text':
         // Show the box being dragged out.
@@ -384,6 +420,9 @@ export class InteractionController {
         this.marquee = null;
         this.createText(mode, e);
         break;
+      case 'vector':
+        this.vector.pointerUp();
+        break;
     }
     // Finishing a draw computes its final box, which may snap once more; nothing stays snapped afterwards.
     this.endSnapping();
@@ -394,10 +433,16 @@ export class InteractionController {
   /** Abandons the interaction in progress and restores the document. Returns true if there was one. */
   cancel(): boolean {
     const mode = this.mode;
-    if (mode.kind === 'idle') return false;
+    // With nothing being dragged, this ends the path the pen is in the middle of.
+    if (mode.kind === 'idle') return this.vector.cancel();
     this.mode = { kind: 'idle' };
     this.marquee = null;
     this.endSnapping();
+    if (mode.kind === 'vector') {
+      this.vector.cancel();
+      this.host.requestRender();
+      return true;
+    }
     this.state.cancelGesture();
     if (mode.kind === 'draw' || mode.kind === 'text') this.state.setTool('move');
     this.host.setCursor(this.idleCursor());
@@ -407,7 +452,9 @@ export class InteractionController {
 
   /** The pointer left the canvas. */
   pointerLeave(): void {
-    if (this.mode.kind === 'idle') this.state.setHovered(null);
+    if (this.mode.kind !== 'idle') return;
+    this.state.setHovered(null);
+    this.vector.pointerLeave();
   }
 
   // ------------------------------------------------------------------ wheel
@@ -438,6 +485,7 @@ export class InteractionController {
   idleCursor(): string {
     if (this.spaceDown || this.state.tool === 'hand') return 'grab';
     if (this.state.tool === 'text') return 'text';
+    if (this.state.tool === 'pen') return 'crosshair';
     return SHAPE_TOOLS[this.state.tool] ? 'crosshair' : 'default';
   }
 
@@ -462,6 +510,11 @@ export class InteractionController {
 
   private updateHover(e: PointerInput): void {
     const state = this.state;
+    if (!this.spaceDown && this.vector.wantsPointer) {
+      state.setHovered(null);
+      this.vector.hover(e);
+      return;
+    }
     if (this.spaceDown || state.tool !== 'move') {
       state.setHovered(null);
       this.host.setCursor(this.idleCursor());
@@ -545,6 +598,12 @@ export class InteractionController {
       label ?? selectionTargetAt(state.doc, state.pageId, world, state.selection, { tolerance, deep: e.ctrlKey });
     if (!label && e.detail >= 2) {
       const deeper = deeperTargetAt(state.doc, state.pageId, world, state.selection, tolerance);
+      // Double-clicking a vector that a single click already reaches opens it for editing its points.
+      if (deeper && isVector(state.doc.nodes[deeper]) && (deeper === target || state.selection.includes(deeper))) {
+        state.setVectorEdit({ id: deeper, vertices: [] });
+        this.host.requestRender();
+        return;
+      }
       // Double-clicking a text layer that a single click already reaches edits its text.
       if (deeper && isText(state.doc.nodes[deeper]) && (deeper === target || state.selection.includes(deeper))) {
         state.setSelection([deeper]);

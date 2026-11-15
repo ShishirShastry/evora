@@ -253,8 +253,10 @@ describe('vector networks', () => {
     expect(networkGeometry(network).chains).toHaveLength(1);
 
     // A straight segment stays straight.
-    const line = splitSegment(network, 2, 0.25).network;
-    expect(line.vertices[4]).toEqual({ x: 125, y: 0 });
+    const line = splitSegment(network, 2, 0.5).network;
+    expect(line.vertices[4]).toEqual({ x: 150, y: 0 });
+    // The parameter is the curve's own: a quarter of the way through it is not a quarter of the way along.
+    expect(splitSegment(network, 2, 0.25).network.vertices[4]).toEqual({ x: 115.625, y: 0 });
     expect(line.segments[2]).toEqual({ start: 1, end: 4, tangentStart: { x: 0, y: 0 }, tangentEnd: { x: 0, y: 0 } });
     expect(line.segments[3]).toEqual({ start: 4, end: 2, tangentStart: { x: 0, y: 0 }, tangentEnd: { x: 0, y: 0 } });
   });

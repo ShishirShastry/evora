@@ -419,7 +419,7 @@ export function setTangent(network: VectorNetwork, ref: HandleRef, tangent: Poin
     const others = handlesOf(network, handleVertex(network, ref)).filter((h) => !(h.segment === ref.segment && h.end === ref.end));
     if (others.length === 1) {
       const other = others[0] as HandleRef;
-      if (mirroring === 'ANGLE_AND_LENGTH') withTangent(segments, other, { x: -tangent.x, y: -tangent.y });
+      if (mirroring === 'ANGLE_AND_LENGTH') withTangent(segments, other, { x: 0 - tangent.x, y: 0 - tangent.y });
       else {
         const current = getTangent(network, other);
         const otherLength = Math.hypot(current.x, current.y);
@@ -450,8 +450,9 @@ export function mirroringAt(network: VectorNetwork, vertex: number): HandleMirro
 }
 
 /**
- * Adds a point on a segment at parameter `t` without changing the shape: the
- * segment becomes two. Returns the new point's index.
+ * Adds a point on a segment at parameter `t` of its curve (as `nearestSegment`
+ * gives it) without changing the shape: the segment becomes two. Returns the
+ * new point's index.
  */
 export function splitSegment(network: VectorNetwork, index: number, t: number): { network: VectorNetwork; vertex: number } {
   const segment = network.segments[index];
@@ -463,7 +464,9 @@ export function splitSegment(network: VectorNetwork, index: number, t: number): 
   let first: VectorSegment;
   let second: VectorSegment;
   if (isStraight(c)) {
-    mid = { x: c.p0.x + (c.p3.x - c.p0.x) * t, y: c.p0.y + (c.p3.y - c.p0.y) * t };
+    // `t` is the curve's own parameter, which does not run evenly along a
+    // straight segment; this is the point `nearestSegment` reports for it.
+    mid = cubicAt(c, t);
     first = { start: segment.start, end: vertex, tangentStart: ZERO, tangentEnd: ZERO };
     second = { start: vertex, end: segment.end, tangentStart: ZERO, tangentEnd: ZERO };
   } else {

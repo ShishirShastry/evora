@@ -17,7 +17,14 @@ import {
 } from '../core';
 import { DEFAULT_VIEWPORT, type Size, type Viewport } from '../engine/viewport';
 
-export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'text';
+export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'text' | 'pen';
+
+/** Point-level editing of one vector layer: which layer, and which of its points are selected. */
+export interface VectorEdit {
+  id: NodeId;
+  /** Indices into the layer's network. */
+  vertices: number[];
+}
 
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error';
 
@@ -60,6 +67,8 @@ export interface EditorState {
   renamingId: NodeId | null;
   /** Text layer whose characters are being edited in place on the canvas. */
   editingTextId: NodeId | null;
+  /** The vector layer whose points are being edited on the canvas. It is always the whole selection. */
+  vectorEdit: VectorEdit | null;
   /** Whether moving, resizing and drawing snap to nearby layers. A user preference. */
   snapping: boolean;
   /** Whether frames' layout grids are drawn (and snapped to). A user preference. */
@@ -111,6 +120,8 @@ export interface EditorActions {
   setCollapsed(id: NodeId, collapsed: boolean): void;
   setRenaming(id: NodeId | null): void;
   setEditingText(id: NodeId | null): void;
+  /** Starts point editing of a vector layer (which becomes the selection), changes which points are selected, or with null ends it. */
+  setVectorEdit(edit: VectorEdit | null): void;
   setSnapping(snapping: boolean): void;
   setShowLayoutGrids(show: boolean): void;
   setShowRulers(show: boolean): void;
@@ -136,6 +147,18 @@ export function sanitizeSelection(doc: Document, pageId: NodeId, ids: readonly N
     if (isLayer(doc.nodes[id]) && getPageIdOf(doc, id) === pageId) out.push(id);
   }
   return out;
+}
+
+/**
+ * Point editing lasts only while its vector exists and is the one selected
+ * layer. Points that no longer exist drop out of the point selection.
+ */
+function keepVectorEdit(doc: Document, selection: readonly NodeId[], edit: VectorEdit | null): VectorEdit | null {
+  if (!edit) return null;
+  const node = doc.nodes[edit.id];
+  if (!node || node.type !== 'VECTOR' || selection.length !== 1 || selection[0] !== edit.id) return null;
+  const count = node.network.vertices.length;
+  return edit.vertices.every((vertex) => vertex < count) ? edit : { id: edit.id, vertices: edit.vertices.filter((vertex) => vertex < count) };
 }
 
 function sameIds(a: readonly NodeId[], b: readonly NodeId[]): boolean {
@@ -177,12 +200,14 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
     /** Switches page (if needed) and selection after a history step or page change. */
     const withPage = (state: EditorState, doc: Document, pageId: NodeId, selection: readonly NodeId[]) => {
       const nextPage = resolvePage(doc, pageId, state.pageId);
+      const nextSelection = sanitizeSelection(doc, nextPage, selection);
       if (nextPage === state.pageId) {
-        return { pageId: nextPage, selection: sanitizeSelection(doc, nextPage, selection) };
+        return { pageId: nextPage, selection: nextSelection, vectorEdit: keepVectorEdit(doc, nextSelection, state.vectorEdit) };
       }
       return {
         pageId: nextPage,
-        selection: sanitizeSelection(doc, nextPage, selection),
+        selection: nextSelection,
+        vectorEdit: null,
         viewports: { ...state.viewports, [state.pageId]: state.viewport },
         viewport: state.viewports[nextPage] ?? DEFAULT_VIEWPORT,
         hoveredId: null,
@@ -207,6 +232,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       collapsed: {},
       renamingId: null,
       editingTextId: null,
+      vectorEdit: null,
       snapping: options.snapping ?? true,
       showLayoutGrids: options.showLayoutGrids ?? true,
       showRulers: options.showRulers ?? false,
@@ -223,7 +249,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const patch = diffDocuments(state.doc, next);
         if (!patch) {
           const selection = sanitizeSelection(state.doc, state.pageId, options?.select ?? state.selection);
-          if (!sameIds(selection, state.selection)) set({ selection });
+          if (!sameIds(selection, state.selection)) set({ selection, vectorEdit: keepVectorEdit(state.doc, selection, state.vectorEdit) });
           return;
         }
         // The change may have removed the current page, or asked to show another one.
@@ -253,7 +279,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const next = normalize(state.gesture.doc, fn(state.gesture.doc));
         const selection = select ? sanitizeSelection(next, state.pageId, select) : sanitizeSelection(next, state.pageId, state.selection);
         if (next === state.doc && sameIds(selection, state.selection)) return;
-        set({ doc: next, selection });
+        set({ doc: next, selection, vectorEdit: keepVectorEdit(next, selection, state.vectorEdit) });
       },
 
       commitGesture(label) {
@@ -278,9 +304,11 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       cancelGesture() {
         const state = get();
         if (!state.gesture) return;
+        const selection = sanitizeSelection(state.gesture.doc, state.pageId, state.gesture.selection);
         set({
           doc: state.gesture.doc,
-          selection: sanitizeSelection(state.gesture.doc, state.pageId, state.gesture.selection),
+          selection,
+          vectorEdit: keepVectorEdit(state.gesture.doc, selection, state.vectorEdit),
           gesture: null,
         });
       },
@@ -320,11 +348,14 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       setSelection(ids) {
         const state = get();
         const selection = sanitizeSelection(state.doc, state.pageId, ids);
-        if (!sameIds(selection, state.selection)) set({ selection });
+        if (!sameIds(selection, state.selection)) set({ selection, vectorEdit: keepVectorEdit(state.doc, selection, state.vectorEdit) });
       },
 
       setTool(tool) {
-        if (get().tool !== tool) set({ tool });
+        if (get().tool === tool) return;
+        // Picking up a drawing tool other than the pen ends point editing.
+        const keepsEditing = tool === 'move' || tool === 'hand' || tool === 'pen';
+        set(keepsEditing ? { tool } : { tool, vectorEdit: null });
       },
 
       setPage(pageId) {
@@ -375,7 +406,28 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       setEditingText(id) {
         const state = get();
         const valid = id !== null && state.doc.nodes[id]?.type === 'TEXT' ? id : null;
-        if (state.editingTextId !== valid) set({ editingTextId: valid, hoveredId: null });
+        if (state.editingTextId !== valid) set({ editingTextId: valid, hoveredId: null, vectorEdit: valid === null ? state.vectorEdit : null });
+      },
+
+      setVectorEdit(edit) {
+        const state = get();
+        if (edit === null) {
+          if (state.vectorEdit !== null) set({ vectorEdit: null });
+          return;
+        }
+        const node = state.doc.nodes[edit.id];
+        if (!node || node.type !== 'VECTOR' || getPageIdOf(state.doc, edit.id) !== state.pageId) return;
+        const count = node.network.vertices.length;
+        const vertices = [...new Set(edit.vertices)].filter((vertex) => Number.isInteger(vertex) && vertex >= 0 && vertex < count);
+        const current = state.vectorEdit;
+        const selected = sameIds(state.selection, [edit.id]);
+        if (current && current.id === edit.id && selected && sameIds(current.vertices.map(String), vertices.map(String))) return;
+        set({
+          vectorEdit: { id: edit.id, vertices },
+          selection: selected ? state.selection : [edit.id],
+          hoveredId: null,
+          editingTextId: null,
+        });
       },
 
       renameDocument(name) {

@@ -1,6 +1,16 @@
 import {
   addPage,
+  addSegment,
   alignNodes,
+  applyToVector,
+  cornerVertex,
+  getWorldMatrix,
+  invert,
+  isVector,
+  moveVertices,
+  removeVertices,
+  setNetwork,
+  smoothVertex,
   canFlatten,
   copyNodes,
   deleteNodes,
@@ -58,7 +68,17 @@ export function clearClipboard(): void {
 // ------------------------------------------------------------------ editing
 
 export function deleteSelection(store: EditorStore): void {
-  const { selection, apply } = store.getState();
+  const { selection, apply, vectorEdit } = store.getState();
+  if (vectorEdit) {
+    // While a vector's points are being edited, Delete removes the selected points, not the layer.
+    if (vectorEdit.vertices.length === 0) return;
+    apply('Delete points', (doc) => {
+      const node = doc.nodes[vectorEdit.id];
+      return isVector(node) ? setNetwork(doc, vectorEdit.id, removeVertices(node.network, vectorEdit.vertices)) : doc;
+    });
+    store.getState().setVectorEdit({ id: vectorEdit.id, vertices: [] });
+    return;
+  }
   if (selection.length === 0) return;
   apply('Delete', (doc) => deleteNodes(doc, selection), { select: [] });
 }
@@ -114,7 +134,13 @@ function roundPoint(p: { x: number; y: number }): { x: number; y: number } {
 
 /** Selects every unlocked, visible layer at the level the user is working on. */
 export function selectAll(store: EditorStore): void {
-  const { doc, pageId, selection, setSelection } = store.getState();
+  const { doc, pageId, selection, setSelection, vectorEdit, setVectorEdit } = store.getState();
+  const edited = vectorEdit ? doc.nodes[vectorEdit.id] : undefined;
+  if (vectorEdit && isVector(edited)) {
+    // While a vector's points are being edited, "all" means all of its points.
+    setVectorEdit({ id: vectorEdit.id, vertices: edited.network.vertices.map((_, index) => index) });
+    return;
+  }
   const first = selection[0] !== undefined ? doc.nodes[selection[0]] : undefined;
   const parentId = isLayer(first) ? first.parentId : pageId;
   setSelection(
@@ -138,8 +164,61 @@ export function flattenSelection(store: EditorStore): void {
   if (created.length > 0) store.getState().setSelection(created);
 }
 
+/** The single selected vector layer whose points could be edited, if that is what is selected. */
+function editableVector(state: EditorState): NodeId | null {
+  if (state.selection.length !== 1) return null;
+  const node = state.doc.nodes[state.selection[0] as NodeId];
+  return isVector(node) && !node.locked ? node.id : null;
+}
+
+/** Starts editing the points of the selected vector, or finishes editing them. */
+export function toggleVectorEdit(store: EditorStore): void {
+  const state = store.getState();
+  if (state.vectorEdit) {
+    state.setVectorEdit(null);
+    if (store.getState().tool === 'pen') store.getState().setTool('move');
+    return;
+  }
+  const id = editableVector(state);
+  if (id) state.setVectorEdit({ id, vertices: [] });
+}
+
+/** Connects the two selected points with a straight segment, which is how two open ends are joined. */
+export function joinPoints(store: EditorStore): void {
+  const { vectorEdit, apply } = store.getState();
+  if (!vectorEdit || vectorEdit.vertices.length !== 2) return;
+  const [a, b] = vectorEdit.vertices as [number, number];
+  apply('Join points', (doc) => {
+    const node = doc.nodes[vectorEdit.id];
+    return isVector(node) ? setNetwork(doc, vectorEdit.id, addSegment(node.network, a, b).network) : doc;
+  });
+}
+
+/** Makes the selected points smooth (handles in line through the point) or corners (no handles). */
+export function setPointType(store: EditorStore, type: 'SMOOTH' | 'CORNER'): void {
+  const { vectorEdit, apply } = store.getState();
+  if (!vectorEdit || vectorEdit.vertices.length === 0) return;
+  apply(type === 'SMOOTH' ? 'Smooth points' : 'Corner points', (doc) => {
+    const node = doc.nodes[vectorEdit.id];
+    if (!isVector(node)) return doc;
+    let network = node.network;
+    for (const vertex of vectorEdit.vertices) network = type === 'SMOOTH' ? smoothVertex(network, vertex) : cornerVertex(network, vertex);
+    return setNetwork(doc, vectorEdit.id, network);
+  });
+}
+
 export function nudgeSelection(store: EditorStore, dx: number, dy: number): void {
-  const { selection, apply } = store.getState();
+  const { selection, apply, vectorEdit } = store.getState();
+  if (vectorEdit && vectorEdit.vertices.length > 0) {
+    // While points are selected, the arrow keys move them rather than the layer.
+    apply('Move points', (doc) => {
+      const node = doc.nodes[vectorEdit.id];
+      if (!isVector(node)) return doc;
+      const local = applyToVector(invert(getWorldMatrix(doc, vectorEdit.id)), { x: dx, y: dy });
+      return setNetwork(doc, vectorEdit.id, moveVertices(node.network, vectorEdit.vertices, local.x, local.y));
+    });
+    return;
+  }
   if (selection.length === 0) return;
   apply('Move', (doc) => moveNodesBy(doc, selection, dx, dy));
 }
@@ -441,6 +520,7 @@ export const COMMANDS: readonly Command[] = [
   toolCommand('polygon', 'Polygon'),
   toolCommand('star', 'Star'),
   toolCommand('text', 'Text', 'KeyT'),
+  toolCommand('pen', 'Pen', 'KeyP'),
 
   {
     id: 'file.save',
@@ -552,6 +632,8 @@ export const COMMANDS: readonly Command[] = [
       if (app.cancelInteraction()) return;
       const state = store.getState();
       if (state.tool !== 'move') state.setTool('move');
+      // Out of point editing one step at a time: first the points, then the editing itself.
+      else if (state.vectorEdit) state.setVectorEdit(state.vectorEdit.vertices.length > 0 ? { id: state.vectorEdit.id, vertices: [] } : null);
       else state.setSelection([]);
     },
   },
@@ -730,16 +812,54 @@ export const COMMANDS: readonly Command[] = [
     run: ({ store }) => flipSelection(store, 'vertical'),
   },
   {
+    // Enter edits whatever is selected: the characters of a text layer, or the points of a vector.
     id: 'object.editText',
-    label: 'Edit text',
+    label: 'Edit text or points',
     group: 'Object',
     shortcut: 'Enter',
     keys: [{ code: 'Enter' }, { code: 'NumpadEnter' }],
-    enabled: (state) => state.selection.length === 1 && state.doc.nodes[state.selection[0] as NodeId]?.type === 'TEXT',
+    enabled: (state) =>
+      (state.selection.length === 1 && state.doc.nodes[state.selection[0] as NodeId]?.type === 'TEXT') ||
+      state.vectorEdit !== null ||
+      editableVector(state) !== null,
     run: ({ store }) => {
-      const { selection, setEditingText } = store.getState();
-      if (selection.length === 1) setEditingText(selection[0] as NodeId);
+      const state = store.getState();
+      const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
+      if (only?.type === 'TEXT') state.setEditingText(only.id);
+      else toggleVectorEdit(store);
     },
+  },
+  {
+    // The same as Enter on a vector, for the menu and the properties panel, where it shows whether it is on.
+    id: 'object.editVector',
+    label: 'Edit points',
+    group: 'Object',
+    enabled: (state) => state.vectorEdit !== null || editableVector(state) !== null,
+    checked: (state) => state.vectorEdit !== null,
+    run: ({ store }) => toggleVectorEdit(store),
+  },
+  {
+    id: 'vector.join',
+    label: 'Join points',
+    group: 'Object',
+    shortcut: 'Ctrl+J',
+    keys: [{ code: 'KeyJ', ctrl: true }],
+    enabled: (state) => state.vectorEdit?.vertices.length === 2,
+    run: ({ store }) => joinPoints(store),
+  },
+  {
+    id: 'vector.smooth',
+    label: 'Smooth points',
+    group: 'Object',
+    enabled: (state) => (state.vectorEdit?.vertices.length ?? 0) > 0,
+    run: ({ store }) => setPointType(store, 'SMOOTH'),
+  },
+  {
+    id: 'vector.corner',
+    label: 'Corner points',
+    group: 'Object',
+    enabled: (state) => (state.vectorEdit?.vertices.length ?? 0) > 0,
+    run: ({ store }) => setPointType(store, 'CORNER'),
   },
   {
     id: 'object.rename',

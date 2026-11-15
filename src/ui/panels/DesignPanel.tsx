@@ -27,6 +27,7 @@ import {
   type TextCase,
   type TextDecoration,
   type TextNode,
+  type VectorNode,
   type VerticalAlign,
 } from '../../core';
 import { availableFonts } from '../../engine/text/measure';
@@ -38,6 +39,7 @@ import { EffectsSection } from './EffectsSection';
 import { ConstraintsSection, LayoutGridSection } from './LayoutSections';
 import { PaintList } from './PaintList';
 import { applyLive, Row, Section, SelectField, shared } from './panelParts';
+import { VectorSection } from './VectorSection';
 
 const CORNER_NAMES = ['Top left', 'Top right', 'Bottom right', 'Bottom left'] as const;
 
@@ -358,6 +360,7 @@ export function DesignPanel() {
   const paintable = layers.filter((layer) => layer.type !== 'GROUP');
   const textLayers = layers.filter((layer): layer is TextNode => layer.type === 'TEXT');
   const stars = layers.filter((layer) => layer.type === 'STAR');
+  const vectors = layers.filter((layer): layer is VectorNode => layer.type === 'VECTOR');
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
   /** Applies a patch computed separately for each layer, as one undo step. */
   const setEach = (label: string, targets: readonly LayerNode[], make: (layer: LayerNode) => LayerPatch): void => {
@@ -531,6 +534,8 @@ export function DesignPanel() {
       {frames.length === layers.length && <LayoutGridSection frames={frames} />}
 
       {textLayers.length === layers.length && <TextSection layers={textLayers} />}
+
+      {vectors.length === layers.length && <VectorSection layers={vectors} />}
 
       <Section title="Layer">
         <Row>
