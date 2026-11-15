@@ -421,6 +421,7 @@ export const COMMANDS: readonly Command[] = [
   toolCommand('line', 'Line', 'KeyL'),
   toolCommand('polygon', 'Polygon'),
   toolCommand('star', 'Star'),
+  toolCommand('text', 'Text', 'KeyT'),
 
   {
     id: 'file.save',
@@ -662,6 +663,18 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyV', shift: true }],
     enabled: hasSelection,
     run: ({ store }) => flipSelection(store, 'vertical'),
+  },
+  {
+    id: 'object.editText',
+    label: 'Edit text',
+    group: 'Object',
+    shortcut: 'Enter',
+    keys: [{ code: 'Enter' }, { code: 'NumpadEnter' }],
+    enabled: (state) => state.selection.length === 1 && state.doc.nodes[state.selection[0] as NodeId]?.type === 'TEXT',
+    run: ({ store }) => {
+      const { selection, setEditingText } = store.getState();
+      if (selection.length === 1) setEditingText(selection[0] as NodeId);
+    },
   },
   {
     id: 'object.rename',

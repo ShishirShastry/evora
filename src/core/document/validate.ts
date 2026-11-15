@@ -4,6 +4,11 @@ import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
 import {
   CONTAINER_TYPES,
   LAYER_TYPES,
+  TEXT_ALIGNS,
+  TEXT_AUTO_RESIZES,
+  TEXT_CASES,
+  TEXT_DECORATIONS,
+  VERTICAL_ALIGNS,
   type DesignNode,
   type Document,
   type LayerNode,
@@ -53,6 +58,10 @@ function paints(value: unknown): Paint[] {
 }
 
 const STROKE_ALIGNS: readonly StrokeAlign[] = ['INSIDE', 'CENTER', 'OUTSIDE'];
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
 
 /** Rebuilds a node from raw data, keeping every valid field and defaulting or clamping the rest. */
 function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
@@ -104,6 +113,19 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
   } else if (layer.type === 'STAR') {
     layer.pointCount = Math.round(finite(raw.pointCount, 5, 3, 60));
     layer.innerRadius = finite(raw.innerRadius, 0.382, 0, 1);
+  } else if (layer.type === 'TEXT') {
+    layer.characters = typeof raw.characters === 'string' ? raw.characters : '';
+    layer.fontFamily = typeof raw.fontFamily === 'string' && raw.fontFamily.trim() ? raw.fontFamily : layer.fontFamily;
+    layer.fontSize = finite(raw.fontSize, layer.fontSize, 1, 2000);
+    layer.fontWeight = Math.round(finite(raw.fontWeight, 400, 100, 900) / 100) * 100;
+    layer.italic = raw.italic === true;
+    layer.lineHeight = raw.lineHeight === null || raw.lineHeight === undefined ? null : finite(raw.lineHeight, layer.fontSize * 1.2, 1, 10000);
+    layer.letterSpacing = finite(raw.letterSpacing, 0, -200, 2000);
+    layer.textAlign = oneOf(raw.textAlign, TEXT_ALIGNS, 'LEFT');
+    layer.verticalAlign = oneOf(raw.verticalAlign, VERTICAL_ALIGNS, 'TOP');
+    layer.textAutoResize = oneOf(raw.textAutoResize, TEXT_AUTO_RESIZES, 'WIDTH_AND_HEIGHT');
+    layer.textDecoration = oneOf(raw.textDecoration, TEXT_DECORATIONS, 'NONE');
+    layer.textCase = oneOf(raw.textCase, TEXT_CASES, 'ORIGINAL');
   }
   return layer;
 }

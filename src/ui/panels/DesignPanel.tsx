@@ -20,7 +20,14 @@ import {
   type Paint,
   type RGB,
   type StrokeAlign,
+  type TextAlign,
+  type TextAutoResize,
+  type TextCase,
+  type TextDecoration,
+  type TextNode,
+  type VerticalAlign,
 } from '../../core';
+import { availableFonts } from '../../engine/text/measure';
 import { getCommand, updateLayers, type Command } from '../../state/commands';
 import type { EditorStore } from '../../state/editorStore';
 import { ColorField, MIXED, NumberField, type Mixed } from '../components/Fields';
@@ -200,6 +207,198 @@ function ArrangeBar() {
   );
 }
 
+const FONT_WEIGHTS: [number, string][] = [
+  [100, 'Thin'],
+  [200, 'Extra light'],
+  [300, 'Light'],
+  [400, 'Regular'],
+  [500, 'Medium'],
+  [600, 'Semibold'],
+  [700, 'Bold'],
+  [800, 'Extra bold'],
+  [900, 'Black'],
+];
+
+function ToggleGroup<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T | Mixed;
+  options: { value: T; label: string; icon: IconName }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-1 gap-0.5 rounded-[5px] bg-field p-0.5">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          aria-label={option.label}
+          title={option.label}
+          className={`flex h-[22px] flex-1 items-center justify-center rounded border-0 ${
+            value === option.value ? 'bg-hover text-ink' : 'bg-transparent text-dim hover:text-ink'
+          }`}
+          onClick={() => onChange(option.value)}
+        >
+          <Icon name={option.icon} size={14} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Font and paragraph settings for the selected text layers. */
+function TextSection({ layers }: { layers: TextNode[] }) {
+  const { store } = useEditorContext();
+  const ids = layers.map((layer) => layer.id);
+  const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
+  const family = shared(layers, (l) => (l as TextNode).fontFamily);
+  const weight = shared(layers, (l) => (l as TextNode).fontWeight);
+  const lineHeight = shared(layers, (l) => (l as TextNode).lineHeight);
+  const fontSize = shared(layers, (l) => (l as TextNode).fontSize);
+  const fonts = availableFonts(family === MIXED ? undefined : family);
+  const autoLine = lineHeight === null;
+
+  return (
+    <Section title="Text">
+      <Row>
+        <select
+          aria-label="Font family"
+          className="od-field flex-1"
+          value={family}
+          onChange={(event) => set('Change font', { fontFamily: event.currentTarget.value })}
+        >
+          {family === MIXED && <option value={MIXED}>Mixed</option>}
+          {fonts.map((font) => (
+            <option key={font} value={font}>
+              {font}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row>
+        <select
+          aria-label="Font weight"
+          className="od-field flex-1"
+          value={weight}
+          onChange={(event) => set('Change font weight', { fontWeight: Number(event.currentTarget.value) })}
+        >
+          {weight === MIXED && <option value={MIXED}>Mixed</option>}
+          {FONT_WEIGHTS.map(([value, name]) => (
+            <option key={value} value={value}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <div className="w-[76px] flex-none">
+          <NumberField label="Font size" min={1} max={2000} value={fontSize} onCommit={(value) => set('Change font size', { fontSize: value })} />
+        </div>
+      </Row>
+      <Row>
+        <NumberField
+          label="Line height"
+          prefix="Line"
+          min={1}
+          value={lineHeight === MIXED ? MIXED : (lineHeight ?? (fontSize === MIXED ? MIXED : Math.round(fontSize * 1.2)))}
+          onCommit={(value) => set('Change line height', { lineHeight: value })}
+        />
+        <button
+          type="button"
+          className="od-icon-button !h-[26px] !w-12 text-[11px]"
+          aria-label="Automatic line height"
+          aria-pressed={autoLine}
+          title="Automatic line height (1.2 × font size)"
+          onClick={() => set('Change line height', { lineHeight: null })}
+        >
+          Auto
+        </button>
+        <NumberField
+          label="Letter spacing"
+          prefix="Space"
+          min={-200}
+          max={2000}
+          value={shared(layers, (l) => (l as TextNode).letterSpacing)}
+          onCommit={(value) => set('Change letter spacing', { letterSpacing: value })}
+        />
+      </Row>
+      <Row>
+        <ToggleGroup<TextAlign>
+          label="Horizontal alignment"
+          value={shared(layers, (l) => (l as TextNode).textAlign)}
+          onChange={(value) => set('Change text alignment', { textAlign: value })}
+          options={[
+            { value: 'LEFT', label: 'Align text left', icon: 'textLeft' },
+            { value: 'CENTER', label: 'Align text centre', icon: 'textCenter' },
+            { value: 'RIGHT', label: 'Align text right', icon: 'textRight' },
+          ]}
+        />
+        <ToggleGroup<VerticalAlign>
+          label="Vertical alignment"
+          value={shared(layers, (l) => (l as TextNode).verticalAlign)}
+          onChange={(value) => set('Change vertical alignment', { verticalAlign: value })}
+          options={[
+            { value: 'TOP', label: 'Align text top', icon: 'textTop' },
+            { value: 'MIDDLE', label: 'Align text middle', icon: 'textMiddle' },
+            { value: 'BOTTOM', label: 'Align text bottom', icon: 'textBottom' },
+          ]}
+        />
+      </Row>
+      <Row>
+        <select
+          aria-label="Text box sizing"
+          className="od-field flex-1"
+          value={shared(layers, (l) => (l as TextNode).textAutoResize)}
+          onChange={(event) => set('Change text sizing', { textAutoResize: event.currentTarget.value as TextAutoResize })}
+        >
+          {shared(layers, (l) => (l as TextNode).textAutoResize) === MIXED && <option value={MIXED}>Mixed</option>}
+          <option value="WIDTH_AND_HEIGHT">Auto width</option>
+          <option value="HEIGHT">Auto height</option>
+          <option value="NONE">Fixed size</option>
+        </select>
+      </Row>
+      <Row>
+        <select
+          aria-label="Letter case"
+          className="od-field flex-1"
+          value={shared(layers, (l) => (l as TextNode).textCase)}
+          onChange={(event) => set('Change letter case', { textCase: event.currentTarget.value as TextCase })}
+        >
+          {shared(layers, (l) => (l as TextNode).textCase) === MIXED && <option value={MIXED}>Mixed</option>}
+          <option value="ORIGINAL">As typed</option>
+          <option value="UPPER">UPPERCASE</option>
+          <option value="LOWER">lowercase</option>
+          <option value="TITLE">Title Case</option>
+        </select>
+        <select
+          aria-label="Text decoration"
+          className="od-field flex-1"
+          value={shared(layers, (l) => (l as TextNode).textDecoration)}
+          onChange={(event) => set('Change text decoration', { textDecoration: event.currentTarget.value as TextDecoration })}
+        >
+          {shared(layers, (l) => (l as TextNode).textDecoration) === MIXED && <option value={MIXED}>Mixed</option>}
+          <option value="NONE">No decoration</option>
+          <option value="UNDERLINE">Underline</option>
+          <option value="STRIKETHROUGH">Strikethrough</option>
+        </select>
+      </Row>
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          className="accent-[var(--od-accent)]"
+          checked={layers.every((layer) => layer.italic)}
+          onChange={(event) => set('Change italic', { italic: event.currentTarget.checked })}
+        />
+        Italic
+      </label>
+    </Section>
+  );
+}
+
 function PageProperties() {
   const { store } = useEditorContext();
   const doc = useEditor((s) => s.doc);
@@ -251,6 +450,7 @@ export function DesignPanel() {
   const pointLayers = layers.filter((layer) => layer.type === 'POLYGON' || layer.type === 'STAR');
   // Groups have no appearance of their own, so they are left out of fills and strokes.
   const paintable = layers.filter((layer) => layer.type !== 'GROUP');
+  const textLayers = layers.filter((layer): layer is TextNode => layer.type === 'TEXT');
   const stars = layers.filter((layer) => layer.type === 'STAR');
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
 
@@ -365,6 +565,8 @@ export function DesignPanel() {
           </label>
         )}
       </Section>
+
+      {textLayers.length === layers.length && <TextSection layers={textLayers} />}
 
       <Section title="Layer">
         <Row>

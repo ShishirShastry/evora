@@ -1,18 +1,19 @@
 /**
- * OPEN DESIGN document schema, version 2 (version 1 plus the GROUP layer type).
+ * OPEN DESIGN document schema, version 3.
+ * Version 2 added the GROUP layer type; version 3 adds TEXT.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
 export type NodeId = string;
 
-export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR';
+export type LayerType = 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT';
 export type NodeType = 'PAGE' | LayerType;
 
-export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR'];
+export const LAYER_TYPES: readonly LayerType[] = ['FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'LINE', 'POLYGON', 'STAR', 'TEXT'];
 export const NODE_TYPES: readonly NodeType[] = ['PAGE', ...LAYER_TYPES];
 /** Types that may have children. */
 export const CONTAINER_TYPES: readonly NodeType[] = ['PAGE', 'FRAME', 'GROUP'];
@@ -108,7 +109,43 @@ export interface StarNode extends LayerBase {
   innerRadius: number;
 }
 
-export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode;
+export type TextAlign = 'LEFT' | 'CENTER' | 'RIGHT';
+export type VerticalAlign = 'TOP' | 'MIDDLE' | 'BOTTOM';
+/** Which of the layer's dimensions follow its content: both, the height only, or neither. */
+export type TextAutoResize = 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'NONE';
+export type TextDecoration = 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
+export type TextCase = 'ORIGINAL' | 'UPPER' | 'LOWER' | 'TITLE';
+
+export const TEXT_ALIGNS: readonly TextAlign[] = ['LEFT', 'CENTER', 'RIGHT'];
+export const VERTICAL_ALIGNS: readonly VerticalAlign[] = ['TOP', 'MIDDLE', 'BOTTOM'];
+export const TEXT_AUTO_RESIZES: readonly TextAutoResize[] = ['WIDTH_AND_HEIGHT', 'HEIGHT', 'NONE'];
+export const TEXT_DECORATIONS: readonly TextDecoration[] = ['NONE', 'UNDERLINE', 'STRIKETHROUGH'];
+export const TEXT_CASES: readonly TextCase[] = ['ORIGINAL', 'UPPER', 'LOWER', 'TITLE'];
+
+/**
+ * A text layer. One style applies to the whole layer; per-range styling is not
+ * part of this version. Its fills colour the glyphs.
+ */
+export interface TextNode extends LayerBase {
+  type: 'TEXT';
+  characters: string;
+  fontFamily: string;
+  fontSize: number;
+  /** 100..900 in steps of 100. */
+  fontWeight: number;
+  italic: boolean;
+  /** Line height in pixels, or null for automatic (1.2 × the font size). */
+  lineHeight: number | null;
+  /** Extra space between characters, in pixels. */
+  letterSpacing: number;
+  textAlign: TextAlign;
+  verticalAlign: VerticalAlign;
+  textAutoResize: TextAutoResize;
+  textDecoration: TextDecoration;
+  textCase: TextCase;
+}
+
+export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode | TextNode;
 export type DesignNode = PageNode | LayerNode;
 
 export type NodeMap = Readonly<Record<NodeId, DesignNode>>;
@@ -148,6 +185,10 @@ export function isGroup(node: DesignNode | undefined): node is GroupNode {
   return node !== undefined && node.type === 'GROUP';
 }
 
+export function isText(node: DesignNode | undefined): node is TextNode {
+  return node !== undefined && node.type === 'TEXT';
+}
+
 export function isContainer(node: DesignNode | undefined): node is PageNode | FrameNode | GroupNode {
   return node !== undefined && (node.type === 'PAGE' || node.type === 'FRAME' || node.type === 'GROUP');
 }
@@ -162,7 +203,7 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   cornerRadius?: number;
   pointCount?: number;
   innerRadius?: number;
-};
+} & Partial<Omit<TextNode, keyof LayerBase>>;
 
 export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor'>>;
 

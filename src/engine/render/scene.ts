@@ -1,5 +1,7 @@
 import {
+  approximateMeasurer,
   expandRect,
+  layoutText,
   getChildIds,
   getWorldBounds,
   getWorldMatrix,
@@ -13,7 +15,10 @@ import {
   type NodeId,
   type NodeMap,
   type Rect,
+  type TextMeasurer,
+  type TextNode,
 } from '../../core';
+import { applyTextStyle } from '../text/measure';
 import { visibleRect, type Size, type Viewport } from '../viewport';
 import { paintToCss, rgbToCss, traceLayerPath } from './paint';
 
@@ -39,6 +44,10 @@ export interface RenderOptions {
   createCanvas?: CanvasFactory;
   /** Paint the page background. Off for exports that need transparency. */
   background?: boolean;
+  /** Measures text for layout. Must be the measurer the editor sizes text layers with. */
+  measurer?: TextMeasurer;
+  /** Layers to leave out, for example a text layer that is being edited in place. */
+  hiddenIds?: ReadonlySet<NodeId>;
 }
 
 const renderBoundsCache = new WeakMap<NodeMap, Map<NodeId, Rect>>();
@@ -110,8 +119,40 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     );
   };
 
+  const measurer = options.measurer ?? approximateMeasurer;
+
+  /** Paints a text layer: its fills colour the glyphs, its strokes outline them. */
+  const drawText = (target: Ctx, node: TextNode): void => {
+    const layout = layoutText(node, measurer);
+    applyTextStyle(target, node);
+    target.textBaseline = 'alphabetic';
+    target.textAlign = 'left';
+    const thickness = Math.max(1, node.fontSize / 16);
+    const decorationOffset =
+      node.textDecoration === 'UNDERLINE' ? node.fontSize * 0.12 : node.textDecoration === 'STRIKETHROUGH' ? -node.fontSize * 0.3 : null;
+    for (const paint of node.fills) {
+      if (!paint.visible || paint.opacity <= 0) continue;
+      target.fillStyle = paintToCss(paint);
+      for (const line of layout.lines) {
+        if (line.text === '') continue;
+        target.fillText(line.text, line.x, line.baseline);
+        if (decorationOffset !== null) target.fillRect(line.x, line.baseline + decorationOffset, line.width, thickness);
+      }
+    }
+    if (node.strokeWeight > 0) {
+      for (const paint of node.strokes) {
+        if (!paint.visible || paint.opacity <= 0) continue;
+        target.strokeStyle = paintToCss(paint);
+        target.lineWidth = node.strokeWeight;
+        target.lineJoin = 'round';
+        for (const line of layout.lines) if (line.text !== '') target.strokeText(line.text, line.x, line.baseline);
+      }
+    }
+    applyTextStyle(target, { ...node, letterSpacing: 0 });
+  };
+
   const fill = (target: Ctx, node: LayerNode): void => {
-    if (node.type === 'LINE') return;
+    if (node.type === 'LINE' || node.type === 'TEXT') return;
     for (const paint of node.fills) {
       if (!paint.visible || paint.opacity <= 0) continue;
       traceLayerPath(target, node);
@@ -121,7 +162,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
   };
 
   const stroke = (target: Ctx, node: LayerNode): void => {
-    if (node.strokeWeight <= 0) return;
+    if (node.strokeWeight <= 0 || node.type === 'TEXT') return;
     const align = node.type === 'LINE' ? 'CENTER' : node.strokeAlign;
     for (const paint of node.strokes) {
       if (!paint.visible || paint.opacity <= 0) continue;
@@ -158,6 +199,10 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
 
   const paintLayer = (target: Ctx, id: NodeId, node: LayerNode): void => {
     setLayerTransform(target, id);
+    if (node.type === 'TEXT') {
+      drawText(target, node);
+      return;
+    }
     fill(target, node);
     if (node.type === 'FRAME' || node.type === 'GROUP') {
       if (getChildIds(doc, id).length > 0) {
@@ -177,6 +222,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
   const drawLayer = (target: Ctx, id: NodeId): void => {
     const node = doc.nodes[id];
     if (!isLayer(node) || !node.visible || node.opacity <= 0) return;
+    if (options.hiddenIds?.has(id)) return;
     if (!rectsIntersect(getRenderBounds(doc, id), visible)) {
       stats.culled++;
       return;

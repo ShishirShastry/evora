@@ -24,7 +24,11 @@ export const TYPE_LABELS: Record<LayerType, string> = {
   LINE: 'Line',
   POLYGON: 'Polygon',
   STAR: 'Star',
+  TEXT: 'Text',
 };
+
+export const DEFAULT_FONT_FAMILY = 'Arial';
+export const DEFAULT_FONT_SIZE = 16;
 
 export function solidPaint(color: RGB, opacity = 1): SolidPaint {
   return { type: 'SOLID', color: { ...color }, opacity, visible: true };
@@ -104,6 +108,27 @@ export function createLayer(
       break;
     case 'STAR':
       node = { ...base, type, pointCount: 5, innerRadius: 0.382 };
+      break;
+    case 'TEXT':
+      node = {
+        ...base,
+        type,
+        width: 1,
+        height: Math.round(DEFAULT_FONT_SIZE * 1.2),
+        fills: [solidPaint(BLACK)],
+        characters: '',
+        fontFamily: DEFAULT_FONT_FAMILY,
+        fontSize: DEFAULT_FONT_SIZE,
+        fontWeight: 400,
+        italic: false,
+        lineHeight: null,
+        letterSpacing: 0,
+        textAlign: 'LEFT',
+        verticalAlign: 'TOP',
+        textAutoResize: 'WIDTH_AND_HEIGHT',
+        textDecoration: 'NONE',
+        textCase: 'ORIGINAL',
+      };
       break;
   }
   return { ...node, ...props } as LayerNode;

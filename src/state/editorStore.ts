@@ -1,7 +1,9 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   applyPatch,
+  approximateMeasurer,
   diffDocuments,
+  fitTextLayers,
   getPageIdOf,
   getPages,
   isLayer,
@@ -9,10 +11,11 @@ import {
   type Document,
   type DocumentPatch,
   type NodeId,
+  type TextMeasurer,
 } from '../core';
 import { DEFAULT_VIEWPORT, type Size, type Viewport } from '../engine/viewport';
 
-export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star';
+export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'text';
 
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error';
 
@@ -53,6 +56,8 @@ export interface EditorState {
   collapsed: Record<NodeId, true>;
   /** Layer whose name is being edited in the layers panel. */
   renamingId: NodeId | null;
+  /** Text layer whose characters are being edited in place on the canvas. */
+  editingTextId: NodeId | null;
 
   // History.
   undoStack: HistoryEntry[];
@@ -97,6 +102,7 @@ export interface EditorActions {
   setHovered(id: NodeId | null): void;
   setCollapsed(id: NodeId, collapsed: boolean): void;
   setRenaming(id: NodeId | null): void;
+  setEditingText(id: NodeId | null): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
   setSaveStatus(status: SaveStatus, error?: string | null): void;
@@ -128,9 +134,22 @@ function resolvePage(doc: Document, preferred: NodeId | undefined, fallback?: No
   return first.id;
 }
 
-export function createEditorStore(doc: Document, session?: Partial<SessionState>): EditorStore {
+export interface EditorOptions {
+  /**
+   * Measures text so that text layers can be sized to their content. The
+   * browser passes a canvas-based measurer; without one a fixed approximation
+   * is used, which is what tests rely on.
+   */
+  measurer?: TextMeasurer;
+}
+
+export function createEditorStore(doc: Document, session?: Partial<SessionState>, options: EditorOptions = {}): EditorStore {
   const initialPage = resolvePage(doc, session?.pageId);
   const viewports = { ...(session?.viewports ?? {}) };
+  const measurer = options.measurer ?? approximateMeasurer;
+  /** Restores the invariants that depend on content: text sizes, then group bounds. */
+  const normalize = (previous: Document, next: Document): Document =>
+    normalizeGroups(fitTextLayers(previous, next, measurer));
 
   return createStore<EditorState & EditorActions>()((set, get) => {
     /** Switches page (if needed) and selection after a history step or page change. */
@@ -165,6 +184,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       hoveredId: null,
       collapsed: {},
       renamingId: null,
+      editingTextId: null,
       undoStack: [],
       redoStack: [],
       gesture: null,
@@ -174,7 +194,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       apply(label, fn, options) {
         if (get().gesture) get().commitGesture('Edit');
         const state = get();
-        const next = normalizeGroups(fn(state.doc));
+        const next = normalize(state.doc, fn(state.doc));
         const patch = diffDocuments(state.doc, next);
         if (!patch) {
           const selection = sanitizeSelection(state.doc, state.pageId, options?.select ?? state.selection);
@@ -205,7 +225,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       updateGesture(fn, select) {
         const state = get();
         if (!state.gesture) return;
-        const next = normalizeGroups(fn(state.gesture.doc));
+        const next = normalize(state.gesture.doc, fn(state.gesture.doc));
         const selection = select ? sanitizeSelection(next, state.pageId, select) : sanitizeSelection(next, state.pageId, state.selection);
         if (next === state.doc && sameIds(selection, state.selection)) return;
         set({ doc: next, selection });
@@ -251,6 +271,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
           undoStack: state.undoStack.slice(0, -1),
           redoStack: [...state.redoStack, entry],
           renamingId: null,
+          editingTextId: null,
           ...withPage(state, next, entry.before.pageId, entry.before.selection),
         });
       },
@@ -266,6 +287,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
           redoStack: state.redoStack.slice(0, -1),
           undoStack: [...state.undoStack, entry],
           renamingId: null,
+          editingTextId: null,
           ...withPage(state, next, entry.after.pageId, entry.after.selection),
         });
       },
@@ -311,6 +333,12 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setRenaming(id) {
         if (get().renamingId !== id) set({ renamingId: id });
+      },
+
+      setEditingText(id) {
+        const state = get();
+        const valid = id !== null && state.doc.nodes[id]?.type === 'TEXT' ? id : null;
+        if (state.editingTextId !== valid) set({ editingTextId: valid, hoveredId: null });
       },
 
       renameDocument(name) {

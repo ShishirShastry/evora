@@ -36,6 +36,9 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
     case 'GROUP':
       // A group is hit only through its children.
       return false;
+    case 'TEXT':
+      // Text is selected by its box, so it can be grabbed between the letters.
+      return inBox(p, width, height, tolerance);
     case 'RECTANGLE':
       if (solid) return inBox(p, width, height, 0);
       return inBox(p, width, height, edge) && !inBox({ x: p.x - edge * 2, y: p.y - edge * 2 }, width - edge * 4, height - edge * 4, 0);

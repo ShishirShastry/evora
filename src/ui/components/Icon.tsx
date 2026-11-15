@@ -33,7 +33,14 @@ export type IconName =
   | 'alignCenterY'
   | 'alignBottom'
   | 'distributeH'
-  | 'distributeV';
+  | 'distributeV'
+  | 'text'
+  | 'textLeft'
+  | 'textCenter'
+  | 'textRight'
+  | 'textTop'
+  | 'textMiddle'
+  | 'textBottom';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -93,6 +100,13 @@ const PATHS: Record<IconName, ReactNode> = {
   alignBottom: <path {...s} d="M2 13.5h12M4.5 4v7H7V4zM9 6.5V11h2.5V6.5z" />,
   distributeH: <path {...s} d="M2.5 2v12M13.5 2v12M6.5 4.5h3v7h-3z" />,
   distributeV: <path {...s} d="M2 2.5h12M2 13.5h12M4.5 6.5h7v3h-7z" />,
+  text: <path {...s} d="M3.5 5V3.5h9V5M8 3.5v9M6.2 12.5h3.6" />,
+  textLeft: <path {...s} d="M2.5 4h11M2.5 8h7M2.5 12h9" />,
+  textCenter: <path {...s} d="M2.5 4h11M4.5 8h7M3.5 12h9" />,
+  textRight: <path {...s} d="M2.5 4h11M6.5 8h7M4.5 12h9" />,
+  textTop: <path {...s} d="M2.5 2.5h11M8 13.5V6M5.5 8.5L8 6l2.5 2.5" />,
+  textMiddle: <path {...s} d="M2.5 8h11M8 2v3.5M6.3 4L8 5.5 9.7 4M8 14v-3.5M6.3 12L8 10.5 9.7 12" />,
+  textBottom: <path {...s} d="M2.5 13.5h11M8 2.5V10M5.5 7.5L8 10l2.5-2.5" />,
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

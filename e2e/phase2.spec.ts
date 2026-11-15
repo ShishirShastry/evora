@@ -109,3 +109,107 @@ test('group, ungroup, align, distribute and flip', async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+/** True if any pixel of the design canvas inside the given canvas-space box is dark (text was painted there). */
+async function hasInk(page: Page, box: { x: number; y: number; w: number; h: number }): Promise<boolean> {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  return page.evaluate(({ x, y, w, h }) => {
+    const element = document.querySelector('canvas');
+    const ctx = element?.getContext('2d');
+    if (!element || !ctx) throw new Error('design canvas not found');
+    const ratio = element.width / element.clientWidth;
+    const data = ctx.getImageData(Math.round(x * ratio), Math.round(y * ratio), Math.max(1, Math.round(w * ratio)), Math.max(1, Math.round(h * ratio))).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if ((data[i] as number) < 90 && (data[i + 1] as number) < 90 && (data[i + 2] as number) < 90) return true;
+    }
+    return false;
+  }, box);
+}
+
+test('text: create, type, restyle, edit again, undo, and reopen', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await newFile(page);
+
+  // A white frame to write on, so black text is visible.
+  await page.keyboard.press('f');
+  await drag(page, [100, 100], [600, 400]);
+
+  // Text tool (T): click inside the frame and type.
+  await page.keyboard.press('t');
+  await expect(page.getByRole('button', { name: 'Text', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await click(page, [150, 200]);
+  const editor = page.getByRole('textbox', { name: 'Edit text' });
+  await expect(editor).toBeFocused();
+  await page.keyboard.type('Get started');
+  await expect(editor).toHaveValue('Get started');
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+
+  // The layer is named after its text, sits inside the frame and has a real size.
+  await expect(layer(page, 'Get started')).toHaveAttribute('aria-selected', 'true');
+  await expect(layer(page, 'Get started')).toHaveAttribute('aria-level', '2');
+  await expect(field(page, 'X position')).toHaveValue('50');
+  const width = Number(await field(page, 'Width').inputValue());
+  const height = Number(await field(page, 'Height').inputValue());
+  expect(width).toBeGreaterThan(40);
+  expect(height).toBeGreaterThan(10);
+
+  // The glyphs are really painted on the canvas, where the layer is.
+  const y = 100 + Number(await field(page, 'Y position').inputValue());
+  expect(await hasInk(page, { x: 150, y, w: width, h: height })).toBe(true);
+  expect(await hasInk(page, { x: 150, y: y + height + 20, w: width, h: height })).toBe(false);
+
+  // A bigger font makes the layer bigger; it is one undo step.
+  await field(page, 'Font size').fill('48');
+  await field(page, 'Font size').press('Enter');
+  const bigWidth = Number(await field(page, 'Width').inputValue());
+  expect(bigWidth).toBeGreaterThan(width * 2);
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Width')).toHaveValue(String(width));
+  await page.keyboard.press('Control+Shift+z');
+  await expect(field(page, 'Width')).toHaveValue(String(bigWidth));
+
+  // Bold and centred, from the properties panel.
+  await page.getByRole('combobox', { name: 'Font weight' }).selectOption('700');
+  await page.getByRole('radio', { name: 'Align text centre' }).click();
+  await expect(page.getByRole('radio', { name: 'Align text centre' })).toHaveAttribute('aria-checked', 'true');
+
+  // Double-click the text to edit it again; clicking elsewhere commits.
+  await click(page, [160, y + 20], { clickCount: 2 });
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('Get started');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' today');
+  await click(page, [700, 600]);
+  await expect(editor).toHaveCount(0);
+  await expect(layer(page, 'Get started today')).toBeVisible();
+
+  // Undo restores the previous text, redo brings the edit back.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(layer(page, 'Get started')).toBeVisible();
+  await page.keyboard.press('Control+Shift+z');
+  await expect(layer(page, 'Get started today')).toBeVisible();
+
+  // Text that is left empty is not kept.
+  await page.keyboard.press('t');
+  await click(page, [300, 350]);
+  await expect(editor).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(layers(page).getByRole('treeitem')).toHaveCount(2);
+
+  await layer(page, 'Get started today').click();
+  await page.screenshot({ path: 'test-results/phase2-text.png' });
+
+  // It all survives a reload.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(layer(page, 'Get started today')).toBeVisible();
+  await layer(page, 'Get started today').click();
+  await expect(field(page, 'Font size')).toHaveValue('48');
+  await expect(page.getByRole('combobox', { name: 'Font weight' })).toHaveValue('700');
+
+  expect(errors).toEqual([]);
+});

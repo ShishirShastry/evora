@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **2**. Version 1 was Phase 1; version 2 adds the `GROUP` layer type (first Phase 2 slice). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **3**. Version 1 was Phase 1; version 2 added the `GROUP` layer type and version 3 adds `TEXT` (both Phase 2). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -87,10 +87,10 @@ A node may be a parent only if its type is a container type. The container types
 ## 5. Node types
 
 ```ts
-type NodeType = 'PAGE' | 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR';
+type NodeType = 'PAGE' | 'FRAME' | 'GROUP' | 'RECTANGLE' | 'ELLIPSE' | 'LINE' | 'POLYGON' | 'STAR' | 'TEXT';
 ```
 
-`GROUP` exists from version 2; everything else from version 1.
+`GROUP` exists from version 2 and `TEXT` from version 3; everything else from version 1.
 
 ### 5.1 Page
 
@@ -164,6 +164,26 @@ interface StarNode extends LayerBase {
 }
 ```
 
+```ts
+interface TextNode extends LayerBase {
+  type: 'TEXT';              // version 3. Fills colour the glyphs; strokes outline them.
+  characters: string;        // "\n" separates paragraphs
+  fontFamily: string;
+  fontSize: number;          // pixels, 1..2000
+  fontWeight: number;        // 100..900 in steps of 100
+  italic: boolean;
+  lineHeight: number | null; // pixels; null = automatic (1.2 × fontSize, rounded)
+  letterSpacing: number;     // pixels added after each character
+  textAlign: 'LEFT' | 'CENTER' | 'RIGHT';
+  verticalAlign: 'TOP' | 'MIDDLE' | 'BOTTOM';
+  textAutoResize: 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'NONE';
+  textDecoration: 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
+  textCase: 'ORIGINAL' | 'UPPER' | 'LOWER' | 'TITLE';
+}
+```
+
+**Text.** One style applies to the whole layer; styling a range of characters differently is not part of version 3. `textAutoResize` says which dimensions follow the content: both (auto width, never wraps), the height only (wraps at the layer's width), or neither (fixed box). The editor refits those dimensions after every edit (`fitTextLayers`), keeping the edge the text is aligned to in place, so the stored `width` and `height` are always the laid-out size as measured on the machine that last edited the text. A machine without the font falls back to another and may lay the text out differently until it is next edited.
+
 **Groups.** A group's box is always the bounding box of its children, in the group's own (possibly rotated) frame of reference. This is an invariant the editor restores after every edit (`normalizeGroups`): the box is refitted when children move or resize, and a group whose last child is removed is deleted. Resizing a group scales its children; resizing a frame does not. A group is never hit directly on the canvas, only through its children.
 
 ### 5.4 Paint
@@ -224,12 +244,15 @@ const CURRENT_SCHEMA_VERSION = 2;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
+  // 2 -> 3: adds the TEXT type. Older files have no text layers.
+  2: (file) => ({ ...file, schemaVersion: 3 }),
 };
 ```
 
 | From | To | What changed | Fixture test |
 |---|---|---|---|
 | 1 | 2 | `GROUP` layer type added | `src/core/ops/arrange.test.ts` ("schema migration") |
+| 2 | 3 | `TEXT` layer type added | `src/core/text/layout.test.ts` ("text in the file format") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -258,7 +281,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | `TEXT`, `IMAGE` fills, gradient paints, multiple strokes with dash/cap/join, independent corner radii, `effects[]`, `blendMode`, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`, asset table. (`GROUP` is done: schema version 2.) |
+| 2 | Per-range text styles, `IMAGE` fills, gradient paints, multiple strokes with dash/cap/join, independent corner radii, `effects[]`, `blendMode`, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`, asset table. (`GROUP` is done in version 2 and `TEXT` in version 3.) |
 | 3 | `VECTOR` (vector network: vertices, segments with Bézier handles, regions), `BOOLEAN_OPERATION`, arc data on ellipses. |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |

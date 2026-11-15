@@ -30,6 +30,8 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   // Version 2 adds the GROUP layer type. A version 1 file contains no groups,
   // so its content is already valid version 2 content.
   1: (file) => ({ ...file, schemaVersion: 2 }),
+  // Version 3 adds the TEXT layer type. Older files contain no text layers.
+  2: (file) => ({ ...file, schemaVersion: 3 }),
 };
 
 /**

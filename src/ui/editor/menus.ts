@@ -88,6 +88,7 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
     'object.backward',
     'object.back',
     '-',
+    'object.editText',
     'object.rename',
     'object.toggleVisible',
     'object.toggleLocked',

@@ -46,6 +46,7 @@ export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0): vo
   ctx.beginPath();
   switch (node.type) {
     case 'GROUP':
+    case 'TEXT':
       ctx.rect(0, 0, width, height);
       break;
     case 'FRAME':

@@ -23,6 +23,10 @@ export interface AutosaveOptions {
  * pending, "saving" while it runs, "saved" once storage confirms it, and
  * "error" (with the reason) if a write fails. A failed write is retried on the
  * next change or flush; nothing is ever reported as saved before it is.
+ *
+ * Only committed work is written. While a gesture is open (a drag, or text
+ * being typed) the document as it was when the gesture began is what counts,
+ * so a half-finished interaction can never end up in the stored file.
  */
 export function createAutosaver(
   store: EditorStore,
@@ -37,16 +41,23 @@ export function createAutosaver(
   let writing: Promise<void> | null = null;
   let disposed = false;
 
+  /** The document as of the last committed change. */
+  const committed = (): Document => {
+    const state = store.getState();
+    return state.gesture ? state.gesture.doc : state.doc;
+  };
+
   const write = async (): Promise<void> => {
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
     }
-    // One write at a time; a change that arrives meanwhile is picked up by the loop.
+    // One write at a time; a change that arrives meanwhile is picked up below.
     while (writing) await writing;
-    const doc = store.getState().doc;
+    const doc = committed();
     if (doc === savedDoc) {
-      if (store.getState().saveStatus !== 'error') store.getState().setSaveStatus('saved');
+      const state = store.getState();
+      if (state.saveStatus !== 'error' && state.doc === savedDoc) state.setSaveStatus('saved');
       return;
     }
     store.getState().setSaveStatus('saving');
@@ -62,7 +73,7 @@ export function createAutosaver(
       }
     })();
     await writing;
-    if (!disposed && store.getState().doc !== savedDoc && store.getState().saveStatus !== 'error') schedule();
+    if (!disposed && committed() !== savedDoc && store.getState().saveStatus !== 'error') schedule();
   };
 
   const schedule = (): void => {
@@ -75,9 +86,13 @@ export function createAutosaver(
 
   const unsubscribe = store.subscribe((state, previous) => {
     if (state.doc === previous.doc && state.gesture === previous.gesture) return;
-    if (state.doc === savedDoc) return;
+    if (state.doc === savedDoc) {
+      // Back to exactly what is stored, for example after a cancelled drag.
+      if (state.saveStatus === 'unsaved' && !writing) state.setSaveStatus('saved');
+      return;
+    }
     if (state.saveStatus === 'saved') state.setSaveStatus('unsaved');
-    // Do not write half-finished drags: the end of the gesture triggers the save.
+    // The end of a gesture, not each step of it, triggers the save.
     if (!state.gesture) schedule();
   });
 

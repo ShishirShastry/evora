@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileFormatError, type FileMeta } from '../../core';
 import type { InteractionController } from '../../engine/input/controller';
+import { getBrowserMeasurer } from '../../engine/text/measure';
 import { createAutosaver, type Autosaver } from '../../persistence/autosave';
 import { saveTextToDisk } from '../../persistence/diskIO';
 import { exportFileName, exportFileText, openFile } from '../../persistence/files';
@@ -44,7 +45,9 @@ export function EditorScreen({ storage, fileId, onExit }: EditorScreenProps) {
           setLoad({ status: 'missing' });
           return;
         }
-        const store = createEditorStore(opened.doc, loadSession(opened.doc.id));
+        const store = createEditorStore(opened.doc, loadSession(opened.doc.id), {
+          measurer: getBrowserMeasurer() ?? undefined,
+        });
         setLoad({ status: 'ready', store, meta: opened.meta, repairs: opened.repairs });
       })
       .catch((error: unknown) => {
@@ -134,6 +137,8 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
 
     const flush = (): void => {
       writeSession();
+      // Text being typed lives in an open gesture; make it part of the document before saving.
+      if (store.getState().editingTextId !== null) store.getState().commitGesture('Edit text');
       void autosaver.flush();
     };
     const onVisibility = (): void => {
@@ -171,17 +176,25 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       target instanceof HTMLElement && target.closest(TEXT_ENTRY) !== null;
     const overlayOpen = (): boolean => document.querySelector('[role="menu"], [role="dialog"]') !== null;
 
+    // Space and Enter operate a focused button, list item or tree item; they must not be taken from it.
+    const onControl = (target: EventTarget | null): boolean =>
+      target instanceof HTMLElement && target.closest('button, a[href], [role="option"], [role="treeitem"]') !== null;
+
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTyping(event.target) || overlayOpen()) return;
       if (event.code === 'Space') {
+        if (onControl(event.target)) return;
         controller.current?.setSpaceDown(true);
         event.preventDefault();
         return;
       }
+      if ((event.code === 'Enter' || event.code === 'NumpadEnter') && onControl(event.target)) return;
       const command = commandForKey(event);
       if (!command) return;
-      event.preventDefault();
-      runCommand(command, { store, app });
+      const ran = runCommand(command, { store, app });
+      // Also swallow modified keys whose command is unavailable right now, so the
+      // browser does not act on them instead (Ctrl+D would bookmark the page).
+      if (ran || event.ctrlKey || event.metaKey || event.altKey) event.preventDefault();
     };
     const onKeyUp = (event: KeyboardEvent): void => {
       if (event.code === 'Space') controller.current?.setSpaceDown(false);

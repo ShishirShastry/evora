@@ -11,12 +11,14 @@ import {
   getWorldRotation,
   invert,
   isLayer,
+  isText,
   lineBox,
   lineEndpoints,
   moveNodesBy,
   nodesInRect,
   patchNode,
   rectCenter,
+  resolveLineHeight,
   rectFromPoints,
   reparentNodes,
   resizeBox,
@@ -89,7 +91,13 @@ type ClickAction =
   /** Shift-click on a selected layer removes it from the selection. */
   | { kind: 'deselect'; id: NodeId }
   /** Click on empty space inside the selection box clears the selection. */
-  | { kind: 'clear' };
+  | { kind: 'clear' }
+  /**
+   * Double-click on a text layer opens it for editing. This waits for the
+   * release because the browser moves keyboard focus to the canvas on the
+   * press, which would immediately close an editor opened any earlier.
+   */
+  | { kind: 'edit-text'; id: NodeId };
 
 type Mode =
   | { kind: 'idle' }
@@ -106,7 +114,9 @@ type Mode =
   | { kind: 'resize'; handle: Handle; frame: SelectionFrame; base: Document; ids: NodeId[] }
   | { kind: 'line-end'; id: NodeId; base: Document; fixed: Point }
   | { kind: 'rotate'; pivot: Point; startAngle: number; base: Document; ids: NodeId[] }
-  | { kind: 'draw'; type: LayerType; id: NodeId; parentId: NodeId; base: Document; startScreen: Point; startWorld: Point };
+  | { kind: 'draw'; type: LayerType; id: NodeId; parentId: NodeId; base: Document; startScreen: Point; startWorld: Point }
+  /** Text tool: a click places auto-width text, a drag sets the width of a text box. */
+  | { kind: 'text'; startScreen: Point; startWorld: Point };
 
 export interface ControllerHost {
   /** Called when the overlay (marquee, handles) needs repainting without a store change. */
@@ -169,7 +179,11 @@ export class InteractionController {
     if (e.button !== 0) return;
     const shape = SHAPE_TOOLS[tool];
     if (shape) this.beginDraw(shape, e);
-    else this.beginSelect(e);
+    else if (tool === 'text') {
+      const world = this.toWorld(e);
+      this.state.setHovered(null);
+      this.mode = { kind: 'text', startScreen: { x: e.x, y: e.y }, startWorld: { x: Math.round(world.x), y: Math.round(world.y) } };
+    } else this.beginSelect(e);
   }
 
   pointerMove(e: PointerInput): void {
@@ -211,6 +225,11 @@ export class InteractionController {
       case 'draw':
         this.updateDraw(mode, e);
         return;
+      case 'text':
+        // Show the box being dragged out.
+        this.marquee = distance(e, mode.startScreen) > DRAG_THRESHOLD_PX ? rectFromPoints(mode.startWorld, world) : null;
+        this.host.requestRender();
+        return;
     }
   }
 
@@ -228,6 +247,7 @@ export class InteractionController {
         if (action.kind === 'collapse') state.setSelection([action.id]);
         else if (action.kind === 'deselect') state.setSelection(state.selection.filter((id) => id !== action.id));
         else if (action.kind === 'clear') state.setSelection([]);
+        else if (action.kind === 'edit-text') state.setEditingText(action.id);
         break;
       }
       case 'move':
@@ -246,6 +266,10 @@ export class InteractionController {
       case 'draw':
         this.finishDraw(mode, e);
         break;
+      case 'text':
+        this.marquee = null;
+        this.createText(mode, e);
+        break;
     }
     this.updateHover(e);
     this.host.requestRender();
@@ -258,7 +282,7 @@ export class InteractionController {
     this.mode = { kind: 'idle' };
     this.marquee = null;
     this.state.cancelGesture();
-    if (mode.kind === 'draw') this.state.setTool('move');
+    if (mode.kind === 'draw' || mode.kind === 'text') this.state.setTool('move');
     this.host.setCursor(this.idleCursor());
     this.host.requestRender();
     return true;
@@ -296,6 +320,7 @@ export class InteractionController {
   /** The cursor for the active tool when nothing more specific applies. */
   idleCursor(): string {
     if (this.spaceDown || this.state.tool === 'hand') return 'grab';
+    if (this.state.tool === 'text') return 'text';
     return SHAPE_TOOLS[this.state.tool] ? 'crosshair' : 'default';
   }
 
@@ -383,7 +408,19 @@ export class InteractionController {
     let target =
       label ?? selectionTargetAt(state.doc, state.pageId, world, state.selection, { tolerance, deep: e.ctrlKey });
     if (!label && e.detail >= 2) {
-      target = deeperTargetAt(state.doc, state.pageId, world, state.selection, tolerance) ?? target;
+      const deeper = deeperTargetAt(state.doc, state.pageId, world, state.selection, tolerance);
+      // Double-clicking a text layer that a single click already reaches edits its text.
+      if (deeper && isText(state.doc.nodes[deeper]) && (deeper === target || state.selection.includes(deeper))) {
+        state.setSelection([deeper]);
+        this.mode = {
+          kind: 'press',
+          startScreen: { x: e.x, y: e.y },
+          startWorld: world,
+          onClick: { kind: 'edit-text', id: deeper },
+        };
+        return;
+      }
+      target = deeper ?? target;
     }
 
     if (target) {
@@ -466,7 +503,15 @@ export class InteractionController {
         fromCenter: e.altKey,
         snap: getWorldRotation(base, single.id) === 0,
       });
-      this.state.updateGesture(() => setLayerBox(base, single.id, box));
+      // Dragging a text layer's handle stops its size following its content in that direction.
+      const textMode =
+        single.type === 'TEXT'
+          ? { textAutoResize: handle.hy !== 0 || single.textAutoResize === 'NONE' ? ('NONE' as const) : ('HEIGHT' as const) }
+          : null;
+      this.state.updateGesture(() => {
+        const resized = setLayerBox(base, single.id, box);
+        return textMode ? patchNode(resized, single.id, textMode) : resized;
+      });
       return;
     }
     const from = frame.bounds;
@@ -522,6 +567,35 @@ export class InteractionController {
       startWorld,
     };
     state.updateGesture(() => created.doc, [created.id]);
+  }
+
+  /**
+   * Creates a text layer and starts editing it. The gesture is left open: the
+   * in-place editor commits it (as "Create text") or cancels it if nothing
+   * was typed, so an abandoned text layer leaves no trace in the history.
+   */
+  private createText(mode: Extract<Mode, { kind: 'text' }>, e: PointerInput): void {
+    const state = this.state;
+    const world = this.toWorld(e);
+    const dragged = distance(e, mode.startScreen) > DRAG_THRESHOLD_PX;
+    const parentId = containerAt(state.doc, state.pageId, mode.startWorld);
+    const a = this.toParent(state.doc, parentId, mode.startWorld);
+    state.beginGesture();
+    let props: LayerPatch;
+    if (dragged) {
+      const b = this.toParent(state.doc, parentId, { x: Math.round(world.x), y: Math.round(world.y) });
+      const box = rectFromPoints(a, b);
+      props = { x: box.x, y: box.y, width: Math.max(10, box.width), textAutoResize: 'HEIGHT' };
+    } else {
+      // Put the first line's middle where the user clicked.
+      const lineHeight = resolveLineHeight({ lineHeight: null, fontSize: 16 });
+      props = { x: a.x, y: Math.round(a.y - lineHeight / 2) };
+    }
+    const created = addLayer(state.doc, 'TEXT', parentId, props);
+    state.updateGesture(() => created.doc, [created.id]);
+    state.setTool('move');
+    this.store.getState().setEditingText(created.id);
+    this.host.setCursor('default');
   }
 
   private drawBox(mode: Extract<Mode, { kind: 'draw' }>, e: PointerInput): LayerPatch {

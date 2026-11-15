@@ -320,7 +320,8 @@ describe('schema migration', () => {
 
   it('opens a version 1 file as the current version with its content intact', () => {
     const parsed = parseFile(JSON.parse(JSON.stringify(V1_FIXTURE)));
-    expect(CURRENT_SCHEMA_VERSION).toBe(2);
+    // Every migration from version 1 up to the current version is applied in turn.
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(2);
     expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(parsed.repairs).toEqual([]);
     expect(parsed.file.document).toEqual(V1_FIXTURE.document);

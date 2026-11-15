@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { InteractionController, type PointerInput } from '../../engine/input/controller';
 import { renderOverlay } from '../../engine/render/overlay';
 import { renderScene } from '../../engine/render/scene';
+import { getBrowserMeasurer } from '../../engine/text/measure';
 import { zoomToFit } from '../../state/commands';
 import { PopupMenu, type MenuItem } from '../components/Menu';
-import { useEditorContext } from './EditorContext';
+import { useEditor, useEditorContext } from './EditorContext';
 import { canvasMenu, layerMenu } from './menus';
+import { TextEditor } from './TextEditor';
 
 const DOUBLE_CLICK_MS = 400;
 const DOUBLE_CLICK_DISTANCE = 6;
@@ -33,6 +35,7 @@ export function CanvasView() {
   const sceneRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const editingTextId = useEditor((s) => s.editingTextId);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -45,7 +48,8 @@ export function CanvasView() {
 
     let frame = 0;
     let dpr = window.devicePixelRatio || 1;
-    let lastScene: { nodes: unknown; pageId: string; viewport: unknown; width: number; height: number; dpr: number } | null = null;
+    let lastScene: { nodes: unknown; pageId: string; viewport: unknown; width: number; height: number; dpr: number; editing: string | null } | null = null;
+    const measurer = getBrowserMeasurer() ?? undefined;
     // Pages that already have a viewport; a page seen for the first time is zoomed to fit.
     const visited = new Set(Object.keys(store.getState().viewports));
 
@@ -62,7 +66,15 @@ export function CanvasView() {
       const state = store.getState();
       const size = state.canvasSize;
       if (size.width === 0 || size.height === 0) return;
-      const sceneKey = { nodes: state.doc.nodes, pageId: state.pageId, viewport: state.viewport, width: size.width, height: size.height, dpr };
+      const sceneKey = {
+        nodes: state.doc.nodes,
+        pageId: state.pageId,
+        viewport: state.viewport,
+        width: size.width,
+        height: size.height,
+        dpr,
+        editing: state.editingTextId,
+      };
       const sceneChanged =
         !lastScene ||
         lastScene.nodes !== sceneKey.nodes ||
@@ -70,12 +82,16 @@ export function CanvasView() {
         lastScene.viewport !== sceneKey.viewport ||
         lastScene.width !== sceneKey.width ||
         lastScene.height !== sceneKey.height ||
-        lastScene.dpr !== sceneKey.dpr;
+        lastScene.dpr !== sceneKey.dpr ||
+        lastScene.editing !== sceneKey.editing;
       if (sceneChanged) {
         renderScene(sceneCtx, state.doc, state.pageId, {
           size,
           dpr,
           viewport: state.viewport,
+          measurer,
+          // The text being edited is shown by the in-place editor instead.
+          hiddenIds: state.editingTextId ? new Set([state.editingTextId]) : undefined,
           createCanvas: (w, h) => {
             const canvas = document.createElement('canvas');
             canvas.width = w;
@@ -94,7 +110,7 @@ export function CanvasView() {
         selection: state.selection,
         hoveredId: state.hoveredId,
         marquee: controller.marquee,
-        showHandles: !controller.isTransforming,
+        showHandles: !controller.isTransforming && state.editingTextId === null,
       });
       controller.labels = result.labels;
     };
@@ -223,6 +239,9 @@ export function CanvasView() {
         aria-label="Design canvas"
         tabIndex={0}
       />
+      {editingTextId && (
+        <TextEditor key={editingTextId} id={editingTextId} onDone={() => overlayRef.current?.focus({ preventScroll: true })} />
+      )}
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="Canvas menu" onClose={() => setMenu(null)} />}
     </div>
   );
