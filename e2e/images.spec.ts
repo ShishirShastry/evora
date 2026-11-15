@@ -168,6 +168,98 @@ test('place an image, change how it fits, replace it, and find it again after a 
   expect(errors).toEqual([]);
 });
 
+test('position a cropped image by dragging it, and adjust how it is drawn', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New design file' }).click();
+  await expect(canvas(page)).toBeVisible();
+  const box = await canvas(page).boundingBox();
+  if (!box) throw new Error('canvas not visible');
+  const cx = Math.floor(box.width) / 2;
+  const cy = Math.floor(box.height) / 2;
+  const left = cx - 100;
+  const drag = async (from: [number, number], to: [number, number]): Promise<void> => {
+    await page.mouse.move(box.x + from[0], box.y + from[1]);
+    await page.mouse.down();
+    await page.mouse.move(box.x + to[0], box.y + to[1], { steps: 6 });
+    await page.mouse.up();
+  };
+  const near = async (x: number, y: number, expected: RGB, tolerance = 4): Promise<void> => {
+    await expect
+      .poll(async () => (await pixel(page, x, y)).every((channel, i) => Math.abs(channel - (expected[i] as number)) <= tolerance), {
+        message: `pixel at ${x}, ${y} about rgb(${expected.join(', ')})`,
+      })
+      .toBe(true);
+  };
+
+  // The 200 × 100 layer shows the middle half of the image's width: red on its left, blue on its right.
+  await placeFromMenu(page, { name: 'two halves.png', mimeType: 'image/png', buffer: TWO_HALVES });
+  await expect(field(page, 'Width')).toHaveValue('200');
+  await select(page, 'Fill 1 image fit').selectOption('CROP');
+  await set(page, 'Fill 1 crop left', '25');
+  await set(page, 'Fill 1 crop width', '50');
+  await expectPixel(page, left + 50, cy, RED);
+  await expectPixel(page, left + 150, cy, BLUE);
+  const layerX = await field(page, 'X position').inputValue();
+
+  // Positioning: the image follows the pointer and the layer stays where it is.
+  const toggle = page.getByRole('button', { name: 'Position Fill 1 on the canvas' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // Half the layer's width to the right is a quarter of the image: its left half now fills the layer.
+  await drag([cx, cy], [cx + 100, cy]);
+  await expect(field(page, 'Fill 1 crop left')).toHaveValue('0');
+  await expect(field(page, 'Fill 1 crop width')).toHaveValue('50');
+  await expect(field(page, 'X position')).toHaveValue(layerX);
+  await expectPixel(page, left + 50, cy, RED);
+  await expectPixel(page, left + 150, cy, RED);
+  // Far to the left: it stops at the image's right edge, and the layer is all blue.
+  await drag([cx + 50, cy], [cx - 350, cy]);
+  await expect(field(page, 'Fill 1 crop left')).toHaveValue('50');
+  await expectPixel(page, left + 50, cy, BLUE);
+  // Each drag is one undo step.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Fill 1 crop left')).toHaveValue('0');
+  await expectPixel(page, left + 150, cy, RED);
+  // Escape ends it; the same drag now moves the layer.
+  await page.keyboard.press('Escape');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await drag([cx, cy], [cx + 40, cy]);
+  await expect(field(page, 'Fill 1 crop left')).toHaveValue('0');
+  await expect(field(page, 'X position')).toHaveValue(String(Number(layerX) + 40));
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'X position')).toHaveValue(layerX);
+
+  // Adjustments. With no saturation, red is drawn as the grey of its brightness.
+  await set(page, 'Fill 1 saturation', '-100');
+  await near(left + 100, cy, [54, 54, 54]);
+  await set(page, 'Fill 1 saturation', '0');
+  await expectPixel(page, left + 100, cy, RED);
+  // Half the exposure is half as bright; none at all is black.
+  await set(page, 'Fill 1 exposure', '-50');
+  await near(left + 100, cy, [128, 0, 0]);
+  await set(page, 'Fill 1 exposure', '-100');
+  await near(left + 100, cy, [0, 0, 0]);
+  // No contrast at all is a flat mid grey, whatever the image.
+  await set(page, 'Fill 1 exposure', '0');
+  await set(page, 'Fill 1 contrast', '-100');
+  await near(left + 100, cy, [128, 128, 128]);
+
+  // The adjustments are part of the file: they are there after a reload.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await near(left + 100, cy, [128, 128, 128]);
+  await layer(page, 'two halves').click();
+  await expect(field(page, 'Fill 1 contrast')).toHaveValue('-100');
+  await set(page, 'Fill 1 contrast', '0');
+  await expectPixel(page, left + 100, cy, RED);
+  expect(errors).toEqual([]);
+});
+
 test('drop and paste images, and refuse files that are not images', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

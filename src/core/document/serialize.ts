@@ -113,6 +113,34 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   },
   // Version 11 adds the BOOLEAN_OPERATION layer type. Older files contain none.
   10: (file) => ({ ...file, schemaVersion: 11 }),
+  // Version 12 adds adjustments to image paints. Older images are drawn as they are: all zero.
+  11: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    // The new values go where a file written by this version has them, after the tile size,
+    // so that an upgraded file reads exactly as a new one and nothing is reported as repaired.
+    const adjusted = (paint: Raw): Raw => {
+      const zero = { exposure: 0, contrast: 0, saturation: 0 };
+      const next: Raw = {};
+      let placed = false;
+      for (const key in paint) {
+        next[key] = paint[key];
+        if (key === 'tileScale') {
+          Object.assign(next, zero);
+          placed = true;
+        }
+      }
+      return placed ? next : { ...next, ...zero };
+    };
+    const adjust = (paints: unknown): unknown =>
+      Array.isArray(paints) ? paints.map((paint) => (isObject(paint) && paint.type === 'IMAGE' ? adjusted(paint) : paint)) : paints;
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type !== 'PAGE' ? { ...node, fills: adjust(node.fills), strokes: adjust(node.strokes) } : node;
+    }
+    return { ...file, schemaVersion: 12, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

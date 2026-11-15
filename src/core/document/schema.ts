@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 11 (adds boolean groups; version 10 added masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
+ * OPEN DESIGN document schema, version 12 (adds image adjustments; version 11 added boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
@@ -7,7 +7,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -81,6 +81,14 @@ export interface ImagePaint {
   crop: { x: number; y: number; width: number; height: number };
   /** For TILE: the size of one tile relative to the image's natural size. */
   tileScale: number;
+  /**
+   * Adjustments made to the image as it is drawn, each from -1 to 1, where 0
+   * leaves it as it is: darker or lighter, flatter or more contrasty, greyer
+   * or more colourful. The image file itself is never changed.
+   */
+  exposure: number;
+  contrast: number;
+  saturation: number;
   opacity: number;
   visible: boolean;
 }

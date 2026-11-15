@@ -256,7 +256,19 @@ export function paintStyle(ctx: Ctx, paint: Paint, width: number, height: number
 /** Shown where an image has not been decoded yet, or cannot be found. */
 const IMAGE_PLACEHOLDER = 'rgba(128, 138, 138, 0.35)';
 
-/** Draws an image paint into the layer's box. The caller has already clipped to the layer's outline. */
+/**
+ * An image paint's adjustments as a canvas filter, or null when it has none.
+ * Each runs from -1 to 1 about "as it is": exposure from black to twice as
+ * bright, contrast from flat grey to twice the contrast, saturation from
+ * grey to twice as colourful.
+ */
+export function imageFilter(paint: ImagePaint): string | null {
+  if (paint.exposure === 0 && paint.contrast === 0 && paint.saturation === 0) return null;
+  const amount = (value: number): number => Math.round((1 + Math.min(1, Math.max(-1, value))) * 1000) / 1000;
+  return `brightness(${amount(paint.exposure)}) contrast(${amount(paint.contrast)}) saturate(${amount(paint.saturation)})`;
+}
+
+/** Draws an image paint into the layer's box. The caller has already clipped to the layer's outline, and restores the context afterwards. */
 function drawImagePaint(ctx: Ctx, paint: ImagePaint, width: number, height: number, images: ImageSource | undefined): void {
   const decoded = images?.get(paint.imageHash) ?? null;
   if (!decoded) {
@@ -264,6 +276,8 @@ function drawImagePaint(ctx: Ctx, paint: ImagePaint, width: number, height: numb
     ctx.fillRect(0, 0, width, height);
     return;
   }
+  const filter = imageFilter(paint);
+  if (filter && 'filter' in ctx) ctx.filter = filter;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   if (paint.scaleMode === 'TILE') {

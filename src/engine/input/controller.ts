@@ -58,6 +58,7 @@ import { hitFrameLabel, type FrameLabel } from '../render/overlay';
 import { RULER_SIZE } from '../render/rulers';
 import { panBy, screenToWorld, zoomAt } from '../viewport';
 import { arcHandleAt, dragArcHandle, type ArcHandle } from './arcHandles';
+import { cropUnderPointer, dragCrop } from './cropDrag';
 import { dragGradientHandle, gradientHandleAt, type GradientHandle } from './gradientHandles';
 import { getSelectionFrame, handleCursor, hitHandle, pointInSelectionFrame, type SelectionFrame } from './selectionFrame';
 import { VectorTool, type VectorOverlay } from './vectorTool';
@@ -145,6 +146,8 @@ type Mode =
   | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document }
   /** The Pen tool or point editing has the pointer; see `VectorTool`. */
   | { kind: 'vector' }
+  /** A cropped image is being dragged about inside its layer. */
+  | { kind: 'crop'; edit: PaintEdit; startWorld: Point; base: Document }
   /** One of the two handles of a gradient is being dragged. */
   | { kind: 'gradient'; edit: PaintEdit; handle: GradientHandle; base: Document }
   /** One of the handles that shape an ellipse's arc is being dragged. */
@@ -384,6 +387,9 @@ export class InteractionController {
       case 'gradient':
         this.state.updateGesture(() => dragGradientHandle(mode.base, mode.edit, mode.handle, world, e.shiftKey));
         return;
+      case 'crop':
+        this.state.updateGesture(() => dragCrop(mode.base, mode.edit, mode.startWorld, world));
+        return;
       case 'arc': {
         const patch = dragArcHandle(mode.base, mode.id, mode.handle, world, e.shiftKey);
         if (patch) this.state.updateGesture(() => patchNode(mode.base, mode.id, patch));
@@ -448,6 +454,9 @@ export class InteractionController {
         break;
       case 'gradient':
         state.commitGesture('Change gradient');
+        break;
+      case 'crop':
+        state.commitGesture('Crop image');
         break;
     }
     // Finishing a draw computes its final box, which may snap once more; nothing stays snapped afterwards.
@@ -559,6 +568,12 @@ export class InteractionController {
       return;
     }
     const world = this.toWorld(e);
+    // A cropped image that is being positioned can be dragged wherever no handle is.
+    if (cropUnderPointer(state.doc, state.paintEdit, world)) {
+      state.setHovered(null);
+      this.host.setCursor('grab');
+      return;
+    }
     if (this.rulerAt(e)) {
       state.setHovered(null);
       this.host.setCursor('default');
@@ -630,6 +645,15 @@ export class InteractionController {
           this.mode = { kind: 'line-end', id: frame.single, base: state.doc, fixed: ends[handle.end === 0 ? 1 : 0] };
         }
       }
+      return;
+    }
+
+    // A cropped image that is being positioned: dragging on its layer moves the image inside it.
+    if (state.paintEdit && cropUnderPointer(state.doc, state.paintEdit, world)) {
+      state.beginGesture();
+      state.setHovered(null);
+      this.mode = { kind: 'crop', edit: state.paintEdit, startWorld: world, base: state.doc };
+      this.host.setCursor('grabbing');
       return;
     }
 

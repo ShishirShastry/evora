@@ -121,6 +121,9 @@ function paints(value: unknown): Paint[] {
         // The crop must stay inside the image and keep some area.
         crop: { x, y, width: finite(crop.width, 1, 0.001, 1 - x || 0.001), height: finite(crop.height, 1, 0.001, 1 - y || 0.001) },
         tileScale: finite(item.tileScale, 1, 0.01, 100),
+        exposure: finite(item.exposure, 0, -1, 1),
+        contrast: finite(item.contrast, 0, -1, 1),
+        saturation: finite(item.saturation, 0, -1, 1),
         opacity,
         visible,
       });

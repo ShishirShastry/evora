@@ -85,7 +85,18 @@ export function paintColor(paint: Paint): RGB {
 
 /** An image fill that covers the layer and shows the whole image when cropping is switched on. */
 export function imagePaint(imageHash: string): ImagePaint {
-  return { type: 'IMAGE', imageHash, scaleMode: 'FILL', crop: { x: 0, y: 0, width: 1, height: 1 }, tileScale: 1, opacity: 1, visible: true };
+  return {
+    type: 'IMAGE',
+    imageHash,
+    scaleMode: 'FILL',
+    crop: { x: 0, y: 0, width: 1, height: 1 },
+    tileScale: 1,
+    exposure: 0,
+    contrast: 0,
+    saturation: 0,
+    opacity: 1,
+    visible: true,
+  };
 }
 
 /** A new layout grid of the given kind, in the customary translucent red. */

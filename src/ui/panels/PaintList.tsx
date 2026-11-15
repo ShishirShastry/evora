@@ -285,6 +285,43 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                     ))}
                   </div>
                 )}
+                {paint.scaleMode === 'CROP' &&
+                  layers.length === 1 &&
+                  (() => {
+                    const id = ids[0] as NodeId;
+                    const active = paintEdit !== null && paintEdit.id === id && paintEdit.key === paintKey && paintEdit.index === index;
+                    return (
+                      <button
+                        type="button"
+                        className="od-button !h-[26px]"
+                        aria-label={`Position ${name} on the canvas`}
+                        aria-pressed={active}
+                        style={active ? { borderColor: 'var(--od-accent)', color: 'var(--od-accent)' } : undefined}
+                        onClick={() => store.getState().setPaintEdit(active ? null : { id, key: paintKey, index })}
+                      >
+                        {active ? 'Done positioning' : 'Drag the image to position it'}
+                      </button>
+                    );
+                  })()}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      ['exposure', 'Exposure', 'Exp'],
+                      ['contrast', 'Contrast', 'Con'],
+                      ['saturation', 'Saturation', 'Sat'],
+                    ] as const
+                  ).map(([key, word, prefix]) => (
+                    <NumberField
+                      key={key}
+                      label={`${name} ${word.toLowerCase()}`}
+                      prefix={prefix}
+                      min={-100}
+                      max={100}
+                      value={Math.round(paint[key] * 100)}
+                      onCommit={(value) => replace(index, { ...paint, [key]: value / 100 }, `Change image ${word.toLowerCase()}`)}
+                    />
+                  ))}
+                </div>
               </>
             )}
 
