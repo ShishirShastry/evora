@@ -118,6 +118,7 @@ export function CanvasView() {
         // A vector whose points are being edited shows those instead of the box handles.
         showHandles: !controller.isTransforming && state.editingTextId === null && state.vectorEdit === null,
         vector: controller.vectorOverlay(),
+        paintEdit: state.paintEdit,
       });
       controller.labels = result.labels;
     };

@@ -49,7 +49,8 @@ export type IconName =
   | 'subtract'
   | 'intersect'
   | 'exclude'
-  | 'mask';
+  | 'mask'
+  | 'handles';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -137,6 +138,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path {...s} d="M6 6h3.5v4H6z" />
       <path {...s} strokeDasharray="1.5 1.8" d="M6 6V2.5H2.5V10H6M9.5 6h4v7.5H6V10" />
+    </>
+  ),
+  handles: (
+    <>
+      <path {...s} d="M4.6 11.4l6.8-6.8" />
+      <circle {...s} cx="3.5" cy="12.5" r="1.6" />
+      <circle cx="12.5" cy="3.5" r="2" fill="currentColor" />
     </>
   ),
   mask: (

@@ -129,6 +129,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
   const context = useEditorContext();
   const { store } = context;
   const assets = useEditor((s) => s.doc.assets);
+  const paintEdit = useEditor((s) => s.paintEdit);
   const ids = layers.map((layer) => layer.id);
   const mixed = !sameList(layers, paintKey);
   const paints = mixed ? [] : (layers[0] as LayerNode)[paintKey];
@@ -299,6 +300,23 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                     value={gradientAngle(paint)}
                     onCommit={(angle) => replace(index, withAngle(paint, angle), 'Change gradient angle')}
                   />
+                  {layers.length === 1 &&
+                    (() => {
+                      const id = ids[0] as NodeId;
+                      const active = paintEdit !== null && paintEdit.id === id && paintEdit.key === paintKey && paintEdit.index === index;
+                      return (
+                        <button
+                          type="button"
+                          className="od-icon-button !h-[26px] !w-[26px]"
+                          aria-label={`Edit ${name} on the canvas`}
+                          aria-pressed={active}
+                          title="Show this gradient's handles on the canvas"
+                          onClick={() => store.getState().setPaintEdit(active ? null : { id, key: paintKey, index })}
+                        >
+                          <Icon name="handles" size={14} />
+                        </button>
+                      );
+                    })()}
                   <button
                     type="button"
                     className="od-button !h-[26px] flex-none !px-2"

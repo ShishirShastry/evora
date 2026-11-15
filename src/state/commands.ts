@@ -735,6 +735,7 @@ export const COMMANDS: readonly Command[] = [
       if (app.cancelInteraction()) return;
       const state = store.getState();
       if (state.tool !== 'move') state.setTool('move');
+      else if (state.paintEdit) state.setPaintEdit(null);
       // Out of point editing one step at a time: first the points, then the editing itself.
       else if (state.vectorEdit) state.setVectorEdit(state.vectorEdit.vertices.length > 0 ? { id: state.vectorEdit.id, vertices: [] } : null);
       else state.setSelection([]);

@@ -20,8 +20,10 @@ import {
   type SnapGuide,
 } from '../../core';
 import { ARC_HANDLE_RADIUS_PX, arcHandles } from '../input/arcHandles';
+import { GRADIENT_HANDLE_RADIUS_PX, gradientHandles } from '../input/gradientHandles';
 import { getSelectionFrame } from '../input/selectionFrame';
 import type { VectorOverlay } from '../input/vectorTool';
+import type { PaintEdit } from '../../state/editorStore';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
 import { traceLayerPath } from './paint';
 import { drawGuides, drawRulers } from './rulers';
@@ -65,6 +67,8 @@ export interface OverlayInput {
   showRulers?: boolean;
   /** The points, handles and pen preview of a vector that is being edited or drawn. */
   vector?: VectorOverlay | null;
+  /** The paint whose handles are shown on the canvas, if one is being edited there. */
+  paintEdit?: PaintEdit | null;
 }
 
 const gridFrameCache = new WeakMap<NodeMap, Map<NodeId, NodeId[]>>();
@@ -261,6 +265,33 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.strokeStyle = ACCENT;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // A gradient being edited on the canvas: a line from where it starts to where it ends, with a handle on each.
+  const gradient = gradientHandles(doc, input.paintEdit ?? null, viewport);
+  if (gradient) {
+    ctx.beginPath();
+    ctx.moveTo(gradient.from.x, gradient.from.y);
+    ctx.lineTo(gradient.to.x, gradient.to.y);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    for (const [point, start] of [
+      [gradient.from, true],
+      [gradient.to, false],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, GRADIENT_HANDLE_RADIUS_PX, 0, Math.PI * 2);
+      // The start is hollow, the end solid.
+      ctx.fillStyle = start ? '#ffffff' : ACCENT;
+      ctx.fill();
+      ctx.strokeStyle = start ? ACCENT : '#ffffff';
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }

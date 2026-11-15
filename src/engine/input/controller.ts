@@ -53,11 +53,12 @@ import {
   type SnapGuide,
   type SnapTargets,
 } from '../../core';
-import type { EditorStore, ToolId } from '../../state/editorStore';
+import type { EditorStore, PaintEdit, ToolId } from '../../state/editorStore';
 import { hitFrameLabel, type FrameLabel } from '../render/overlay';
 import { RULER_SIZE } from '../render/rulers';
 import { panBy, screenToWorld, zoomAt } from '../viewport';
 import { arcHandleAt, dragArcHandle, type ArcHandle } from './arcHandles';
+import { dragGradientHandle, gradientHandleAt, type GradientHandle } from './gradientHandles';
 import { getSelectionFrame, handleCursor, hitHandle, pointInSelectionFrame, type SelectionFrame } from './selectionFrame';
 import { VectorTool, type VectorOverlay } from './vectorTool';
 
@@ -144,6 +145,8 @@ type Mode =
   | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document }
   /** The Pen tool or point editing has the pointer; see `VectorTool`. */
   | { kind: 'vector' }
+  /** One of the two handles of a gradient is being dragged. */
+  | { kind: 'gradient'; edit: PaintEdit; handle: GradientHandle; base: Document }
   /** One of the handles that shape an ellipse's arc is being dragged. */
   | { kind: 'arc'; id: NodeId; handle: ArcHandle; base: Document };
 
@@ -378,6 +381,9 @@ export class InteractionController {
       case 'vector':
         this.vector.pointerMove(e);
         return;
+      case 'gradient':
+        this.state.updateGesture(() => dragGradientHandle(mode.base, mode.edit, mode.handle, world, e.shiftKey));
+        return;
       case 'arc': {
         const patch = dragArcHandle(mode.base, mode.id, mode.handle, world, e.shiftKey);
         if (patch) this.state.updateGesture(() => patchNode(mode.base, mode.id, patch));
@@ -439,6 +445,9 @@ export class InteractionController {
         break;
       case 'arc':
         state.commitGesture('Change arc');
+        break;
+      case 'gradient':
+        state.commitGesture('Change gradient');
         break;
     }
     // Finishing a draw computes its final box, which may snap once more; nothing stays snapped afterwards.
@@ -537,7 +546,7 @@ export class InteractionController {
       this.host.setCursor(this.idleCursor());
       return;
     }
-    if (arcHandleAt(state.doc, state.selection, state.viewport, e)) {
+    if (gradientHandleAt(state.doc, state.paintEdit, state.viewport, e) || arcHandleAt(state.doc, state.selection, state.viewport, e)) {
       state.setHovered(null);
       this.host.setCursor('pointer');
       return;
@@ -576,6 +585,15 @@ export class InteractionController {
     const world = this.toWorld(e);
     const tolerance = HIT_TOLERANCE_PX / state.viewport.zoom;
     const frame = getSelectionFrame(state.doc, state.selection);
+
+    // The handles of a gradient that is being edited on the canvas.
+    const gradient = gradientHandleAt(state.doc, state.paintEdit, state.viewport, e);
+    if (gradient && state.paintEdit) {
+      state.beginGesture();
+      state.setHovered(null);
+      this.mode = { kind: 'gradient', edit: state.paintEdit, handle: gradient, base: state.doc };
+      return;
+    }
 
     // The handles that shape a selected ellipse's arc.
     const arc = arcHandleAt(state.doc, state.selection, state.viewport, e);
