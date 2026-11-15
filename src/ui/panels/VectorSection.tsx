@@ -100,6 +100,7 @@ export function VectorSection({ layers }: { layers: VectorNode[] }) {
           </Row>
           <Row>
             {button('vector.join', 'Join', selected === 2)}
+            {button('vector.cut', 'Cut', selected > 0)}
             {button('edit.delete', 'Delete', selected > 0)}
           </Row>
         </>

@@ -7,6 +7,7 @@ import {
   booleanNodes,
   canBoolean,
   cornerVertex,
+  detachVertex,
   getWorldMatrix,
   invert,
   isVector,
@@ -234,6 +235,26 @@ export function setPointType(store: EditorStore, type: 'SMOOTH' | 'CORNER'): voi
     for (const vertex of vectorEdit.vertices) network = type === 'SMOOTH' ? smoothVertex(network, vertex) : cornerVertex(network, vertex);
     return setNetwork(doc, vectorEdit.id, network);
   });
+}
+
+/** Cuts the path open at each selected point, so that the segments that met there can be pulled apart. */
+export function cutAtPoints(store: EditorStore): void {
+  const { vectorEdit, apply } = store.getState();
+  if (!vectorEdit || vectorEdit.vertices.length === 0) return;
+  const added: number[] = [];
+  apply('Cut path', (doc) => {
+    const node = doc.nodes[vectorEdit.id];
+    if (!isVector(node)) return doc;
+    let network = node.network;
+    for (const vertex of vectorEdit.vertices) {
+      const cut = detachVertex(network, vertex);
+      network = cut.network;
+      added.push(...cut.added);
+    }
+    return setNetwork(doc, vectorEdit.id, network);
+  });
+  // The new ends are selected, ready to be dragged away from the points they were cut from.
+  if (added.length > 0) store.getState().setVectorEdit({ id: vectorEdit.id, vertices: added });
 }
 
 export function nudgeSelection(store: EditorStore, dx: number, dy: number): void {
@@ -750,6 +771,15 @@ export const COMMANDS: readonly Command[] = [
     checked: (state) => state.snapping,
     run: ({ store }) => store.getState().setSnapping(!store.getState().snapping),
   },
+  {
+    id: 'view.pixelSnap',
+    label: 'Snap to pixel grid',
+    group: 'View',
+    shortcut: "Ctrl+Alt+'",
+    keys: [{ code: 'Quote', ctrl: true, alt: true }],
+    checked: (state) => state.pixelSnap,
+    run: ({ store }) => store.getState().setPixelSnap(!store.getState().pixelSnap),
+  },
 
   {
     id: 'view.rulers',
@@ -890,6 +920,13 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyJ', ctrl: true }],
     enabled: (state) => state.vectorEdit?.vertices.length === 2,
     run: ({ store }) => joinPoints(store),
+  },
+  {
+    id: 'vector.cut',
+    label: 'Cut path at points',
+    group: 'Object',
+    enabled: (state) => (state.vectorEdit?.vertices.length ?? 0) > 0,
+    run: ({ store }) => cutAtPoints(store),
   },
   {
     id: 'vector.smooth',

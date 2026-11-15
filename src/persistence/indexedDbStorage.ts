@@ -103,6 +103,13 @@ export class IndexedDbStorage implements DocumentStorage {
     return asset ?? null;
   }
 
+  async removeAsset(hash: string): Promise<void> {
+    const db = await this.open();
+    const tx = db.transaction(ASSETS, 'readwrite');
+    tx.objectStore(ASSETS).delete(hash);
+    await done(tx);
+  }
+
   /** Closes the connection. Used by tests. */
   async close(): Promise<void> {
     if (!this.db) return;

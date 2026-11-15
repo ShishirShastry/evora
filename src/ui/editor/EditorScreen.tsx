@@ -172,10 +172,11 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     const unsubscribe = store.subscribe((state, previous) => {
       if (
         state.snapping !== previous.snapping ||
+        state.pixelSnap !== previous.pixelSnap ||
         state.showLayoutGrids !== previous.showLayoutGrids ||
         state.showRulers !== previous.showRulers
       ) {
-        savePreferences({ snapping: state.snapping, showLayoutGrids: state.showLayoutGrids, showRulers: state.showRulers });
+        savePreferences({ snapping: state.snapping, pixelSnap: state.pixelSnap, showLayoutGrids: state.showLayoutGrids, showRulers: state.showRulers });
       }
       if (state.viewport === previous.viewport && state.pageId === previous.pageId) return;
       if (sessionTimer !== null) clearTimeout(sessionTimer);

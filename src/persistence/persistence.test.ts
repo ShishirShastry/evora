@@ -217,6 +217,7 @@ describe('autosave', () => {
       remove: (id) => inner.remove(id),
       saveAsset: (hash, asset) => inner.saveAsset(hash, asset),
       loadAsset: (hash) => inner.loadAsset(hash),
+      removeAsset: (hash) => inner.removeAsset(hash),
       save: async (file: OpenDesignFile) => {
         if (failing) throw new Error('disk full');
         await inner.save(file);

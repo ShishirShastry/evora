@@ -41,9 +41,18 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
     case 'TEXT':
       // Text is selected by its box, so it can be grabbed between the letters.
       return inBox(p, width, height, tolerance);
-    case 'RECTANGLE':
+    case 'RECTANGLE': {
+      if (node.cornerRadius > 0 || node.cornerRadii?.some((radius) => radius > 0)) {
+        // Rounded corners: what lies outside the curve of a corner is not the rectangle.
+        const network = outlineNetwork(node);
+        if (network) {
+          if (solid && pointInNetworkFill(network, p, 'NONZERO')) return true;
+          return distanceToNetwork(network, p) <= edge;
+        }
+      }
       if (solid) return inBox(p, width, height, 0);
       return inBox(p, width, height, edge) && !inBox({ x: p.x - edge * 2, y: p.y - edge * 2 }, width - edge * 4, height - edge * 4, 0);
+    }
     case 'ELLIPSE': {
       if (hasArc(node)) {
         // A slice or a ring is tested against its real outline.

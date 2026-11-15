@@ -44,7 +44,11 @@ export type IconName =
   | 'corners'
   | 'vector'
   | 'pen'
-  | 'pencil';
+  | 'pencil'
+  | 'union'
+  | 'subtract'
+  | 'intersect'
+  | 'exclude';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -121,6 +125,25 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   pen: <path {...s} d="M8 2l3.4 6.6-1.6 3.4H6.2L4.6 8.6zM8 2v5.6M5.5 14h5" />,
   pencil: <path {...s} d="M2.8 13.2l.8-3.2 7.2-7.2 2.4 2.4L6 12.4zM9.4 4.2l2.4 2.4" />,
+  union: <path {...s} d="M2.5 2.5h7V6h4v7.5H6V10H2.5z" />,
+  subtract: (
+    <>
+      <path {...s} d="M2.5 2.5h7V6H6v4H2.5z" />
+      <path {...s} strokeDasharray="1.5 1.8" d="M9.5 6h4v7.5H6V10" />
+    </>
+  ),
+  intersect: (
+    <>
+      <path {...s} d="M6 6h3.5v4H6z" />
+      <path {...s} strokeDasharray="1.5 1.8" d="M6 6V2.5H2.5V10H6M9.5 6h4v7.5H6V10" />
+    </>
+  ),
+  exclude: (
+    <>
+      <path {...s} d="M2.5 2.5h7V6H6v4H2.5z" />
+      <path {...s} d="M9.5 6h4v7.5H6V10h3.5z" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

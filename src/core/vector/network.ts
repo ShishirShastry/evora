@@ -577,6 +577,29 @@ export function mergeVertices(network: VectorNetwork, keep: number, drop: number
   return dropVertex(network, drop, moved);
 }
 
+/**
+ * Cuts the path at a point: the segments that met there no longer do. The
+ * first keeps the point; each of the others gets a point of its own in the
+ * same place. A closed path is opened; an open one becomes two. `added`
+ * lists the new points.
+ */
+export function detachVertex(network: VectorNetwork, vertex: number): { network: VectorNetwork; added: number[] } {
+  const at = network.vertices[vertex];
+  const handles = handlesOf(network, vertex);
+  if (!at || handles.length < 2) return { network, added: [] };
+  const vertices = [...network.vertices];
+  const segments = [...network.segments];
+  const added: number[] = [];
+  for (const ref of handles.slice(1)) {
+    const index = vertices.length;
+    vertices.push({ x: at.x, y: at.y });
+    added.push(index);
+    const segment = segments[ref.segment] as VectorSegment;
+    segments[ref.segment] = ref.end === 'start' ? { ...segment, start: index } : { ...segment, end: index };
+  }
+  return { network: { vertices, segments }, added };
+}
+
 /** Turns a point into a corner: its handles are pulled in, so the segments leave it straight. */
 export function cornerVertex(network: VectorNetwork, vertex: number): VectorNetwork {
   const handles = handlesOf(network, vertex);

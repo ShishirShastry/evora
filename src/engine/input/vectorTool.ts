@@ -671,6 +671,13 @@ export class VectorTool {
     }
 
     const onSegment = this.segmentAt(node, matrix, world);
+    if (onSegment && e.detail >= 2) {
+      // Double-clicking a segment puts a point on it.
+      const split = splitSegment(node.network, onSegment.segment, onSegment.t);
+      state.apply('Add point', (doc) => setNetwork(doc, node.id, split.network));
+      this.store.getState().setVectorEdit({ id: node.id, vertices: [split.vertex] });
+      return;
+    }
     if (onSegment) {
       // A segment is moved by its two ends.
       const segment = node.network.segments[onSegment.segment];
@@ -708,7 +715,7 @@ export class VectorTool {
       const before = applyToPoint(matrix, grabbed);
       const after = this.host.snapPoint(add(before, delta), mode.base, node.parentId, new Set([mode.id]), true);
       delta = sub(after, before);
-    } else delta = { x: Math.round(delta.x), y: Math.round(delta.y) };
+    } else if (state.pixelSnap) delta = { x: Math.round(delta.x), y: Math.round(delta.y) };
     const local = applyToVector(invert(matrix), delta);
     state.updateGesture(() => setNetwork(mode.base, mode.id, moveVertices(node.network, mode.indices, local.x, local.y)));
   }

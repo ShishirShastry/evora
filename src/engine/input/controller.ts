@@ -1,6 +1,7 @@
 import {
   addLayer,
   applyToPoint,
+  clean,
   collectSnapTargets,
   containerAt,
   deeperTargetAt,
@@ -180,8 +181,7 @@ export class InteractionController {
         this.marquee = rect;
       },
       snapPoint: (world, doc, containerId, exclude, show) => {
-        const whole = { x: Math.round(world.x), y: Math.round(world.y) };
-        const snapped = this.snapWorldPoint(whole, doc, [containerId], exclude, { x: true, y: true });
+        const snapped = this.snapWorldPoint(this.whole(world), doc, [containerId], exclude, { x: true, y: true });
         if (!show) this.guides = [];
         return snapped;
       },
@@ -210,6 +210,11 @@ export class InteractionController {
 
   private toWorld(p: Point): Point {
     return screenToWorld(this.state.viewport, p);
+  }
+
+  /** A point put on whole pixels, when snapping to the pixel grid is on; otherwise just tidied to a thousandth. */
+  private whole(p: Point): Point {
+    return this.state.pixelSnap ? { x: Math.round(p.x), y: Math.round(p.y) } : { x: clean(p.x), y: clean(p.y) };
   }
 
   /**
@@ -320,7 +325,7 @@ export class InteractionController {
     else if (tool === 'text') {
       const world = this.toWorld(e);
       this.state.setHovered(null);
-      this.mode = { kind: 'text', startScreen: { x: e.x, y: e.y }, startWorld: { x: Math.round(world.x), y: Math.round(world.y) } };
+      this.mode = { kind: 'text', startScreen: { x: e.x, y: e.y }, startWorld: this.whole(world) };
     } else this.beginSelect(e);
   }
 
@@ -694,7 +699,7 @@ export class InteractionController {
     }
 
     this.state.updateGesture(() => {
-      let doc = moveNodesBy(mode.base, mode.ids, dx, dy, true);
+      let doc = moveNodesBy(mode.base, mode.ids, dx, dy, this.state.pixelSnap);
       // Dropping onto a frame puts the layers inside it; dragging out takes them out.
       // A layer inside a group stays in its group while it remains over the same frame.
       const container = containerAt(doc, pageId, world, new Set(mode.ids));
@@ -722,7 +727,7 @@ export class InteractionController {
       const box = resizeBox(single, handle, pointer, {
         keepAspect: e.shiftKey,
         fromCenter: e.altKey,
-        snap: getWorldRotation(base, single.id) === 0,
+        snap: this.state.pixelSnap && getWorldRotation(base, single.id) === 0,
       });
       // Dragging a text layer's handle stops its size following its content in that direction.
       const textMode =
@@ -739,9 +744,10 @@ export class InteractionController {
     const to = resizeBox({ ...from, rotation: 0 }, handle, world, {
       keepAspect: e.shiftKey,
       fromCenter: e.altKey,
-      snap: true,
+      snap: this.state.pixelSnap,
     });
-    this.state.updateGesture(() => resizeNodesInBounds(base, mode.ids, from, to, true));
+    const pixelSnap = this.state.pixelSnap;
+    this.state.updateGesture(() => resizeNodesInBounds(base, mode.ids, from, to, pixelSnap));
   }
 
   private updateLineEnd(mode: Extract<Mode, { kind: 'line-end' }>, world: Point, e: PointerInput): void {
@@ -749,7 +755,7 @@ export class InteractionController {
     if (!node) return;
     let pointer = this.toParent(mode.base, node.parentId, world);
     if (e.shiftKey) pointer = snapAngle(mode.fixed, pointer, ROTATION_SNAP);
-    else if (getWorldRotation(mode.base, node.parentId) === 0) pointer = { x: Math.round(pointer.x), y: Math.round(pointer.y) };
+    else if (this.state.pixelSnap && getWorldRotation(mode.base, node.parentId) === 0) pointer = { x: Math.round(pointer.x), y: Math.round(pointer.y) };
     const [start] = lineEndpoints(node);
     // Keep the line's direction: the fixed end stays the end it was.
     const fixedIsStart = distance(start, mode.fixed) < 1e-6;
@@ -772,7 +778,7 @@ export class InteractionController {
   private beginDraw(type: LayerType, e: PointerInput): void {
     const state = this.state;
     const world = this.toWorld(e);
-    const startWorld = { x: Math.round(world.x), y: Math.round(world.y) };
+    const startWorld = this.whole(world);
     const parentId = containerAt(state.doc, state.pageId, startWorld);
     const origin = this.toParent(state.doc, parentId, startWorld);
     state.beginGesture();
@@ -804,13 +810,13 @@ export class InteractionController {
     state.beginGesture();
     let props: LayerPatch;
     if (dragged) {
-      const b = this.toParent(state.doc, parentId, { x: Math.round(world.x), y: Math.round(world.y) });
+      const b = this.toParent(state.doc, parentId, this.whole(world));
       const box = rectFromPoints(a, b);
       props = { x: box.x, y: box.y, width: Math.max(10, box.width), textAutoResize: 'HEIGHT' };
     } else {
       // Put the first line's middle where the user clicked.
       const lineHeight = resolveLineHeight({ lineHeight: null, fontSize: 16 });
-      props = { x: a.x, y: Math.round(a.y - lineHeight / 2) };
+      props = { x: a.x, y: state.pixelSnap ? Math.round(a.y - lineHeight / 2) : clean(a.y - lineHeight / 2) };
     }
     const created = addLayer(state.doc, 'TEXT', parentId, props);
     state.updateGesture(() => created.doc, [created.id]);
@@ -826,7 +832,7 @@ export class InteractionController {
       : this.snapWorldPoint(this.toWorld(e), mode.base, [mode.parentId], new Set([mode.id]), { x: true, y: true });
     if (constrained) this.guides = [];
     const a = this.toParent(mode.base, mode.parentId, mode.startWorld);
-    let b = this.toParent(mode.base, mode.parentId, { x: Math.round(world.x), y: Math.round(world.y) });
+    let b = this.toParent(mode.base, mode.parentId, this.whole(world));
 
     if (mode.type === 'LINE') {
       if (e.shiftKey) b = snapAngle(a, b, 45);

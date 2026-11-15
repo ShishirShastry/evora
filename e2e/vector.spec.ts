@@ -292,12 +292,13 @@ test('boolean operations: subtract, intersect, exclude and union of a square and
   };
   await expectPainted([squareOnly, both, circleOnly], [neither]);
 
-  // Subtract: the square with the circle's bite out of it.
-  await page.keyboard.press('Control+Alt+s');
+  // Subtract, from the button in the properties panel: the square with the circle's bite out of it.
+  await page.getByRole('toolbar', { name: 'Combine shapes' }).getByRole('button', { name: 'Subtract selection' }).click();
   await expect(layer(page, 'Subtract')).toBeVisible();
   await expect(layers(page).getByRole('treeitem')).toHaveCount(1);
   await expectPainted([squareOnly], [both, circleOnly, neither]);
   await expect(field(page, 'Width')).toHaveValue('200');
+  await canvas(page).focus();
   await page.keyboard.press('Control+z');
   await expect(layers(page).getByRole('treeitem')).toHaveCount(2);
   await expectPainted([squareOnly, both, circleOnly], [neither]);

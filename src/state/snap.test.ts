@@ -13,7 +13,7 @@ import {
   type NodeId,
 } from '../core';
 import { InteractionController, type PointerInput } from '../engine/input/controller';
-import { loadPreferences, savePreferences } from '../persistence/prefs';
+import { DEFAULT_PREFERENCES, loadPreferences, savePreferences, type Preferences } from '../persistence/prefs';
 import { commandForKey, getCommand, runCommand } from './commands';
 import { createEditorStore, type EditorStore } from './editorStore';
 
@@ -197,6 +197,9 @@ describe('snapping in the tools', () => {
 });
 
 describe('preferences', () => {
+  /** The default preferences with some of them changed. */
+  const prefs = (changed: Partial<Preferences>): Preferences => ({ ...DEFAULT_PREFERENCES, ...changed });
+
   function fakeStorage(): Storage {
     const data = new Map<string, string>();
     return {
@@ -213,19 +216,19 @@ describe('preferences', () => {
 
   it('remembers each preference, defaults to on, and ignores damaged values', () => {
     const storage = fakeStorage();
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true, showRulers: false });
-    savePreferences({ snapping: false, showLayoutGrids: true, showRulers: false }, storage);
-    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true, showRulers: false });
-    savePreferences({ snapping: true, showLayoutGrids: false, showRulers: false }, storage);
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false, showRulers: false });
-    savePreferences({ snapping: true, showLayoutGrids: true, showRulers: true }, storage);
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true, showRulers: true });
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: true, showRulers: false }));
+    savePreferences(prefs({ snapping: false, showLayoutGrids: true, showRulers: false }), storage);
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: false, showLayoutGrids: true, showRulers: false }));
+    savePreferences(prefs({ snapping: true, showLayoutGrids: false, showRulers: false }), storage);
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: false, showRulers: false }));
+    savePreferences(prefs({ snapping: true, showLayoutGrids: true, showRulers: true }), storage);
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: true, showRulers: true }));
     storage.setItem('open-design:preferences', 'broken');
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: true, showRulers: false });
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: true, showRulers: false }));
     // A value of the wrong type falls back to its default; values saved by an older version are kept.
     storage.setItem('open-design:preferences', '{"snapping":"yes","showLayoutGrids":false}');
-    expect(loadPreferences(storage)).toEqual({ snapping: true, showLayoutGrids: false, showRulers: false });
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: false, showRulers: false }));
     storage.setItem('open-design:preferences', '{"snapping":false}');
-    expect(loadPreferences(storage)).toEqual({ snapping: false, showLayoutGrids: true, showRulers: false });
+    expect(loadPreferences(storage)).toEqual(prefs({ snapping: false, showLayoutGrids: true, showRulers: false }));
   });
 });

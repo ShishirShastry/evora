@@ -83,6 +83,44 @@ const ARRANGE_BUTTONS: { id: string; icon: IconName }[] = [
   { id: 'arrange.distribute.vertical', icon: 'distributeV' },
 ];
 
+const BOOLEAN_BUTTONS: { id: string; icon: IconName }[] = [
+  { id: 'object.union', icon: 'union' },
+  { id: 'object.subtract', icon: 'subtract' },
+  { id: 'object.intersect', icon: 'intersect' },
+  { id: 'object.exclude', icon: 'exclude' },
+  { id: 'object.flatten', icon: 'vector' },
+];
+
+/** Buttons for combining shapes. They run the same commands as the Object menu and its shortcuts. */
+function BooleanBar() {
+  const run = useRunCommand();
+  const doc = useEditor((s) => s.doc);
+  const selection = useEditor((s) => s.selection);
+  const state = useEditorContext().store.getState();
+  void doc;
+  void selection;
+  return (
+    <div role="toolbar" aria-label="Combine shapes" className="flex h-10 items-center gap-1 border-b border-line px-2">
+      {BOOLEAN_BUTTONS.map(({ id, icon }) => {
+        const command = getCommand(id) as Command;
+        return (
+          <button
+            key={id}
+            type="button"
+            className="od-icon-button !h-7 !w-7"
+            aria-label={command.label}
+            title={`${command.label} (${command.shortcut})`}
+            disabled={command.enabled ? !command.enabled(state) : false}
+            onClick={() => run(command)}
+          >
+            <Icon name={icon} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Align and distribute buttons. They run the same commands as the Arrange menu and its shortcuts. */
 function ArrangeBar() {
   const run = useRunCommand();
@@ -422,6 +460,7 @@ export function DesignPanel() {
     <aside aria-label="Design properties" className="h-full overflow-y-auto">
       <div className="flex h-9 items-center border-b border-line px-3 font-medium">{title}</div>
       <ArrangeBar />
+      <BooleanBar />
 
       <Section title="Position and size">
         <Row>

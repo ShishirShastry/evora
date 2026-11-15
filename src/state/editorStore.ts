@@ -71,6 +71,8 @@ export interface EditorState {
   vectorEdit: VectorEdit | null;
   /** Whether moving, resizing and drawing snap to nearby layers. A user preference. */
   snapping: boolean;
+  /** Whether positions and sizes land on whole pixels while moving, resizing and drawing. A user preference. */
+  pixelSnap: boolean;
   /** Whether frames' layout grids are drawn (and snapped to). A user preference. */
   showLayoutGrids: boolean;
   /** Whether the rulers, and with them the page's guides, are shown. A user preference. */
@@ -123,6 +125,7 @@ export interface EditorActions {
   /** Starts point editing of a vector layer (which becomes the selection), changes which points are selected, or with null ends it. */
   setVectorEdit(edit: VectorEdit | null): void;
   setSnapping(snapping: boolean): void;
+  setPixelSnap(pixelSnap: boolean): void;
   setShowLayoutGrids(show: boolean): void;
   setShowRulers(show: boolean): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
@@ -182,6 +185,8 @@ export interface EditorOptions {
   measurer?: TextMeasurer;
   /** Initial value of the snapping preference. On unless told otherwise. */
   snapping?: boolean;
+  /** Initial value of the "snap to pixel grid" preference. On unless told otherwise. */
+  pixelSnap?: boolean;
   /** Initial value of the "show layout grids" preference. On unless told otherwise. */
   showLayoutGrids?: boolean;
   /** Initial value of the "show rulers" preference. Off unless told otherwise. */
@@ -234,6 +239,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       editingTextId: null,
       vectorEdit: null,
       snapping: options.snapping ?? true,
+      pixelSnap: options.pixelSnap ?? true,
       showLayoutGrids: options.showLayoutGrids ?? true,
       showRulers: options.showRulers ?? false,
       undoStack: [],
@@ -393,6 +399,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setSnapping(snapping) {
         if (get().snapping !== snapping) set({ snapping });
+      },
+
+      setPixelSnap(pixelSnap) {
+        if (get().pixelSnap !== pixelSnap) set({ pixelSnap });
       },
 
       setShowLayoutGrids(show) {

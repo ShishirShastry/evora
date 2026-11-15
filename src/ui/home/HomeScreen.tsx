@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FileFormatError } from '../../core';
 import { pickTextFile } from '../../persistence/diskIO';
-import { createFile, duplicateFile, importFileText, listFiles, renameFile } from '../../persistence/files';
+import { createFile, deleteFile, duplicateFile, importFileText, listFiles, renameFile } from '../../persistence/files';
 import { clearSession } from '../../persistence/session';
 import type { DocumentStorage, FileSummary } from '../../persistence/storage';
 import { Dialog } from '../components/Dialog';
@@ -210,7 +210,7 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
                   const target = deleting;
                   setDeleting(null);
                   void attempt(async () => {
-                    await storage.remove(target.id);
+                    await deleteFile(storage, target.id);
                     clearSession(target.id);
                     await refresh();
                   });

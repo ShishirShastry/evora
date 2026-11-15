@@ -33,6 +33,8 @@ export interface DocumentStorage {
   /** Stores an asset under its hash. Storing the same hash again is harmless. */
   saveAsset(hash: string, asset: StoredAsset): Promise<void>;
   loadAsset(hash: string): Promise<StoredAsset | null>;
+  /** Deletes an asset's bytes. The caller makes sure no file needs them. */
+  removeAsset(hash: string): Promise<void>;
 }
 
 export function summarize(file: OpenDesignFile): FileSummary {
@@ -76,5 +78,9 @@ export class MemoryStorage implements DocumentStorage {
   async loadAsset(hash: string): Promise<StoredAsset | null> {
     const asset = this.assets.get(hash);
     return asset ? { mimeType: asset.mimeType, bytes: asset.bytes.slice(0) } : null;
+  }
+
+  async removeAsset(hash: string): Promise<void> {
+    this.assets.delete(hash);
   }
 }

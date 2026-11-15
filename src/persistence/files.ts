@@ -68,6 +68,31 @@ export async function duplicateFile(storage: DocumentStorage, id: string): Promi
 }
 
 /**
+ * Deletes a file, and with it the images that only it knew about. An image
+ * is kept for as long as any remaining file lists it, whether or not a layer
+ * of that file still shows it, so that undoing in an open file never finds
+ * its image gone. Returns how many images were removed.
+ */
+export async function deleteFile(storage: DocumentStorage, id: string): Promise<number> {
+  const doomed = await storage.load(id);
+  await storage.remove(id);
+  const hashes = Object.keys(doomed?.document?.assets ?? {});
+  if (hashes.length === 0) return 0;
+  const needed = new Set<string>();
+  for (const summary of await storage.list()) {
+    const other = await storage.load(summary.id);
+    for (const hash in other?.document?.assets ?? {}) needed.add(hash);
+  }
+  let removed = 0;
+  for (const hash of hashes) {
+    if (needed.has(hash)) continue;
+    await storage.removeAsset(hash);
+    removed++;
+  }
+  return removed;
+}
+
+/**
  * The text of a `.opendesign` file for a document: the document itself plus
  * the bytes of every image it uses, so the file is complete on its own and
  * opens on another machine. An image whose bytes cannot be found on this
