@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 9 (adds arcs on ellipses and arrowheads on lines and vectors;
+ * OPEN DESIGN document schema, version 10 (adds masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
@@ -7,7 +7,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -268,6 +268,12 @@ interface LayerBase extends NodeBase {
   blendMode: BlendMode;
   /** How the layer responds when the frame it is directly inside is resized. */
   constraints: Constraints;
+  /**
+   * A mask is not painted itself. Instead the layers above it in the same
+   * parent, up to the next mask, show only where it would have painted, as
+   * strongly as it would have painted there.
+   */
+  isMask: boolean;
 }
 
 export interface FrameNode extends LayerBase {

@@ -105,6 +105,7 @@ export function flattenNodes(doc: Document, ids: readonly NodeId[]): { doc: Docu
     if (!network) return null;
     const vector = createLayer('VECTOR', first.parentId, first.order, {
       ...appearanceOf(first),
+      isMask: first.isMask,
       name: first.name,
       x: first.x,
       y: first.y,

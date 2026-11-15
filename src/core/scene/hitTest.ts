@@ -91,9 +91,30 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
 }
 
 /**
+ * The mask that governs the child at `index`: the nearest mask below it in
+ * the same parent, unless that mask is hidden (a hidden mask masks nothing).
+ */
+export function maskFor(doc: Document, siblings: readonly NodeId[], index: number): LayerNode | null {
+  for (let i = index - 1; i >= 0; i--) {
+    const node = doc.nodes[siblings[i] as NodeId];
+    if (isLayer(node) && node.isMask) return node.visible ? node : null;
+  }
+  return null;
+}
+
+/** Does a mask let a page-space point through? Containers and text mask by their box, shapes by what they would paint. */
+function maskCovers(doc: Document, mask: LayerNode, point: Point): boolean {
+  const local = applyToPoint(invert(getWorldMatrix(doc, mask.id)), point);
+  if (mask.type === 'FRAME' || mask.type === 'GROUP' || mask.type === 'TEXT') return inBox(local, mask.width, mask.height, 0);
+  return hitsShape(mask, local, 0);
+}
+
+/**
  * The top-most, deepest layer under a page-space point. Hidden and locked
  * layers, and everything inside them, are skipped. Frames that clip hide
- * whatever part of their children lies outside them.
+ * whatever part of their children lies outside them, and a mask hides
+ * whatever part of the layers above it lies outside what it would paint.
+ * A mask is not painted, so it is not found here itself.
  */
 export function hitTestDeepest(doc: Document, pageId: NodeId, point: Point, tolerance = 0): NodeId | null {
   const search = (parentId: NodeId): NodeId | null => {
@@ -101,7 +122,9 @@ export function hitTestDeepest(doc: Document, pageId: NodeId, point: Point, tole
     for (let i = children.length - 1; i >= 0; i--) {
       const id = children[i] as NodeId;
       const node = doc.nodes[id];
-      if (!isLayer(node) || !node.visible || node.locked) continue;
+      if (!isLayer(node) || !node.visible || node.locked || node.isMask) continue;
+      const mask = maskFor(doc, children, i);
+      if (mask && !maskCovers(doc, mask, point)) continue;
       const local = applyToPoint(invert(getWorldMatrix(doc, id)), point);
       if (node.type === 'FRAME') {
         const inside = inBox(local, node.width, node.height, 0);

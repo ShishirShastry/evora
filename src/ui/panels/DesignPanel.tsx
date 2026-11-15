@@ -647,6 +647,15 @@ export function DesignPanel() {
             onChange={(blendMode) => set('Change blend mode', { blendMode })}
           />
         </Row>
+        <label className="mt-0.5 flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="accent-[var(--od-accent)]"
+            checked={layers.every((layer) => layer.isMask)}
+            onChange={(event) => set(event.currentTarget.checked ? 'Use as mask' : 'Remove mask', { isMask: event.currentTarget.checked })}
+          />
+          Mask the layers above
+        </label>
       </Section>
 
       {paintable.some((l) => l.type !== 'LINE') && (

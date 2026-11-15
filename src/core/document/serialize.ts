@@ -100,6 +100,17 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 9, document: { ...body, nodes: upgraded } };
   },
+  // Version 10 adds masks. No older layer is one.
+  9: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type !== 'PAGE' ? { isMask: false, ...node } : node;
+    }
+    return { ...file, schemaVersion: 10, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

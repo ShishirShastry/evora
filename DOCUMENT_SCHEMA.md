@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **9**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **10**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -154,8 +154,13 @@ interface LayerBase extends NodeBase {
 
   // Version 6
   constraints: { horizontal: ConstraintType; vertical: ConstraintType };
+
+  // Version 10
+  isMask: boolean;           // the layer masks the layers above it in its parent instead of being painted
 }
 ```
+
+**Masks.** A layer with `isMask` is not painted. The layers above it in the same parent, up to the next mask (or the end of the parent), are shown only where the mask would have painted, and only as strongly: a half-transparent mask lets half through, and a mask with a gradient that fades out fades them out. A hidden mask masks nothing. A mask reaches no further than its parent, which is why "Use as mask" on several layers groups them first. On the canvas a masked layer can be clicked only where its mask lets it show, and a mask cannot be clicked at all (it is selected in the layers panel).
 
 ### 5.3 Concrete layers
 
@@ -399,7 +404,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -419,6 +424,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   7: (file) => ({ ...file, schemaVersion: 8 }),
   // 8 -> 9: ellipses get arcStart 0, arcSweep 360, arcRatio 0; lines and vectors get startArrow and endArrow 'NONE'.
   8: addVersion9Defaults,
+  // 9 -> 10: every layer gets isMask false.
+  9: addIsMask,
 };
 ```
 
@@ -432,6 +439,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 6 | 7 | Ruler guides on pages | `src/guides.test.ts` ("opens a version 6 file") |
 | 7 | 8 | `VECTOR` layer type added | `src/vector.test.ts` ("opens a version 7 file") |
 | 8 | 9 | Arcs on ellipses; arrowheads on lines and vectors | `src/arcs.test.ts` ("opens a version 8 file") |
+| 9 | 10 | Masks (`isMask` on every layer) | `src/masks.test.ts` ("survives flattening, validation and older files") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -460,7 +468,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | Per-range text styles, `flipX/flipY`, masks. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7.) |
+| 2 | Per-range text styles, `flipX/flipY`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7.) |
 | 3 | `BOOLEAN_OPERATION` (a container that keeps the shapes a boolean operation combines; today the operations replace them with a `VECTOR`). (Done: `VECTOR` in version 8, arcs and arrowheads in version 9.) |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |

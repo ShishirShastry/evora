@@ -355,8 +355,87 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.restore();
   };
 
+  /** The part of the canvas, in device pixels, that something with these page-space bounds can touch. */
+  const pixelRegion = (bounds: Rect): { x: number; y: number; w: number; h: number } => {
+    const x0 = Math.max(0, Math.floor((bounds.x - viewport.x) * scale) - 2);
+    const y0 = Math.max(0, Math.floor((bounds.y - viewport.y) * scale) - 2);
+    const x1 = Math.min(pixelWidth, Math.ceil((bounds.x + bounds.width - viewport.x) * scale) + 2);
+    const y1 = Math.min(pixelHeight, Math.ceil((bounds.y + bounds.height - viewport.y) * scale) + 2);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  };
+
+  /**
+   * Paints the layers above a mask, showing through only where the mask
+   * would have painted and only as strongly as it would have painted there.
+   * The mask itself is not shown.
+   */
+  const drawMasked = (target: Ctx, maskId: NodeId, mask: LayerNode, ids: readonly NodeId[]): void => {
+    if (ids.length === 0 || mask.opacity <= 0) return;
+    const bounds = getRenderBounds(doc, maskId);
+    if (!rectsIntersect(bounds, visible)) {
+      stats.culled += ids.length;
+      return;
+    }
+    const region = pixelRegion(bounds);
+    const content = options.createCanvas ? (scratch.pop() ?? options.createCanvas(pixelWidth, pixelHeight)) : null;
+    const stencil = options.createCanvas ? (scratch.pop() ?? options.createCanvas(pixelWidth, pixelHeight)) : null;
+    const contentCtx = content ? (content.getContext('2d') as Ctx | null) : null;
+    const stencilCtx = stencil ? (stencil.getContext('2d') as Ctx | null) : null;
+    if (!content || !stencil || !contentCtx || !stencilCtx || region.w <= 0 || region.h <= 0) {
+      // Without somewhere to composite, the mask's outline is used as a clip: exact for a shape with a solid fill.
+      if (content) scratch.push(content);
+      if (stencil) scratch.push(stencil);
+      target.save();
+      setLayerTransform(target, maskId);
+      traceLayerPath(target, mask);
+      clipPath(target, fillRuleOf(mask));
+      for (const id of ids) drawLayer(target, id);
+      target.restore();
+      return;
+    }
+    for (const layerCtx of [contentCtx, stencilCtx]) {
+      layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+      layerCtx.globalAlpha = 1;
+      layerCtx.globalCompositeOperation = 'source-over';
+      layerCtx.clearRect(region.x, region.y, region.w, region.h);
+    }
+    for (const id of ids) drawLayer(contentCtx, id);
+    drawLayer(stencilCtx, maskId);
+    // Keep of the content only what the mask covers.
+    contentCtx.setTransform(1, 0, 0, 1, 0, 0);
+    contentCtx.globalAlpha = 1;
+    contentCtx.globalCompositeOperation = 'destination-in';
+    contentCtx.drawImage(stencil, region.x, region.y, region.w, region.h, region.x, region.y, region.w, region.h);
+    contentCtx.globalCompositeOperation = 'source-over';
+    target.save();
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.drawImage(content, region.x, region.y, region.w, region.h, region.x, region.y, region.w, region.h);
+    target.restore();
+    scratch.push(content, stencil);
+  };
+
   const drawChildren = (target: Ctx, parentId: NodeId): void => {
-    for (const childId of getChildIds(doc, parentId)) drawLayer(target, childId);
+    const ids = getChildIds(doc, parentId);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i] as NodeId;
+      const node = doc.nodes[id];
+      if (!isLayer(node) || !node.isMask) {
+        drawLayer(target, id);
+        continue;
+      }
+      // A mask governs the layers above it, up to the next mask.
+      let end = i + 1;
+      while (end < ids.length) {
+        const next = doc.nodes[ids[end] as NodeId];
+        if (isLayer(next) && next.isMask) break;
+        end++;
+      }
+      const above = ids.slice(i + 1, end);
+      // A hidden mask masks nothing: what is above it is painted as usual.
+      if (node.visible && !options.hiddenIds?.has(id)) drawMasked(target, id, node, above);
+      else for (const other of above) drawLayer(target, other);
+      i = end - 1;
+    }
   };
 
   const paintLayer = (target: Ctx, id: NodeId, node: LayerNode, innerShadows: readonly ShadowEffect[]): void => {

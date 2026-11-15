@@ -290,6 +290,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       horizontal: oneOf(isObject(raw.constraints) ? raw.constraints.horizontal : undefined, CONSTRAINT_TYPES, 'MIN'),
       vertical: oneOf(isObject(raw.constraints) ? raw.constraints.vertical : undefined, CONSTRAINT_TYPES, 'MIN'),
     },
+    isMask: raw.isMask === true,
   } as LayerNode;
 
   if (layer.type === 'FRAME') {

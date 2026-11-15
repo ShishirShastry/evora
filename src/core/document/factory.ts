@@ -158,6 +158,7 @@ export function createLayer(
     effects: [] as LayerNode['effects'],
     blendMode: 'NORMAL' as const,
     constraints: { horizontal: 'MIN' as const, vertical: 'MIN' as const },
+    isMask: false,
   };
   let node: LayerNode;
   switch (type) {

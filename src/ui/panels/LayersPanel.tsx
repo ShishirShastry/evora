@@ -232,7 +232,7 @@ export function LayersPanel() {
                 <Icon name={row.expanded ? 'chevronDown' : 'chevronRight'} size={10} />
               </button>
               <span className={`mr-1.5 flex-none ${isSelected ? 'text-accent' : 'text-dim'}`}>
-                <Icon name={TYPE_ICONS[node.type]} size={13} />
+                <Icon name={node.isMask ? 'mask' : TYPE_ICONS[node.type]} size={13} />
               </span>
               {renamingId === node.id ? (
                 <TextEdit

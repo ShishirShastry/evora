@@ -332,6 +332,33 @@ export function groupSelection(store: EditorStore): void {
   if (created) store.getState().setSelection([created]);
 }
 
+/**
+ * "Use as mask". One layer: it becomes a mask for the layers above it in
+ * its parent, or stops being one. Several layers: they are grouped, and the
+ * bottom-most becomes the mask of the others, so the mask reaches no
+ * further than the group.
+ */
+export function maskSelection(store: EditorStore): void {
+  const { selection, apply, doc } = store.getState();
+  const layers = selection.map((id) => doc.nodes[id]).filter(isLayer);
+  const only = layers[0];
+  if (!only) return;
+  if (layers.length === 1) {
+    apply(only.isMask ? 'Remove mask' : 'Use as mask', (d) => patchNodes(d, { [only.id]: { isMask: !only.isMask } }));
+    return;
+  }
+  const created: NodeId[] = [];
+  apply('Use as mask', (d) => {
+    const out = groupNodes(d, selection);
+    if (!out) return d;
+    const bottom = getChildIds(out.doc, out.id)[0];
+    if (!bottom) return d;
+    created.push(out.id);
+    return patchNodes(out.doc, { [bottom]: { isMask: true }, [out.id]: { name: 'Mask group' } });
+  });
+  if (created.length > 0) store.getState().setSelection(created);
+}
+
 export function ungroupSelection(store: EditorStore): void {
   const { selection, apply } = store.getState();
   let released: NodeId[] = [];
@@ -862,6 +889,19 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyE', ctrl: true }],
     enabled: (state) => canFlatten(state.doc, state.selection),
     run: ({ store }) => flattenSelection(store),
+  },
+  {
+    id: 'object.mask',
+    label: 'Use as mask',
+    group: 'Object',
+    shortcut: 'Ctrl+Alt+M',
+    keys: [{ code: 'KeyM', ctrl: true, alt: true }],
+    enabled: hasSelection,
+    checked: (state) => {
+      const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
+      return isLayer(only) && only.isMask;
+    },
+    run: ({ store }) => maskSelection(store),
   },
   booleanCommand('UNION', 'Union selection', 'KeyU'),
   booleanCommand('SUBTRACT', 'Subtract selection', 'KeyS'),
