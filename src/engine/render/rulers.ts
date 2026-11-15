@@ -4,9 +4,12 @@ import type { Size, Viewport } from '../viewport';
 /** Thickness of the rulers along the top and left edges of the canvas, in screen pixels. */
 export const RULER_SIZE = 20;
 
-const RULER_BACKGROUND = '#171b1c';
-const RULER_LINE = '#2b3233';
-const RULER_TEXT = '#8d9797';
+/** The rulers are part of the application's chrome, so they follow its theme. */
+export type RulerTheme = 'dark' | 'light';
+const RULER_COLORS: Record<RulerTheme, { background: string; line: string; text: string }> = {
+  dark: { background: '#171b1c', line: '#2b3233', text: '#8d9797' },
+  light: { background: '#ffffff', line: '#d5dbda', text: '#5b6767' },
+};
 const RULER_SELECTION = 'rgba(25, 194, 179, 0.28)';
 export const GUIDE_COLOR = '#4aa8ff';
 const RULER_FONT = '10px Inter, "Segoe UI", system-ui, sans-serif';
@@ -60,6 +63,8 @@ export interface RulerInput {
   guides: readonly Guide[];
   /** Page-space bounds of the selection, highlighted on both rulers. */
   selection: Rect | null;
+  /** Dark unless told otherwise. */
+  theme?: RulerTheme;
 }
 
 function formatValue(value: number): string {
@@ -91,8 +96,9 @@ export function drawGuides(ctx: CanvasRenderingContext2D, input: Pick<RulerInput
 export function drawRulers(ctx: CanvasRenderingContext2D, input: RulerInput): void {
   const { viewport, size, selection } = input;
   const R = RULER_SIZE;
+  const colors = RULER_COLORS[input.theme ?? 'dark'];
 
-  ctx.fillStyle = RULER_BACKGROUND;
+  ctx.fillStyle = colors.background;
   ctx.fillRect(0, 0, size.width, R);
   ctx.fillRect(0, 0, R, size.height);
 
@@ -106,8 +112,8 @@ export function drawRulers(ctx: CanvasRenderingContext2D, input: RulerInput): vo
     if (y1 > y0) ctx.fillRect(0, y0, R, y1 - y0);
   }
 
-  ctx.strokeStyle = RULER_LINE;
-  ctx.fillStyle = RULER_TEXT;
+  ctx.strokeStyle = colors.line;
+  ctx.fillStyle = colors.text;
   ctx.lineWidth = 1;
   ctx.font = RULER_FONT;
   ctx.textBaseline = 'alphabetic';
@@ -143,6 +149,6 @@ export function drawRulers(ctx: CanvasRenderingContext2D, input: RulerInput): vo
   ctx.stroke();
 
   // The corner where the two rulers meet.
-  ctx.fillStyle = RULER_BACKGROUND;
+  ctx.fillStyle = colors.background;
   ctx.fillRect(0, 0, R, R);
 }

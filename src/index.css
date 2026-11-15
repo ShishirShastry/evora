@@ -19,6 +19,22 @@
   --od-danger: #ff7a7a;
 }
 
+/* The light theme: the same variables with other values. Designs keep their own colours. */
+:root[data-theme="light"] {
+  --od-bg: #e7ebea;
+  --od-panel: #ffffff;
+  --od-field: #eef2f1;
+  --od-hover: #e3e9e8;
+  --od-line: #d3dad9;
+  --od-ink: #152021;
+  --od-dim: #586464;
+  --od-faint: #97a2a2;
+  --od-accent: #0b8177;
+  --od-accent-ink: #ffffff;
+  --od-selected: rgba(11, 129, 119, 0.16);
+  --od-danger: #c22f2f;
+}
+
 @theme inline {
   --color-bg: var(--od-bg);
   --color-panel: var(--od-panel);

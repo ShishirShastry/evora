@@ -1,4 +1,4 @@
-import { isFrame, isGroupLike, isLayer, type Document, type LayerNode, type NodeId } from '../document/schema';
+import { isFrame, isGroupLike, isLayer, type Document, type FrameNode, type LayerNode, type NodeId } from '../document/schema';
 import {
   convexPolygonsIntersect,
   distanceToPolygonEdge,
@@ -12,11 +12,28 @@ import {
 import { applyToPoint, invert } from '../math/matrix';
 import { distanceToNetwork, pointInNetworkFill } from '../vector/network';
 import { outlineNetwork } from '../vector/shapes';
-import { hasArc, hasVisiblePaint, outlinePoints } from './shapes';
+import { effectiveRadii, hasArc, hasVisiblePaint, outlinePoints } from './shapes';
 import { getAncestorIds, getChildIds, getWorldBounds, getWorldCorners, getWorldMatrix } from './tree';
 
 function inBox(p: Point, width: number, height: number, grow: number): boolean {
   return p.x >= -grow && p.y >= -grow && p.x <= width + grow && p.y <= height + grow;
+}
+
+/**
+ * Is a point in a frame's own space inside the frame? What lies outside the
+ * curve of a rounded corner is not: it is neither painted nor, when the
+ * frame clips, shown.
+ */
+export function inFrame(node: Pick<FrameNode, 'width' | 'height' | 'cornerRadius' | 'cornerRadii'>, p: Point): boolean {
+  const { width, height } = node;
+  if (!inBox(p, width, height, 0)) return false;
+  const [tl, tr, br, bl] = effectiveRadii(width, height, node.cornerRadius, node.cornerRadii);
+  const within = (cx: number, cy: number, r: number): boolean => (p.x - cx) ** 2 + (p.y - cy) ** 2 <= r * r;
+  if (p.x < tl && p.y < tl) return within(tl, tl, tl);
+  if (p.x > width - tr && p.y < tr) return within(width - tr, tr, tr);
+  if (p.x > width - br && p.y > height - br) return within(width - br, height - br, br);
+  if (p.x < bl && p.y > height - bl) return within(bl, height - bl, bl);
+  return true;
 }
 
 /**
@@ -34,7 +51,7 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
 
   switch (node.type) {
     case 'FRAME':
-      return inBox(p, width, height, 0);
+      return inFrame(node, p);
     case 'GROUP':
       // A group is hit only through its children.
       return false;
@@ -109,7 +126,8 @@ export function maskFor(doc: Document, siblings: readonly NodeId[], index: numbe
 /** Does a mask let a page-space point through? Containers and text mask by their box, shapes by what they would paint. */
 function maskCovers(doc: Document, mask: LayerNode, point: Point): boolean {
   const local = applyToPoint(invert(getWorldMatrix(doc, mask.id)), point);
-  if (mask.type === 'FRAME' || mask.type === 'GROUP' || mask.type === 'TEXT') return inBox(local, mask.width, mask.height, 0);
+  if (mask.type === 'FRAME') return inFrame(mask, local);
+  if (mask.type === 'GROUP' || mask.type === 'TEXT') return inBox(local, mask.width, mask.height, 0);
   return hitsShape(mask, local, 0);
 }
 
@@ -131,7 +149,7 @@ export function hitTestDeepest(doc: Document, pageId: NodeId, point: Point, tole
       if (mask && !maskCovers(doc, mask, point)) continue;
       const local = applyToPoint(invert(getWorldMatrix(doc, id)), point);
       if (node.type === 'FRAME') {
-        const inside = inBox(local, node.width, node.height, 0);
+        const inside = inFrame(node, local);
         if (node.clipsContent && !inside) continue;
         const child = search(id);
         if (child) return child;

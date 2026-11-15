@@ -27,7 +27,7 @@ import type { VectorOverlay } from '../input/vectorTool';
 import type { PaintEdit } from '../../state/editorStore';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
 import { traceLayerPath } from './paint';
-import { drawGuides, drawRulers } from './rulers';
+import { drawGuides, drawRulers, type RulerTheme } from './rulers';
 
 export const ACCENT = '#19c2b3';
 const ACCENT_FILL = 'rgba(25, 194, 179, 0.12)';
@@ -70,6 +70,8 @@ export interface OverlayInput {
   showLayoutGrids?: boolean;
   /** Draw the rulers and the page's ruler guides. Off by default. */
   showRulers?: boolean;
+  /** The application's theme, which the rulers follow. Dark by default. */
+  theme?: RulerTheme;
   /** The points, handles and pen preview of a vector that is being edited or drawn. */
   vector?: VectorOverlay | null;
   /** The paint whose handles are shown on the canvas, if one is being edited there. */
@@ -336,7 +338,7 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     const page = doc.nodes[pageId];
     const guides = isPage(page) ? page.guides : [];
     drawGuides(ctx, { viewport, size, guides });
-    drawRulers(ctx, { viewport, size, guides, selection: frame ? frame.bounds : null });
+    drawRulers(ctx, { viewport, size, guides, selection: frame ? frame.bounds : null, theme: input.theme });
   }
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);

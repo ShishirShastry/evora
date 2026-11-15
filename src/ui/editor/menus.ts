@@ -85,7 +85,7 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
     'edit.selectAll',
     'edit.deselect',
   ],
-  View: ['view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100', '-', 'view.snapping', 'view.pixelSnap', 'view.rulers', 'view.layoutGrids'],
+  View: ['view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100', '-', 'view.snapping', 'view.pixelSnap', 'view.rulers', 'view.layoutGrids', '-', 'view.lightTheme'],
   Object: [
     'object.group',
     'object.ungroup',

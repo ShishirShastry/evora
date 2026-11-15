@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileFormatError, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, FileFormatError, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { getBrowserMeasurer } from '../../engine/text/measure';
 import { createAutosaver, type Autosaver } from '../../persistence/autosave';
 import { pickImageFiles, saveTextToDisk } from '../../persistence/diskIO';
 import { exportFileName, exportFileText, openFile } from '../../persistence/files';
-import { loadPreferences, savePreferences } from '../../persistence/prefs';
+import { DEFAULT_PREFERENCES, loadPreferences, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN, savePreferences } from '../../persistence/prefs';
 import { loadSession, saveSession } from '../../persistence/session';
 import type { DocumentStorage } from '../../persistence/storage';
-import { commandForKey, getCommand, runCommand, type AppActions } from '../../state/commands';
+import { clipboardText, commandForKey, getCommand, pasteClipboardText, runCommand, type AppActions } from '../../state/commands';
 import { imageTypeOf, importImageFiles, placeImages } from '../../state/images';
 import { createEditorStore, getSession, type EditorStore } from '../../state/editorStore';
 import { Dialog } from '../components/Dialog';
 import { Logo } from '../components/Icon';
+import { PanelResizer } from '../components/PanelResizer';
 import { DesignPanel } from '../panels/DesignPanel';
 import { LayersPanel } from '../panels/LayersPanel';
 import { PagesPanel } from '../panels/PagesPanel';
+import { applyTheme } from '../theme';
 import { CanvasView } from './CanvasView';
 import { EditorContext, type EditorContextValue } from './EditorContext';
 import { shortcutGroups } from './menus';
@@ -135,8 +137,23 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     return first.hash;
   }, [storage, images, store]);
 
+  /** True while a copy raised by the application itself is under way: that is the copy that carries layers. */
+  const copyingLayers = useRef(false);
+
   const app = useMemo<AppActions>(
     () => ({
+      copyToSystemClipboard: () => {
+        // A page may write the clipboard only while a copy is under way, so one is started here;
+        // the copy handler further down fills it with the layers.
+        copyingLayers.current = true;
+        try {
+          document.execCommand('copy');
+        } catch {
+          // The layers are still on the application's own clipboard.
+        } finally {
+          copyingLayers.current = false;
+        }
+      },
       cancelInteraction: () => controller.current?.cancel() ?? false,
       openShortcuts: () => setShortcutsOpen(true),
       saveNow: () => void saver.current?.flush(),
@@ -177,6 +194,10 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
         state.showRulers !== previous.showRulers
       ) {
         savePreferences({ snapping: state.snapping, pixelSnap: state.pixelSnap, showLayoutGrids: state.showLayoutGrids, showRulers: state.showRulers });
+      }
+      if (state.theme !== previous.theme) {
+        applyTheme(state.theme);
+        savePreferences({ theme: state.theme });
       }
       if (state.viewport === previous.viewport && state.pageId === previous.pageId) return;
       if (sessionTimer !== null) clearTimeout(sessionTimer);
@@ -270,10 +291,24 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       controller.current?.setAltDown(false);
     };
 
-    /** Paste: images from the system clipboard are placed; otherwise layers copied in the editor are pasted. */
+    /** A copy started by the application: the copied layers go on the system clipboard, with their names as plain text. */
+    const onCopy = (event: ClipboardEvent): void => {
+      const copied = copyingLayers.current ? clipboardText() : null;
+      if (!copied || !event.clipboardData) return;
+      event.clipboardData.setData(CLIPBOARD_MIME, copied.data);
+      event.clipboardData.setData('text/plain', copied.names);
+      event.preventDefault();
+    };
+
+    /**
+     * Paste: layers on the system clipboard (copied in this window or another) are pasted; failing that,
+     * images on it are placed; failing that, whatever was last copied in this window is pasted.
+     */
     const onPaste = (event: ClipboardEvent): void => {
       if (isTyping(event.target) || overlayOpen()) return;
       event.preventDefault();
+      const layers = event.clipboardData?.getData(CLIPBOARD_MIME) ?? '';
+      if (layers !== '' && pasteClipboardText(store, layers)) return;
       const files = [...(event.clipboardData?.files ?? [])].filter((file) => imageTypeOf(file) !== null);
       if (files.length > 0) void placeFiles(files);
       else {
@@ -282,17 +317,25 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       }
     };
 
+    window.addEventListener('copy', onCopy);
     window.addEventListener('paste', onPaste);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
     return () => {
+      window.removeEventListener('copy', onCopy);
       window.removeEventListener('paste', onPaste);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
   }, [store, app, placeFiles]);
+
+  // The widths of the two side panels: dragged by their edges, remembered on this device.
+  const [panels, setPanels] = useState(() => {
+    const preferences = loadPreferences();
+    return { left: preferences.leftPanelWidth, right: preferences.rightPanelWidth };
+  });
 
   // Show the file name in the browser tab.
   useEffect(() => {
@@ -329,12 +372,32 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
           </div>
         )}
         <div className="flex min-h-0 flex-1">
-          <nav aria-label="Pages and layers" className="flex w-60 flex-none flex-col border-r border-line bg-panel">
+          <nav aria-label="Pages and layers" className="relative z-10 flex flex-none flex-col border-r border-line bg-panel" style={{ width: panels.left }}>
             <PagesPanel />
             <LayersPanel />
+            <PanelResizer
+              label="Resize the layers panel"
+              side="left"
+              width={panels.left}
+              min={PANEL_WIDTH_MIN}
+              max={PANEL_WIDTH_MAX}
+              reset={DEFAULT_PREFERENCES.leftPanelWidth}
+              onChange={(left) => setPanels((current) => ({ ...current, left }))}
+              onCommit={(left) => savePreferences({ leftPanelWidth: left })}
+            />
           </nav>
           <CanvasView />
-          <div className="flex w-[252px] flex-none flex-col border-l border-line bg-panel">
+          <div className="relative z-10 flex flex-none flex-col border-l border-line bg-panel" style={{ width: panels.right }}>
+            <PanelResizer
+              label="Resize the design panel"
+              side="right"
+              width={panels.right}
+              min={PANEL_WIDTH_MIN}
+              max={PANEL_WIDTH_MAX}
+              reset={DEFAULT_PREFERENCES.rightPanelWidth}
+              onChange={(right) => setPanels((current) => ({ ...current, right }))}
+              onCommit={(right) => savePreferences({ rightPanelWidth: right })}
+            />
             <div className="flex h-9 flex-none items-center border-b border-line px-3 text-[11px] font-semibold uppercase tracking-wide text-accent">
               Design
             </div>

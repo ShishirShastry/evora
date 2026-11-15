@@ -55,6 +55,24 @@ export function buildRows(doc: Document, pageId: NodeId, collapsed: Readonly<Rec
   return rows;
 }
 
+/** Height of one row of the list in pixels: the `h-7` of a row. */
+export const LAYER_ROW_HEIGHT = 28;
+/** Rows kept either side of the ones in view, so that scrolling does not show a gap. */
+const OVERSCAN_ROWS = 8;
+
+/**
+ * Which rows of the list need to exist: the ones in view and a few either
+ * side. A page can hold thousands of layers; the list never makes more
+ * elements than fit on screen.
+ */
+export function visibleRows(count: number, scrollTop: number, viewHeight: number, rowHeight = LAYER_ROW_HEIGHT, overscan = OVERSCAN_ROWS): { start: number; end: number } {
+  if (count <= 0) return { start: 0, end: 0 };
+  const top = Math.max(0, scrollTop);
+  const first = Math.min(count - 1, Math.floor(top / rowHeight));
+  const last = Math.max(first + 1, Math.ceil((top + Math.max(0, viewHeight)) / rowHeight));
+  return { start: Math.max(0, first - overscan), end: Math.min(count, last + overscan) };
+}
+
 type DropPosition = 'above' | 'below' | 'inside';
 
 /**
@@ -80,12 +98,33 @@ export function LayersPanel() {
   const [drop, setDrop] = useState<{ id: NodeId; position: DropPosition } | null>(null);
   const dragging = useRef<NodeId[]>([]);
 
-  // Keep the selected layer in view when it was selected on the canvas.
+  // Only the rows in view are rendered. What is in view follows the list's scroll position and height.
+  const [view, setView] = useState({ top: 0, height: 600 });
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const measure = (): void =>
+      setView((current) => (current.top === list.scrollTop && current.height === list.clientHeight ? current : { top: list.scrollTop, height: list.clientHeight }));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
+  const { start, end } = visibleRows(rows.length, view.top, view.height);
+
+  // Keep the selected layer in view when it was selected on the canvas. Its row may not exist yet,
+  // so the list is scrolled to where the row is rather than to the row.
   const firstSelected = selection[0];
   useEffect(() => {
-    if (firstSelected === undefined) return;
-    const row = listRef.current?.querySelector<HTMLElement>(`[data-layer-id="${firstSelected}"]`);
-    row?.scrollIntoView?.({ block: 'nearest' });
+    const list = listRef.current;
+    if (firstSelected === undefined || !list) return;
+    const index = rows.findIndex((row) => row.node.id === firstSelected);
+    if (index < 0) return;
+    const top = index * LAYER_ROW_HEIGHT;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + LAYER_ROW_HEIGHT > list.scrollTop + list.clientHeight) list.scrollTop = top + LAYER_ROW_HEIGHT - list.clientHeight;
+    // Only a change of selection moves the list; the rows are read as they are at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstSelected]);
 
   const onRowClick = (event: MouseEvent, id: NodeId): void => {
@@ -155,6 +194,10 @@ export function LayersPanel() {
         aria-label="Layers"
         aria-multiselectable="true"
         className="min-h-0 flex-1 overflow-y-auto pb-3"
+        onScroll={(event) => {
+          const { scrollTop, clientHeight } = event.currentTarget;
+          setView((current) => (current.top === scrollTop && current.height === clientHeight ? current : { top: scrollTop, height: clientHeight }));
+        }}
         onDragLeave={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrop(null);
         }}
@@ -167,7 +210,9 @@ export function LayersPanel() {
             This page is empty. Pick a shape or frame tool in the toolbar and drag on the canvas.
           </p>
         )}
-        {rows.map((row) => {
+        {/* The space of the rows above the ones in view, so the scroll bar is that of the whole list. */}
+        {start > 0 && <div role="presentation" style={{ height: start * LAYER_ROW_HEIGHT }} />}
+        {rows.slice(start, end).map((row) => {
           const { node } = row;
           const isSelected = selected.has(node.id);
           const dropHere = drop?.id === node.id ? drop.position : null;
@@ -282,6 +327,7 @@ export function LayersPanel() {
             </div>
           );
         })}
+        {end < rows.length && <div role="presentation" style={{ height: (rows.length - end) * LAYER_ROW_HEIGHT }} />}
       </div>
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="Layer menu" onClose={() => setMenu(null)} />}
     </section>

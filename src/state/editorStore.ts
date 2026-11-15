@@ -18,6 +18,7 @@ import {
   type TextMeasurer,
 } from '../core';
 import { DEFAULT_VIEWPORT, type Size, type Viewport } from '../engine/viewport';
+import type { Theme } from '../persistence/prefs';
 
 export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'line' | 'polygon' | 'star' | 'text' | 'pen' | 'pencil';
 
@@ -93,6 +94,8 @@ export interface EditorState {
   showLayoutGrids: boolean;
   /** Whether the rulers, and with them the page's guides, are shown. A user preference. */
   showRulers: boolean;
+  /** The colours of the application: dark or light. A user preference; a design's own colours do not change with it. */
+  theme: Theme;
 
   // History.
   undoStack: HistoryEntry[];
@@ -148,6 +151,7 @@ export interface EditorActions {
   setPixelSnap(pixelSnap: boolean): void;
   setShowLayoutGrids(show: boolean): void;
   setShowRulers(show: boolean): void;
+  setTheme(theme: Theme): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
   /**
@@ -225,6 +229,8 @@ export interface EditorOptions {
   showLayoutGrids?: boolean;
   /** Initial value of the "show rulers" preference. Off unless told otherwise. */
   showRulers?: boolean;
+  /** Initial value of the theme preference. Dark unless told otherwise. */
+  theme?: Theme;
 }
 
 export function createEditorStore(doc: Document, session?: Partial<SessionState>, options: EditorOptions = {}): EditorStore {
@@ -279,6 +285,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       pixelSnap: options.pixelSnap ?? true,
       showLayoutGrids: options.showLayoutGrids ?? true,
       showRulers: options.showRulers ?? false,
+      theme: options.theme === 'light' ? 'light' : 'dark',
       undoStack: [],
       redoStack: [],
       gesture: null,
@@ -449,6 +456,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setShowRulers(show) {
         if (get().showRulers !== show) set({ showRulers: show });
+      },
+
+      setTheme(theme) {
+        if (get().theme !== theme) set({ theme });
       },
 
       setEditingText(id) {

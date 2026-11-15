@@ -18,7 +18,10 @@ import {
   smoothVertex,
   canFlatten,
   canOutlineStroke,
+  clipboardAssets,
   copyNodes,
+  parseClipboard,
+  serializeClipboard,
   deleteNodes,
   deletePage,
   distributeNodes,
@@ -45,7 +48,7 @@ import {
   unionRects,
   type AlignMode,
   type BooleanOperation,
-  type ClipboardPayload,
+  type ClipboardData,
   type DistributeAxis,
   type FlipAxis,
   type LayerPatch,
@@ -64,8 +67,9 @@ import type { EditorState, EditorStore, ToolId } from './editorStore';
  * points always behave identically.
  */
 
-// The clipboard is shared by every open file in this tab.
-let clipboard: ClipboardPayload | null = null;
+// The application's own clipboard, shared by every open file in this tab. What is copied also goes on the
+// system clipboard (see `clipboardText`), which is how it reaches other windows.
+let clipboard: ClipboardData | null = null;
 
 export function hasClipboard(): boolean {
   return clipboard !== null;
@@ -110,19 +114,44 @@ export function copySelection(store: EditorStore): boolean {
   const { doc, selection } = store.getState();
   const payload = copyNodes(doc, selection);
   if (!payload) return false;
-  clipboard = payload;
+  // The images the layers use travel with them, so a paste into another file can show them.
+  clipboard = { payload, assets: clipboardAssets(doc, payload) };
   return true;
 }
 
-export function cutSelection(store: EditorStore): void {
+/** Copies the selection and then deletes it. `copied` runs in between, while the layers still exist. */
+export function cutSelection(store: EditorStore, copied?: () => void): void {
   if (!copySelection(store)) return;
+  copied?.();
   const { selection, apply } = store.getState();
   apply('Cut', (doc) => deleteNodes(doc, selection), { select: [] });
 }
 
-export function paste(store: EditorStore): void {
-  const payload = clipboard;
-  if (!payload) return;
+/** What was last copied, as text for the system clipboard, with the names of the copied layers as plain text. */
+export function clipboardText(): { data: string; names: string } | null {
+  if (!clipboard) return null;
+  return {
+    data: serializeClipboard(clipboard),
+    names: clipboard.payload.roots.map((root) => root.nodes[0]?.name ?? '').join('\n'),
+  };
+}
+
+/**
+ * Pastes layers read from the system clipboard, as copied in this window or
+ * another one. False when the text is not layers that this version can read.
+ */
+export function pasteClipboardText(store: EditorStore, text: string): boolean {
+  const data = parseClipboard(text);
+  if (!data) return false;
+  paste(store, data);
+  return true;
+}
+
+export function paste(store: EditorStore, data: ClipboardData | null = clipboard): void {
+  if (!data) return;
+  const payload = data.payload;
+  // The images the layers use are made known to this file before the layers arrive.
+  store.getState().addAssets(data.assets);
   const state = store.getState();
   const samePage = payload.sourceDocumentId === state.doc.id && payload.sourcePageId === state.pageId;
   // Paste in place when the original spot is on screen; otherwise in the middle of the view.
@@ -553,6 +582,11 @@ export interface AppActions {
   /** Lets the user choose image files and places them on the canvas. */
   placeImage(): void;
   goHome(): void;
+  /**
+   * Puts what was just copied on the system clipboard as well, where the
+   * surroundings have one. Without it, copying still works inside the application.
+   */
+  copyToSystemClipboard?(): void;
 }
 
 export interface CommandEnv {
@@ -704,7 +738,7 @@ export const COMMANDS: readonly Command[] = [
     shortcut: 'Ctrl+X',
     keys: [{ code: 'KeyX', ctrl: true }],
     enabled: hasSelection,
-    run: ({ store }) => cutSelection(store),
+    run: ({ store, app }) => cutSelection(store, () => app.copyToSystemClipboard?.()),
   },
   {
     id: 'edit.copy',
@@ -713,7 +747,9 @@ export const COMMANDS: readonly Command[] = [
     shortcut: 'Ctrl+C',
     keys: [{ code: 'KeyC', ctrl: true }],
     enabled: hasSelection,
-    run: ({ store }) => void copySelection(store),
+    run: ({ store, app }) => {
+      if (copySelection(store)) app.copyToSystemClipboard?.();
+    },
   },
   {
     id: 'edit.paste',
@@ -868,6 +904,13 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyG', shift: true }],
     checked: (state) => state.showLayoutGrids,
     run: ({ store }) => store.getState().setShowLayoutGrids(!store.getState().showLayoutGrids),
+  },
+  {
+    id: 'view.lightTheme',
+    label: 'Light theme',
+    group: 'View',
+    checked: (state) => state.theme === 'light',
+    run: ({ store }) => store.getState().setTheme(store.getState().theme === 'light' ? 'dark' : 'light'),
   },
 
   {
