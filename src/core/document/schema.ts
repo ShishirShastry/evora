@@ -1,12 +1,13 @@
 /**
- * OPEN DESIGN document schema, version 8 (adds the VECTOR layer type; version 7 added ruler guides on pages).
+ * OPEN DESIGN document schema, version 9 (adds arcs on ellipses and arrowheads on lines and vectors;
+ * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
  * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
  * modes, and version 5 image paints with the document's asset table.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -293,12 +294,31 @@ export interface RectangleNode extends LayerBase {
   cornerRadii: CornerRadii | null;
 }
 
+/**
+ * An ellipse, or part of one. The angles are in degrees, clockwise on screen
+ * from three o'clock. A sweep of less than 360 leaves a slice; a ratio above
+ * zero cuts a hole of that proportion out of the middle, which makes a ring,
+ * or with a sweep a piece of one. The layer's box is always the whole ellipse's.
+ */
 export interface EllipseNode extends LayerBase {
   type: 'ELLIPSE';
+  /** Where the arc starts. */
+  arcStart: number;
+  /** How far round it goes, 1..360. 360 is the whole ellipse. */
+  arcSweep: number;
+  /** The inner radius as a fraction of the outer one, 0..0.99. */
+  arcRatio: number;
 }
+
+/** What is drawn at a loose end of a stroke. */
+export type ArrowType = 'NONE' | 'LINE' | 'TRIANGLE' | 'CIRCLE' | 'DIAMOND';
+export const ARROW_TYPES: readonly ArrowType[] = ['NONE', 'LINE', 'TRIANGLE', 'CIRCLE', 'DIAMOND'];
 
 export interface LineNode extends LayerBase {
   type: 'LINE';
+  /** The arrowhead at the line's left end (its start) and at its right end, before rotation. */
+  startArrow: ArrowType;
+  endArrow: ArrowType;
 }
 
 export interface PolygonNode extends LayerBase {
@@ -389,6 +409,9 @@ export interface VectorNode extends LayerBase {
   type: 'VECTOR';
   network: VectorNetwork;
   windingRule: WindingRule;
+  /** The arrowheads at the loose ends of its open paths: where each was started, and where it ended. */
+  startArrow: ArrowType;
+  endArrow: ArrowType;
 }
 
 export type LayerNode = FrameNode | GroupNode | RectangleNode | EllipseNode | LineNode | PolygonNode | StarNode | TextNode | VectorNode;
@@ -465,6 +488,11 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   innerRadius?: number;
   network?: VectorNetwork;
   windingRule?: WindingRule;
+  arcStart?: number;
+  arcSweep?: number;
+  arcRatio?: number;
+  startArrow?: ArrowType;
+  endArrow?: ArrowType;
 } & Partial<Omit<TextNode, keyof LayerBase>>;
 
 export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides'>>;

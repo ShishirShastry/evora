@@ -86,6 +86,20 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   },
   // Version 8 adds the VECTOR layer type. Older files contain no vector layers.
   7: (file) => ({ ...file, schemaVersion: 8 }),
+  // Version 9 adds arcs to ellipses and arrowheads to lines and vectors. A
+  // whole ellipse and no arrowheads are what older layers were.
+  8: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (isObject(node) && node.type === 'ELLIPSE') upgraded[id] = { arcStart: 0, arcSweep: 360, arcRatio: 0, ...node };
+      else if (isObject(node) && (node.type === 'LINE' || node.type === 'VECTOR')) upgraded[id] = { startArrow: 'NONE', endArrow: 'NONE', ...node };
+      else upgraded[id] = node;
+    }
+    return { ...file, schemaVersion: 9, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

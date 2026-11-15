@@ -1,4 +1,4 @@
-import type { CornerRadii, LayerNode } from '../document/schema';
+import type { CornerRadii, EllipseNode, LayerNode } from '../document/schema';
 import type { Point } from '../math/geometry';
 
 /** Vertices of a regular polygon inscribed in the box, first vertex at top centre. */
@@ -56,6 +56,11 @@ export function effectiveRadii(width: number, height: number, radius: number, ra
     tr + br > 0 ? height / (tr + br) : 1,
   );
   return [tl * factor, tr * factor, br * factor, bl * factor];
+}
+
+/** Does an ellipse show only part of itself: a slice, a ring, or a piece of a ring? */
+export function hasArc(node: EllipseNode): boolean {
+  return node.arcSweep < 360 || node.arcRatio > 0;
 }
 
 export function hasVisiblePaint(paints: readonly { visible: boolean; opacity: number }[]): boolean {

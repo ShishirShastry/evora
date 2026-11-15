@@ -171,7 +171,7 @@ export function createLayer(
       node = { ...base, type, cornerRadius: 0, cornerRadii: null };
       break;
     case 'ELLIPSE':
-      node = { ...base, type };
+      node = { ...base, type, arcStart: 0, arcSweep: 360, arcRatio: 0 };
       break;
     case 'LINE':
       node = {
@@ -181,6 +181,8 @@ export function createLayer(
         fills: [],
         strokes: [solidPaint(BLACK)],
         strokeAlign: 'CENTER',
+        startArrow: 'NONE',
+        endArrow: 'NONE',
       };
       break;
     case 'POLYGON':
@@ -222,6 +224,8 @@ export function createLayer(
         strokeAlign: 'CENTER',
         network: { vertices: [], segments: [] },
         windingRule: 'NONZERO',
+        startArrow: 'NONE',
+        endArrow: 'NONE',
       };
       break;
   }

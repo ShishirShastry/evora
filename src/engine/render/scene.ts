@@ -29,7 +29,7 @@ import {
 import type { ImageSource } from '../images/imageCache';
 import { applyTextStyle } from '../text/measure';
 import { visibleRect, type Size, type Viewport } from '../viewport';
-import { clipPath, fillPath, fillRuleOf, fillWithPaint, paintStyle, rgbToCss, traceLayerPath } from './paint';
+import { arrowHeads, clipPath, fillPath, fillRuleOf, fillWithPaint, paintStyle, rgbToCss, traceArrowHead, traceLayerPath, traceStrokePath } from './paint';
 
 export interface RenderStats {
   /** Layers actually painted. */
@@ -119,6 +119,9 @@ export function getRenderBounds(doc: Document, id: NodeId): Rect {
       // The mitred tip of a sharp corner of a vector reaches well beyond the corner itself.
       const sharp = node.type === 'VECTOR' && node.strokeJoin === 'MITER';
       bounds = expandRect(bounds, node.strokeWeight * (sharp ? (strokeAlignOf(node) === 'OUTSIDE' ? 10 : 5) : 1));
+      // Arrowheads reach beyond the ends of the stroke.
+      const reach = arrowHeads(node).reduce((most, head) => Math.max(most, head.reach), 0);
+      if (reach > 0) bounds = expandRect(bounds, reach);
     }
     if ((node.type === 'FRAME' && !node.clipsContent) || node.type === 'GROUP') {
       const parts = [bounds];
@@ -240,6 +243,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     if (node.strokeWeight <= 0 || node.type === 'TEXT') return;
     const align = strokeAlignOf(node);
     const rule = fillRuleOf(node);
+    const heads = arrowHeads(node);
     const alpha = target.globalAlpha;
     target.lineCap = CAPS[node.strokeCap];
     target.lineJoin = JOINS[node.strokeJoin];
@@ -249,9 +253,13 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
       target.globalAlpha = alpha * paint.opacity;
       target.strokeStyle = paintStyle(target, paint, node.width, node.height);
       if (align === 'CENTER') {
-        traceLayerPath(target, node, 0, 'stroke');
+        traceStrokePath(target, node);
         target.lineWidth = node.strokeWeight;
         target.stroke();
+        if (heads.length > 0) {
+          drawArrowHeads(target, heads);
+          target.setLineDash(node.dashPattern);
+        }
         continue;
       }
       // Inside and outside strokes: draw a double-width stroke and keep only
@@ -271,6 +279,18 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     }
     target.globalAlpha = alpha;
     target.setLineDash([]);
+  };
+
+  /** Paints arrowheads with the current stroke style: solid, whatever the stroke's dashes. */
+  const drawArrowHeads = (target: Ctx, heads: readonly ReturnType<typeof arrowHeads>[number][]): void => {
+    target.setLineDash([]);
+    for (const head of heads) {
+      traceArrowHead(target, head);
+      if (head.filled) {
+        target.fillStyle = target.strokeStyle;
+        target.fill();
+      } else target.stroke();
+    }
   };
 
   /** Draws a layer's drop shadow from its outline, without drawing the layer. */
@@ -293,12 +313,13 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
       }
       // An inside stroke lies within the fill, which already cast the shadow.
       if (stroked && !(filled && align === 'INSIDE')) {
-        traceLayerPath(target, node, 0, 'stroke');
+        traceStrokePath(target, node);
         target.lineCap = CAPS[node.strokeCap];
         target.lineJoin = JOINS[node.strokeJoin];
         target.setLineDash(node.dashPattern);
         target.lineWidth = align === 'OUTSIDE' ? node.strokeWeight * 2 : node.strokeWeight;
         target.stroke();
+        drawArrowHeads(target, arrowHeads(node));
       }
     }
     target.restore();

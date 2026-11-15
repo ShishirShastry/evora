@@ -1,5 +1,5 @@
 import type { LayerNode, VectorNetwork } from '../document/schema';
-import { effectiveRadii, polygonPoints, starPoints } from '../scene/shapes';
+import { effectiveRadii, hasArc, polygonPoints, starPoints } from '../scene/shapes';
 import { KAPPA } from './bezier';
 import { mapNetwork, NetworkBuilder } from './network';
 
@@ -13,6 +13,43 @@ export function hasOutline(node: LayerNode): boolean {
     node.type === 'STAR' ||
     node.type === 'VECTOR'
   );
+}
+
+/**
+ * Adds an arc of an ellipse to a path, from one angle to another (degrees,
+ * clockwise on screen from three o'clock; backwards if `to` is less than
+ * `from`), as curves of at most a quarter turn each. The arc is joined to
+ * what is already in the path by a straight line, or starts a new path.
+ */
+function addArc(path: NetworkBuilder, cx: number, cy: number, rx: number, ry: number, from: number, to: number, start: 'move' | 'line'): void {
+  const a0 = (from * Math.PI) / 180;
+  const a1 = (to * Math.PI) / 180;
+  const count = Math.max(1, Math.ceil(Math.abs(a1 - a0) / (Math.PI / 2) - 1e-9));
+  const step = (a1 - a0) / count;
+  const k = (4 / 3) * Math.tan(step / 4);
+  const point = (a: number): [number, number] => [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
+  const first = point(a0);
+  if (start === 'move') path.moveTo(first[0], first[1]);
+  else path.lineTo(first[0], first[1]);
+  for (let i = 0; i < count; i++) {
+    const a = a0 + step * i;
+    const b = a + step;
+    const [ax, ay] = point(a);
+    const [bx, by] = point(b);
+    path.curveTo(ax - k * rx * Math.sin(a), ay + k * ry * Math.cos(a), bx + k * rx * Math.sin(b), by - k * ry * Math.cos(b), bx, by);
+  }
+}
+
+const outlineCache = new WeakMap<LayerNode, VectorNetwork | null>();
+
+/** `shapeNetwork`, remembered for each layer object. */
+export function outlineNetwork(node: LayerNode): VectorNetwork | null {
+  let network = outlineCache.get(node);
+  if (network === undefined) {
+    network = shapeNetwork(node);
+    outlineCache.set(node, network);
+  }
+  return network;
 }
 
 /**
@@ -41,6 +78,22 @@ export function shapeNetwork(node: LayerNode): VectorNetwork | null {
     case 'ELLIPSE': {
       const rx = w / 2;
       const ry = h / 2;
+      if (hasArc(node)) {
+        const path = new NetworkBuilder();
+        const end = node.arcStart + node.arcSweep;
+        if (node.arcSweep >= 360) {
+          // A ring: the hole runs the other way round, so it is a hole under either fill rule.
+          addArc(path, rx, ry, rx, ry, 0, 360, 'move');
+          path.close();
+          addArc(path, rx, ry, rx * node.arcRatio, ry * node.arcRatio, 360, 0, 'move');
+        } else {
+          addArc(path, rx, ry, rx, ry, node.arcStart, end, 'move');
+          // Back along the inner edge, or for a slice straight to the centre.
+          if (node.arcRatio > 0) addArc(path, rx, ry, rx * node.arcRatio, ry * node.arcRatio, end, node.arcStart, 'line');
+          else path.lineTo(rx, ry);
+        }
+        return path.close().build();
+      }
       return new NetworkBuilder()
         .moveTo(rx, 0)
         .curveTo(rx + k * rx, 0, w, ry - k * ry, w, ry)

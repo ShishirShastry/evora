@@ -64,6 +64,7 @@ function appearanceOf(node: LayerNode): LayerPatch {
     effects: node.effects,
     blendMode: node.blendMode,
     constraints: node.constraints,
+    ...(node.type === 'LINE' || node.type === 'VECTOR' ? { startArrow: node.startArrow, endArrow: node.endArrow } : {}),
   };
 }
 

@@ -1,5 +1,19 @@
-import type { CornerRadii, GradientPaint, ImagePaint, LayerNode, Paint, PathStep, RGB, SolidPaint, VectorNetwork } from '../../core';
-import { effectiveRadii, imagePlacement, isStraight, networkGeometry, outlinePoints, stepCubic } from '../../core';
+import type { ArrowShape, CornerRadii, GradientPaint, ImagePaint, LayerNode, LineNode, Paint, PathStep, RGB, SolidPaint, VectorNetwork, VectorNode } from '../../core';
+import {
+  arrowShape,
+  arrowTrim,
+  effectiveRadii,
+  hasArc,
+  imagePlacement,
+  isStraight,
+  networkGeometry,
+  openRuns,
+  outlinePoints,
+  pathEnds,
+  stepCubic,
+  trimEnd,
+  trimStart,
+} from '../../core';
 import type { ImageSource } from '../images/imageCache';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -7,7 +21,7 @@ type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 /** The subset of the 2D canvas API used to build paths; lets tests pass a recording stub. */
 export type PathContext = Pick<
   CanvasRenderingContext2D,
-  'beginPath' | 'moveTo' | 'lineTo' | 'arcTo' | 'ellipse' | 'closePath' | 'rect' | 'bezierCurveTo'
+  'beginPath' | 'moveTo' | 'lineTo' | 'arcTo' | 'ellipse' | 'closePath' | 'rect' | 'bezierCurveTo' | 'arc'
 >;
 
 /** Which of a layer's outlines to trace: what a fill covers, or what a stroke follows. They differ for vectors only. */
@@ -88,10 +102,35 @@ export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0, par
       roundedRect(ctx, inset, inset, w, h, effectiveRadii(w, h, node.cornerRadius, node.cornerRadii, inset));
       break;
     }
-    case 'ELLIPSE':
-      ctx.ellipse(width / 2, height / 2, Math.max(0, width / 2 - inset), Math.max(0, height / 2 - inset), 0, 0, Math.PI * 2);
-      ctx.closePath();
+    case 'ELLIPSE': {
+      const cx = width / 2;
+      const cy = height / 2;
+      const rx = Math.max(0, cx - inset);
+      const ry = Math.max(0, cy - inset);
+      if (!hasArc(node)) {
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.closePath();
+        break;
+      }
+      const from = (node.arcStart * Math.PI) / 180;
+      const to = ((node.arcStart + node.arcSweep) * Math.PI) / 180;
+      const inner = node.arcRatio;
+      if (node.arcSweep >= 360) {
+        // A ring: the hole is traced the other way round, and as a path of its own.
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.moveTo(cx + rx * inner, cy);
+        ctx.ellipse(cx, cy, rx * inner, ry * inner, 0, Math.PI * 2, 0, true);
+        ctx.closePath();
+      } else {
+        ctx.ellipse(cx, cy, rx, ry, 0, from, to);
+        // Back along the inner edge, or for a slice straight to the centre.
+        if (inner > 0) ctx.ellipse(cx, cy, rx * inner, ry * inner, 0, to, from, true);
+        else ctx.lineTo(cx, cy);
+        ctx.closePath();
+      }
       break;
+    }
     case 'LINE':
       ctx.moveTo(0, height / 2);
       ctx.lineTo(width, height / 2);
@@ -107,6 +146,67 @@ export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0, par
       traceNetwork(ctx, node.network, part);
       break;
   }
+}
+
+/** The arrowheads a layer's stroke ends in, in the layer's own space. Only lines and vectors with loose ends have any. */
+export function arrowHeads(node: LayerNode): ArrowShape[] {
+  if (node.type !== 'LINE' && node.type !== 'VECTOR') return [];
+  if (node.startArrow === 'NONE' && node.endArrow === 'NONE') return [];
+  const heads: ArrowShape[] = [];
+  for (const end of pathEnds(node)) {
+    const head = arrowShape(end.at === 'start' ? node.startArrow : node.endArrow, end, node.strokeWeight);
+    if (head) heads.push(head);
+  }
+  return heads;
+}
+
+/**
+ * Traces what a line or vector's stroke follows, cut short at the ends whose
+ * arrowhead would otherwise have the stroke showing through its tip.
+ */
+function traceTrimmedStroke(ctx: PathContext, node: LineNode | VectorNode): void {
+  const startTrim = arrowTrim(node.startArrow, node.strokeWeight);
+  const endTrim = arrowTrim(node.endArrow, node.strokeWeight);
+  ctx.beginPath();
+  if (node.type === 'LINE') {
+    const room = node.width * 0.45;
+    ctx.moveTo(Math.min(startTrim, room), node.height / 2);
+    ctx.lineTo(node.width - Math.min(endTrim, room), node.height / 2);
+    return;
+  }
+  const runs = openRuns(node);
+  for (const chain of networkGeometry(node.network).chains) {
+    const curves = chain.steps.map((step) => stepCubic(node.network, step));
+    const run = runs.find((candidate) => candidate.steps === chain.steps);
+    const last = curves.length - 1;
+    if (run && last >= 0) {
+      if (run.startLoose && startTrim > 0) curves[0] = trimStart(curves[0] as (typeof curves)[number], startTrim);
+      if (run.endLoose && endTrim > 0) curves[last] = trimEnd(curves[last] as (typeof curves)[number], endTrim);
+    }
+    curves.forEach((c, i) => {
+      if (i === 0) ctx.moveTo(c.p0.x, c.p0.y);
+      if (isStraight(c)) ctx.lineTo(c.p3.x, c.p3.y);
+      else ctx.bezierCurveTo(c.p1.x, c.p1.y, c.p2.x, c.p2.y, c.p3.x, c.p3.y);
+    });
+    if (chain.closed && curves.length > 0) ctx.closePath();
+  }
+}
+
+/** Traces the path a layer's stroke is drawn along: its outline, made room for arrowheads where it has them. */
+export function traceStrokePath(ctx: PathContext, node: LayerNode): void {
+  if ((node.type === 'LINE' || node.type === 'VECTOR') && (node.startArrow !== 'NONE' || node.endArrow !== 'NONE')) traceTrimmedStroke(ctx, node);
+  else traceLayerPath(ctx, node, 0, 'stroke');
+}
+
+/** Traces one arrowhead. */
+export function traceArrowHead(ctx: PathContext, head: ArrowShape): void {
+  ctx.beginPath();
+  if (head.circle) {
+    ctx.arc(head.circle.center.x, head.circle.center.y, head.circle.radius, 0, Math.PI * 2);
+    return;
+  }
+  head.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+  if (head.filled) ctx.closePath();
 }
 
 function addStops(gradient: CanvasGradient, paint: GradientPaint): CanvasGradient {

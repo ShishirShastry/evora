@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **8**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **9**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -182,10 +182,17 @@ interface RectangleNode extends LayerBase {
 
 interface EllipseNode extends LayerBase {
   type: 'ELLIPSE';
+  arcStart: number;          // version 9. Degrees, clockwise on screen from three o'clock; -360..360
+  arcSweep: number;          // version 9. Degrees, 1..360; 360 is the whole ellipse
+  arcRatio: number;          // version 9. Inner radius as a fraction of the outer, 0..0.99
 }
+
+type ArrowType = 'NONE' | 'LINE' | 'TRIANGLE' | 'CIRCLE' | 'DIAMOND';
 
 interface LineNode extends LayerBase {
   type: 'LINE';              // drawn from (0, height/2) to (width, height/2); height is 0
+  startArrow: ArrowType;     // version 9. At (0, height/2)
+  endArrow: ArrowType;       // version 9. At (width, height/2)
 }
 
 interface PolygonNode extends LayerBase {
@@ -225,6 +232,8 @@ interface VectorNode extends LayerBase {
   type: 'VECTOR';            // version 8
   network: VectorNetwork;
   windingRule: 'NONZERO' | 'EVENODD';
+  startArrow: ArrowType;     // version 9
+  endArrow: ArrowType;       // version 9
 }
 
 interface VectorNetwork {
@@ -248,6 +257,10 @@ interface VectorSegment {
 - Whether a point is smooth is read from its handles (two handles in a straight line through the point); no flag is stored.
 
 A vector's box is always the bounding box of its curves (the curves themselves, not their handles), in the layer's own, possibly rotated, frame of reference. The editor restores this after every edit (`fitVectors`) without moving anything on the page, and removes a vector that has no points left. Resizing a vector scales its points and handles; a vector that is flat in one direction (a straight line) cannot be resized in that direction. "Flatten to vector" turns rectangles, ellipses, lines, polygons and stars into vectors (text cannot be converted: the application has no access to glyph outlines).
+
+**Arcs.** An ellipse with `arcSweep` below 360 is a slice (the arc and two straight sides to the centre); with `arcRatio` above 0 the middle is cut out, which makes a ring, or with a sweep a piece of a ring. The layer's box is always that of the whole ellipse, whatever part of it is shown. Hit testing, flattening and boolean operations use the real outline.
+
+**Arrowheads.** `startArrow` and `endArrow` say what is drawn at the loose ends of a stroke: nothing, an open arrow, a filled triangle, a dot or a diamond, sized from the stroke weight and painted with the stroke's paints. On a vector they apply to every open run of segments: `startArrow` to the end the run begins at (the lower-numbered point), `endArrow` to the other, and only at ends that are not branch points; a closed path shows none. Under a triangle the stroke is drawn slightly shorter so that it does not show through the tip. Arrowheads are not part of a layer's box.
 
 **Groups.** A group's box is always the bounding box of its children, in the group's own (possibly rotated) frame of reference. This is an invariant the editor restores after every edit (`normalizeGroups`): the box is refitted when children move or resize, and a group whose last child is removed is deleted. Resizing a group scales its children; resizing a frame does not. A group is never hit directly on the canvas, only through its children.
 
@@ -386,7 +399,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -404,6 +417,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   6: addEmptyGuides,
   // 7 -> 8: adds the VECTOR type. Older files have no vector layers.
   7: (file) => ({ ...file, schemaVersion: 8 }),
+  // 8 -> 9: ellipses get arcStart 0, arcSweep 360, arcRatio 0; lines and vectors get startArrow and endArrow 'NONE'.
+  8: addVersion9Defaults,
 };
 ```
 
@@ -416,6 +431,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 5 | 6 | Constraints on every layer; layout grids on frames | `src/layout.test.ts` ("version 5 files") |
 | 6 | 7 | Ruler guides on pages | `src/guides.test.ts` ("opens a version 6 file") |
 | 7 | 8 | `VECTOR` layer type added | `src/vector.test.ts` ("opens a version 7 file") |
+| 8 | 9 | Arcs on ellipses; arrowheads on lines and vectors | `src/arcs.test.ts` ("opens a version 8 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -445,7 +461,7 @@ These are reserved so that later versions extend the schema without restructurin
 | Phase | Addition |
 |---|---|
 | 2 | Per-range text styles, `flipX/flipY`, masks. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7.) |
-| 3 | `BOOLEAN_OPERATION`, arc data on ellipses, arrowheads. (Done: `VECTOR` in version 8.) |
+| 3 | `BOOLEAN_OPERATION` (a container that keeps the shapes a boolean operation combines; today the operations replace them with a `VECTOR`). (Done: `VECTOR` in version 8, arcs and arrowheads in version 9.) |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |

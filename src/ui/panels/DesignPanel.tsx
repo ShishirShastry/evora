@@ -13,11 +13,14 @@ import {
   resizeFromTopLeft,
   setLayerBox,
   TYPE_LABELS,
+  type ArrowType,
   type BlendMode,
   type CornerRadii,
+  type EllipseNode,
   type FrameNode,
   type LayerNode,
   type LayerPatch,
+  type LineNode,
   type NodeId,
   type StrokeAlign,
   type StrokeCap,
@@ -52,6 +55,14 @@ const CAP_NAMES: readonly (readonly [StrokeCap, string])[] = [
   ['NONE', 'Flat ends'],
   ['ROUND', 'Round ends'],
   ['SQUARE', 'Square ends'],
+];
+
+const ARROW_NAMES: readonly (readonly [ArrowType, string])[] = [
+  ['NONE', 'No arrow'],
+  ['LINE', 'Line arrow'],
+  ['TRIANGLE', 'Triangle'],
+  ['CIRCLE', 'Circle'],
+  ['DIAMOND', 'Diamond'],
 ];
 
 const JOIN_NAMES: readonly (readonly [StrokeJoin, string])[] = [
@@ -361,6 +372,9 @@ export function DesignPanel() {
   const textLayers = layers.filter((layer): layer is TextNode => layer.type === 'TEXT');
   const stars = layers.filter((layer) => layer.type === 'STAR');
   const vectors = layers.filter((layer): layer is VectorNode => layer.type === 'VECTOR');
+  const ellipses = layers.filter((layer): layer is EllipseNode => layer.type === 'ELLIPSE');
+  // Arrowheads go on strokes that have ends: lines, and vectors (where they show on open paths).
+  const arrowLayers = layers.filter((layer): layer is LineNode | VectorNode => layer.type === 'LINE' || layer.type === 'VECTOR');
   const set = (label: string, patch: LayerPatch): void => updateLayers(store, label, ids, patch);
   /** Applies a patch computed separately for each layer, as one undo step. */
   const setEach = (label: string, targets: readonly LayerNode[], make: (layer: LayerNode) => LayerPatch): void => {
@@ -516,6 +530,42 @@ export function DesignPanel() {
             )}
           </Row>
         )}
+        {ellipses.length === layers.length && (
+          <>
+            <Row>
+              <NumberField
+                label="Arc start"
+                prefix="Start"
+                suffix="°"
+                min={-360}
+                max={360}
+                value={shared(ellipses, (l) => (l.type === 'ELLIPSE' ? l.arcStart : 0))}
+                onCommit={(arcStart) => set('Change arc', { arcStart })}
+              />
+              <NumberField
+                label="Arc sweep"
+                prefix="Sweep"
+                suffix="°"
+                min={1}
+                max={360}
+                value={shared(ellipses, (l) => (l.type === 'ELLIPSE' ? l.arcSweep : 360))}
+                onCommit={(arcSweep) => set('Change arc', { arcSweep })}
+              />
+            </Row>
+            <Row>
+              <NumberField
+                label="Arc ratio"
+                prefix="Ratio"
+                suffix="%"
+                min={0}
+                max={99}
+                value={shared(ellipses, (l) => (l.type === 'ELLIPSE' ? Math.round(l.arcRatio * 100) : 0))}
+                onCommit={(value) => set('Change arc', { arcRatio: value / 100 })}
+              />
+              <div className="flex-1" />
+            </Row>
+          </>
+        )}
         {frames.length === layers.length && (
           <label className="mt-0.5 flex cursor-pointer items-center gap-2">
             <input
@@ -624,6 +674,22 @@ export function DesignPanel() {
             onCommit={(gap) => setDash(undefined, gap)}
           />
         </Row>
+        {arrowLayers.length === layers.length && (
+          <Row>
+            <SelectField<ArrowType>
+              label="Start arrow"
+              value={shared(arrowLayers, (l) => (l.type === 'LINE' || l.type === 'VECTOR' ? l.startArrow : 'NONE'))}
+              options={ARROW_NAMES}
+              onChange={(startArrow) => set('Change arrowhead', { startArrow })}
+            />
+            <SelectField<ArrowType>
+              label="End arrow"
+              value={shared(arrowLayers, (l) => (l.type === 'LINE' || l.type === 'VECTOR' ? l.endArrow : 'NONE'))}
+              options={ARROW_NAMES}
+              onChange={(endArrow) => set('Change arrowhead', { endArrow })}
+            />
+          </Row>
+        )}
       </PaintList>
       )}
 

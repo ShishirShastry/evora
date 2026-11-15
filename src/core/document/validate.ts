@@ -3,6 +3,7 @@ import { fitVectorNode } from '../vector/fit';
 import { freshKeys } from '../order';
 import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
 import {
+  ARROW_TYPES,
   BLEND_MODES,
   CONSTRAINT_TYPES,
   CONTAINER_TYPES,
@@ -299,6 +300,13 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
   } else if (layer.type === 'RECTANGLE') {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
+  } else if (layer.type === 'ELLIPSE') {
+    layer.arcStart = finite(raw.arcStart, 0, -360, 360);
+    layer.arcSweep = finite(raw.arcSweep, 360, 1, 360);
+    layer.arcRatio = finite(raw.arcRatio, 0, 0, 0.99);
+  } else if (layer.type === 'LINE') {
+    layer.startArrow = oneOf(raw.startArrow, ARROW_TYPES, 'NONE');
+    layer.endArrow = oneOf(raw.endArrow, ARROW_TYPES, 'NONE');
   } else if (layer.type === 'POLYGON') {
     layer.pointCount = Math.round(finite(raw.pointCount, 3, 3, 60));
   } else if (layer.type === 'STAR') {
@@ -320,6 +328,8 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
   } else if (layer.type === 'VECTOR') {
     layer.network = vectorNetwork(raw.network);
     layer.windingRule = oneOf(raw.windingRule, WINDING_RULES, 'NONZERO');
+    layer.startArrow = oneOf(raw.startArrow, ARROW_TYPES, 'NONE');
+    layer.endArrow = oneOf(raw.endArrow, ARROW_TYPES, 'NONE');
     // The box of a vector is the bounding box of its curves.
     return fitVectorNode(layer);
   }

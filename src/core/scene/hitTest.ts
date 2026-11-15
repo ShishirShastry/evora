@@ -11,7 +11,8 @@ import {
 } from '../math/geometry';
 import { applyToPoint, invert } from '../math/matrix';
 import { distanceToNetwork, pointInNetworkFill } from '../vector/network';
-import { hasVisiblePaint, outlinePoints } from './shapes';
+import { outlineNetwork } from '../vector/shapes';
+import { hasArc, hasVisiblePaint, outlinePoints } from './shapes';
 import { getAncestorIds, getChildIds, getWorldBounds, getWorldCorners, getWorldMatrix } from './tree';
 
 function inBox(p: Point, width: number, height: number, grow: number): boolean {
@@ -44,6 +45,13 @@ export function hitsShape(node: LayerNode, p: Point, tolerance: number): boolean
       if (solid) return inBox(p, width, height, 0);
       return inBox(p, width, height, edge) && !inBox({ x: p.x - edge * 2, y: p.y - edge * 2 }, width - edge * 4, height - edge * 4, 0);
     case 'ELLIPSE': {
+      if (hasArc(node)) {
+        // A slice or a ring is tested against its real outline.
+        const network = outlineNetwork(node);
+        if (!network) return false;
+        if (solid && pointInNetworkFill(network, p, 'NONZERO')) return true;
+        return distanceToNetwork(network, p) <= edge;
+      }
       const rx = width / 2;
       const ry = height / 2;
       if (rx <= 0 || ry <= 0) return inBox(p, width, height, tolerance);
