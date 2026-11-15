@@ -57,6 +57,7 @@ import type { EditorStore, ToolId } from '../../state/editorStore';
 import { hitFrameLabel, type FrameLabel } from '../render/overlay';
 import { RULER_SIZE } from '../render/rulers';
 import { panBy, screenToWorld, zoomAt } from '../viewport';
+import { arcHandleAt, dragArcHandle, type ArcHandle } from './arcHandles';
 import { getSelectionFrame, handleCursor, hitHandle, pointInSelectionFrame, type SelectionFrame } from './selectionFrame';
 import { VectorTool, type VectorOverlay } from './vectorTool';
 
@@ -142,7 +143,9 @@ type Mode =
   /** A ruler guide being pulled out of a ruler (`index` null) or moved (its index in the page's guides). */
   | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document }
   /** The Pen tool or point editing has the pointer; see `VectorTool`. */
-  | { kind: 'vector' };
+  | { kind: 'vector' }
+  /** One of the handles that shape an ellipse's arc is being dragged. */
+  | { kind: 'arc'; id: NodeId; handle: ArcHandle; base: Document };
 
 export interface ControllerHost {
   /** Called when the overlay (marquee, handles) needs repainting without a store change. */
@@ -375,6 +378,11 @@ export class InteractionController {
       case 'vector':
         this.vector.pointerMove(e);
         return;
+      case 'arc': {
+        const patch = dragArcHandle(mode.base, mode.id, mode.handle, world, e.shiftKey);
+        if (patch) this.state.updateGesture(() => patchNode(mode.base, mode.id, patch));
+        return;
+      }
       case 'text':
         // Show the box being dragged out.
         this.marquee = distance(e, mode.startScreen) > DRAG_THRESHOLD_PX ? rectFromPoints(mode.startWorld, world) : null;
@@ -428,6 +436,9 @@ export class InteractionController {
         break;
       case 'vector':
         this.vector.pointerUp();
+        break;
+      case 'arc':
+        state.commitGesture('Change arc');
         break;
     }
     // Finishing a draw computes its final box, which may snap once more; nothing stays snapped afterwards.
@@ -526,6 +537,11 @@ export class InteractionController {
       this.host.setCursor(this.idleCursor());
       return;
     }
+    if (arcHandleAt(state.doc, state.selection, state.viewport, e)) {
+      state.setHovered(null);
+      this.host.setCursor('pointer');
+      return;
+    }
     const frame = getSelectionFrame(state.doc, state.selection);
     const handle = frame ? hitHandle(frame, state.viewport, e) : null;
     if (frame && handle) {
@@ -560,6 +576,15 @@ export class InteractionController {
     const world = this.toWorld(e);
     const tolerance = HIT_TOLERANCE_PX / state.viewport.zoom;
     const frame = getSelectionFrame(state.doc, state.selection);
+
+    // The handles that shape a selected ellipse's arc.
+    const arc = arcHandleAt(state.doc, state.selection, state.viewport, e);
+    if (arc) {
+      state.beginGesture();
+      state.setHovered(null);
+      this.mode = { kind: 'arc', id: arc.id, handle: arc.handle, base: state.doc };
+      return;
+    }
 
     // 1. A transform handle of the current selection.
     const handle = frame ? hitHandle(frame, state.viewport, e) : null;

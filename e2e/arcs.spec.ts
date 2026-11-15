@@ -166,3 +166,48 @@ test('arrowheads: a line gets a triangle at one end and a dot at the other', asy
 
   expect(errors).toEqual([]);
 });
+
+test('arcs: shaped by dragging the handles on the canvas', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await canvas(page).focus();
+  // A circle of radius 100 about (300, 300). Drawn, it is selected, and its arc handle is at three o'clock.
+  await page.keyboard.press('o');
+  await drag(page, [200, 200], [400, 400]);
+  const overlay = async (x: number, y: number): Promise<RGB> => {
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    return page.evaluate(
+      ([px, py]) => {
+        const data = (document.querySelectorAll('canvas')[1] as HTMLCanvasElement).getContext('2d')!.getImageData(px as number, py as number, 1, 1).data;
+        return [data[0], data[1], data[2]] as [number, number, number];
+      },
+      [x, y],
+    );
+  };
+  expectNear(await overlay(375, 300), [255, 255, 255]);
+
+  // Drag it round to six o'clock: a quarter of the circle is left.
+  await drag(page, [375, 300], [300, 375]);
+  await expect(field(page, 'Arc sweep')).toHaveValue('90');
+  expectNear(await pixel(page, 350, 350), GREY);
+  expectNear(await pixel(page, 250, 250), PAGE);
+  expectNear(await pixel(page, 350, 250), PAGE);
+  // The handle went with the end of the arc, and there is now one for the start and one in the middle for the hole.
+  expectNear(await overlay(300, 375), [255, 255, 255]);
+  expectNear(await overlay(300, 300), [255, 255, 255]);
+
+  // Drag the middle handle out: a hole, half the size of the circle.
+  await drag(page, [300, 300], [335, 335]);
+  await expect(field(page, 'Arc ratio')).toHaveValue('49');
+  expectNear(await pixel(page, 320, 320), PAGE);
+  expectNear(await pixel(page, 360, 360), GREY);
+
+  // Undo steps back through the drags.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Arc ratio')).toHaveValue('0');
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Arc sweep')).toHaveValue('360');
+
+  expect(errors).toEqual([]);
+});

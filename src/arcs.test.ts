@@ -39,8 +39,11 @@ import {
   type VectorNode,
 } from './core';
 import { freshKeys } from './core/order';
+import { arcHandles } from './engine/input/arcHandles';
+import { InteractionController, type PointerInput } from './engine/input/controller';
 import { arrowHeads, traceLayerPath, traceStrokePath } from './engine/render/paint';
 import { getRenderBounds, renderScene } from './engine/render/scene';
+import { createEditorStore, type EditorStore } from './state/editorStore';
 
 function setup(): { doc: Document; pageId: NodeId } {
   const doc = createDocument('Arcs');
@@ -395,5 +398,102 @@ describe('the file format', () => {
     (kept.nodes[dot.id] as Record<string, unknown>).arcSweep = 120;
     const again = parseFile({ format: 'open-design', schemaVersion: 8, meta: {}, document: kept });
     expect(again.file.document.nodes[dot.id]).toMatchObject({ arcSweep: 120 });
+  });
+});
+
+describe('arc handles on the canvas', () => {
+  const ptr = (x: number, y: number, shiftKey = false): PointerInput => ({ x, y, button: 0, shiftKey, altKey: false, ctrlKey: false, detail: 1 });
+
+  /** An editor with one selected circle of radius 100 about (200, 200). Canvas pixels are page units. */
+  function editor(props: Partial<EllipseNode> = {}): { store: EditorStore; controller: InteractionController; id: NodeId } {
+    const { doc, pageId } = setup();
+    const made = addLayer(doc, 'ELLIPSE', pageId, { x: 100, y: 100, width: 200, height: 200, ...props });
+    const store = createEditorStore(made.doc);
+    store.getState().setCanvasSize({ width: 800, height: 600 });
+    store.getState().setSelection([made.id]);
+    const controller = new InteractionController(store, { requestRender: () => undefined, setCursor: () => undefined });
+    return { store, controller, id: made.id };
+  }
+
+  const drag = (controller: InteractionController, from: [number, number], to: [number, number], shift = false): void => {
+    controller.pointerDown(ptr(from[0], from[1], shift));
+    controller.pointerMove(ptr((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, shift));
+    controller.pointerMove(ptr(to[0], to[1], shift));
+    controller.pointerUp(ptr(to[0], to[1], shift));
+  };
+
+  const shown = (store: EditorStore): [string, number, number][] =>
+    (arcHandles(store.getState().doc, store.getState().selection, store.getState().viewport)?.points ?? []).map((p) => [p.handle, Math.round(p.screen.x), Math.round(p.screen.y)]);
+
+  const arcOf = (store: EditorStore, id: NodeId): EllipseNode => store.getState().doc.nodes[id] as EllipseNode;
+
+  it('shows one handle on a whole ellipse, and three on an arc', () => {
+    // Three quarters of the way out, at three o'clock.
+    expect(shown(editor().store)).toEqual([['end', 275, 200]]);
+    expect(shown(editor({ arcSweep: 90 }).store)).toEqual([
+      ['start', 275, 200],
+      ['end', 200, 275],
+      ['ratio', 200, 200],
+    ]);
+    // On a ring the hole's handle is on the hole's edge, opposite where the ring starts.
+    expect(shown(editor({ arcRatio: 0.5 }).store)).toEqual([
+      ['end', 275, 200],
+      ['ratio', 150, 200],
+    ]);
+    // None when there is no room for them, when the ellipse is locked, or when more is selected.
+    expect(shown(editor({ width: 30, height: 30 }).store)).toEqual([]);
+    expect(shown(editor({ locked: true }).store)).toEqual([]);
+    const two = editor();
+    const other = addLayer(two.store.getState().doc, 'ELLIPSE', two.store.getState().pageId, { x: 400, y: 100 });
+    two.store.getState().apply('Add', () => other.doc);
+    two.store.getState().setSelection([two.id, other.id]);
+    expect(shown(two.store)).toEqual([]);
+  });
+
+  it('sweeps the arc when its end is dragged', () => {
+    const { store, controller, id } = editor();
+    drag(controller, [275, 200], [200, 275]);
+    expect(arcOf(store, id)).toMatchObject({ arcStart: 0, arcSweep: 90, arcRatio: 0 });
+    expect(store.getState().undoStack.map((entry) => entry.label)).toEqual(['Change arc']);
+    // The handle is where the arc now ends; on to nine o'clock.
+    drag(controller, [200, 275], [120, 200]);
+    expect(arcOf(store, id).arcSweep).toBe(180);
+    // With Shift, in steps of 15 degrees.
+    drag(controller, [125, 200], [140, 150], true);
+    expect(arcOf(store, id).arcSweep).toBe(225);
+    store.getState().undo();
+    store.getState().undo();
+    store.getState().undo();
+    expect(arcOf(store, id)).toMatchObject({ arcSweep: 360 });
+  });
+
+  it('moves the start of the arc and leaves its end where it is', () => {
+    const { store, controller, id } = editor({ arcSweep: 180 });
+    // From three o'clock to twelve.
+    drag(controller, [275, 200], [200, 125]);
+    expect(arcOf(store, id)).toMatchObject({ arcStart: 270, arcSweep: 270 });
+  });
+
+  it('opens a hole when the middle handle is dragged out', () => {
+    const { store, controller, id } = editor({ arcSweep: 180 });
+    drag(controller, [200, 200], [200, 250]);
+    expect(arcOf(store, id)).toMatchObject({ arcRatio: 0.5, arcSweep: 180 });
+    // The handle is now on the hole's edge, half-way round the arc: straight down.
+    expect(shown(store)).toContainEqual(['ratio', 200, 250]);
+    drag(controller, [200, 250], [200, 198]);
+    expect(arcOf(store, id).arcRatio).toBe(0.02);
+  });
+
+  it('leaves a whole ellipse free to be dragged by its middle, and gives up a drag that is cancelled', () => {
+    const { store, controller, id } = editor();
+    drag(controller, [200, 200], [230, 240]);
+    expect(arcOf(store, id)).toMatchObject({ x: 130, y: 140, arcSweep: 360, arcRatio: 0 });
+
+    controller.pointerDown(ptr(305, 240));
+    controller.pointerMove(ptr(230, 315));
+    expect(arcOf(store, id).arcSweep).toBe(90);
+    expect(controller.cancel()).toBe(true);
+    expect(arcOf(store, id).arcSweep).toBe(360);
+    expect(store.getState().undoStack.map((entry) => entry.label)).toEqual(['Move']);
   });
 });

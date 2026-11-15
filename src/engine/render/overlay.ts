@@ -19,6 +19,7 @@ import {
   type Rect,
   type SnapGuide,
 } from '../../core';
+import { ARC_HANDLE_RADIUS_PX, arcHandles } from '../input/arcHandles';
 import { getSelectionFrame } from '../input/selectionFrame';
 import type { VectorOverlay } from '../input/vectorTool';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
@@ -248,6 +249,20 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
       ctx.textBaseline = 'middle';
       ctx.fillText(text, -textWidth / 2, 16);
       ctx.restore();
+    }
+  }
+
+  // The round handles that shape a selected ellipse's arc: its start, its end and its hole.
+  const arc = input.showHandles ? arcHandles(doc, selection, viewport) : null;
+  if (arc) {
+    for (const { screen } of arc.points) {
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, ARC_HANDLE_RADIUS_PX, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = ACCENT;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
 
