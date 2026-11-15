@@ -13,7 +13,7 @@ Last updated: 2026-11-15, after seven slices of Phase 2. Every item in the speci
 
 How to run and check the project: [README.md](README.md).
 
-## What works (Phase 1)
+## What works (Phase 1, then the Phase 2 additions)
 
 All of this is wired to the real document model, is undoable, and is saved automatically.
 
@@ -38,7 +38,7 @@ All of this is wired to the real document model, is undoable, and is saved autom
 - **Constraints (Phase 2).** A layer directly inside a frame can keep to the left, right or centre, stretch between both edges, or scale, and the same vertically. Resizing the frame — by its handles, in the properties panel, or as part of a larger resize — moves and resizes its children accordingly, in the same undo step; nested frames and groups pass it on.
 - **Layout grids (Phase 2).** Frames can carry any number of uniform grids, columns and rows (count, gutter, margin or offset, stretched or aligned with a fixed size, colour and opacity). They are drawn over the design as guides, never into it; layers snap to their lines; View → Show layout grids (Shift+G) hides and shows them all.
 - **Rulers and guides (Phase 2).** View → Rulers and guides (Shift+R) shows rulers along the top and left with page coordinates that follow pan and zoom, and marks the selection's extent on them. Drag out of a ruler to make a guide, drag a guide to move it, drag it back onto its ruler to remove it, or "Remove all" on the page's properties. Layers snap to guides. Guides are stored per page and, like layout grids, are never part of the design. Whether rulers are shown is remembered on this device.
-- **Menus and shortcuts.** Main menu (File, Edit, View, Object, Help), context menus and a shortcut reference, all generated from one command table, so a menu item and its shortcut cannot disagree.
+- **Menus and shortcuts.** Main menu (File, Edit, View, Object, Arrange, Help), context menus and a shortcut reference, all generated from one command table, so a menu item and its shortcut cannot disagree.
 
 ## What is tested
 
@@ -64,7 +64,7 @@ Run on 2026-11-15: TypeScript clean; **278 unit tests** and **16 browser accepta
 - `e2e/phase2.spec.ts` — snapping on and off in the browser with the preference surviving a reload; group, ungroup, align, distribute and flip; and text: typing in the real in-place editor, glyph pixels on the canvas, restyling, re-editing, undo, discarding empty text, reload.
 - `e2e/rendering.spec.ts` — reads real pixels from the canvas: fills, clipping, ellipse shape, strokes, hidden layers, undo.
 
-Not covered by automated tests: the native save/open file dialogs (`src/persistence/diskIO.ts`), drag-and-drop reordering in the layers panel, context menus, the colour picker's live preview, and any browser other than Edge. These were written to work but have not been exercised by a test.
+Not covered by automated tests: the native save/open file dialogs for `.opendesign` files (`src/persistence/diskIO.ts`; the export and import logic behind them is tested), drag-and-drop reordering in the layers panel, the context menus, the colour picker's live preview while dragging, the cursors, how the rulers' labels look, and any browser other than Edge. These were written to work but have not been exercised by a test.
 
 ## Known limitations and rough edges
 
@@ -75,7 +75,7 @@ Not covered by automated tests: the native save/open file dialogs (`src/persiste
 - Gradients are edited in the properties panel only (type, angle, stops); there are no draggable gradient handles on the canvas, and no eyedropper. On text and strokes, radial and angular gradients are circular rather than stretched to the box, and diamond falls back to radial.
 - Shadow spread works on rectangles, ellipses and frames only. Inner shadows are not drawn on text or groups. A drop shadow shows through a translucent fill. Background blur does not see through a group that is itself being composited (one with a blend mode, blur or partial opacity).
 - There is one colour picker (the browser's), with HEX entry; no RGB / HSL fields, no colour styles.
-- Snapping is to objects only: no snapping to a grid or to guides (there are none yet), no equal-spacing snapping, no distance read-outs, and nothing snaps inside a rotated frame. Whole-pixel snapping is always on and has no switch yet.
+- Snapping covers other layers, frame edges and centres, layout grids and ruler guides. There is no equal-spacing snapping, there are no distance read-outs, and nothing snaps inside a rotated frame. Whole-pixel snapping is always on and has no switch yet.
 - Text has one style per layer: no bold word inside a sentence, no lists, no text on a path, no justified alignment. No fonts are bundled, so the font menu offers what the machine has (default Arial) and a file opened on a machine without a font shows a fallback. Text strokes are always centred on the outline.
 - While text is being edited, the in-place editor ignores vertical alignment and may sit a fraction of a pixel off the painted text.
 - Dragging a resize handle past the opposite edge flips the box but does not mirror its content. (The Flip commands do mirror correctly.)
