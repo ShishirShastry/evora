@@ -10,6 +10,7 @@ export function commandItem(id: string, env: CommandEnv, state: EditorState, lab
     label: label ?? command.label,
     shortcut: command.shortcut,
     disabled: command.enabled ? !command.enabled(state) : false,
+    checked: command.checked?.(state),
     onSelect: () => void runCommand(command, env),
   };
 }
@@ -75,7 +76,7 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
     'edit.selectAll',
     'edit.deselect',
   ],
-  View: ['view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100'],
+  View: ['view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100', '-', 'view.snapping'],
   Object: [
     'object.group',
     'object.ungroup',

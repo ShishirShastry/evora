@@ -10,6 +10,7 @@ export * from './document/serialize';
 export * from './scene/tree';
 export * from './scene/shapes';
 export * from './scene/hitTest';
+export * from './scene/snap';
 export * from './ops/ordering';
 export * from './ops/nodes';
 export * from './ops/transform';

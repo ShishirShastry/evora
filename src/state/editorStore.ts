@@ -58,6 +58,8 @@ export interface EditorState {
   renamingId: NodeId | null;
   /** Text layer whose characters are being edited in place on the canvas. */
   editingTextId: NodeId | null;
+  /** Whether moving, resizing and drawing snap to nearby layers. A user preference. */
+  snapping: boolean;
 
   // History.
   undoStack: HistoryEntry[];
@@ -103,6 +105,7 @@ export interface EditorActions {
   setCollapsed(id: NodeId, collapsed: boolean): void;
   setRenaming(id: NodeId | null): void;
   setEditingText(id: NodeId | null): void;
+  setSnapping(snapping: boolean): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
   setSaveStatus(status: SaveStatus, error?: string | null): void;
@@ -141,6 +144,8 @@ export interface EditorOptions {
    * is used, which is what tests rely on.
    */
   measurer?: TextMeasurer;
+  /** Initial value of the snapping preference. On unless told otherwise. */
+  snapping?: boolean;
 }
 
 export function createEditorStore(doc: Document, session?: Partial<SessionState>, options: EditorOptions = {}): EditorStore {
@@ -185,6 +190,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       collapsed: {},
       renamingId: null,
       editingTextId: null,
+      snapping: options.snapping ?? true,
       undoStack: [],
       redoStack: [],
       gesture: null,
@@ -333,6 +339,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setRenaming(id) {
         if (get().renamingId !== id) set({ renamingId: id });
+      },
+
+      setSnapping(snapping) {
+        if (get().snapping !== snapping) set({ snapping });
       },
 
       setEditingText(id) {

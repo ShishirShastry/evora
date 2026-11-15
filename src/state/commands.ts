@@ -365,6 +365,8 @@ export interface Command {
   shortcut?: string;
   keys?: KeyBinding[];
   enabled?: (state: EditorState) => boolean;
+  /** For commands that switch something on and off: whether it is on. Shown as a tick in menus. */
+  checked?: (state: EditorState) => boolean;
   run: (env: CommandEnv) => void;
 }
 
@@ -590,6 +592,16 @@ export const COMMANDS: readonly Command[] = [
       { code: 'Digit0', ctrl: true },
     ],
     run: ({ store }) => setZoom(store, 1),
+  },
+
+  {
+    id: 'view.snapping',
+    label: 'Snap to objects',
+    group: 'View',
+    shortcut: "Ctrl+Shift+'",
+    keys: [{ code: 'Quote', ctrl: true, shift: true }],
+    checked: (state) => state.snapping,
+    run: ({ store }) => store.getState().setSnapping(!store.getState().snapping),
   },
 
   {

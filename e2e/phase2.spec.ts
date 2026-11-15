@@ -213,3 +213,42 @@ test('text: create, type, restyle, edit again, undo, and reopen', async ({ page 
 
   expect(errors).toEqual([]);
 });
+
+test('snapping: layers snap to each other, and the preference can be switched off and is remembered', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const { originX } = await newFile(page);
+
+  await page.keyboard.press('r');
+  await drag(page, [100, 100], [200, 200]);
+  await page.keyboard.press('r');
+  await drag(page, [300, 300], [400, 400]);
+
+  // Drag the second rectangle so its left edge is 3px from the first one's right edge: it snaps onto it.
+  await drag(page, [350, 350], [253, 350]);
+  await expect(field(page, 'X position')).toHaveValue(String(200 - originX));
+
+  // Switch snapping off from the View menu.
+  const snapItem = page.getByRole('menuitemcheckbox', { name: /Snap to objects/ });
+  await page.getByRole('button', { name: 'Main menu' }).click();
+  await page.getByRole('menuitem', { name: 'View' }).click();
+  await expect(snapItem).toHaveAttribute('aria-checked', 'true');
+  await snapItem.click();
+
+  // Now the same kind of drag lands exactly where the pointer puts it.
+  await drag(page, [250, 350], [353, 350]);
+  await expect(field(page, 'X position')).toHaveValue(String(303 - originX));
+  await drag(page, [353, 350], [253, 350]);
+  await expect(field(page, 'X position')).toHaveValue(String(203 - originX));
+
+  // The preference belongs to the user, not the file: it is still off after a reload.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await page.getByRole('button', { name: 'Main menu' }).click();
+  await page.getByRole('menuitem', { name: 'View' }).click();
+  await expect(snapItem).toHaveAttribute('aria-checked', 'false');
+  await snapItem.click();
+
+  expect(errors).toEqual([]);
+});

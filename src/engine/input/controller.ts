@@ -1,12 +1,14 @@
 import {
   addLayer,
   applyToPoint,
+  collectSnapTargets,
   containerAt,
   deeperTargetAt,
   distance,
   duplicateNodes,
   enclosingFrameOrPage,
   getLayer,
+  getWorldBounds,
   getWorldMatrix,
   getWorldRotation,
   invert,
@@ -27,8 +29,11 @@ import {
   selectionTargetAt,
   setLayerBox,
   snapAngle,
+  snapPoint,
+  snapRect,
   topLevelIds,
   TYPE_LABELS,
+  unionRects,
   type Document,
   type Handle,
   type LayerPatch,
@@ -36,6 +41,9 @@ import {
   type NodeId,
   type Point,
   type Rect,
+  type SnapAxes,
+  type SnapGuide,
+  type SnapTargets,
 } from '../../core';
 import type { EditorStore, ToolId } from '../../state/editorStore';
 import { hitFrameLabel, type FrameLabel } from '../render/overlay';
@@ -68,6 +76,8 @@ export interface WheelInput {
 const DRAG_THRESHOLD_PX = 3;
 const HIT_TOLERANCE_PX = 4;
 const ROTATION_SNAP = 15;
+/** How close, in screen pixels, an edge must come to a line to snap to it. */
+const SNAP_DISTANCE_PX = 6;
 const DEFAULT_SHAPE_SIZE = 100;
 
 const SHAPE_TOOLS: Partial<Record<ToolId, LayerType>> = {
@@ -137,6 +147,10 @@ export class InteractionController {
   marquee: Rect | null = null;
   /** Frame name labels from the last overlay paint, used for hit testing. */
   labels: FrameLabel[] = [];
+  /** Smart guides for whatever is snapped right now, read by the overlay renderer. */
+  guides: SnapGuide[] = [];
+  /** Snap lines of the container being worked in, kept for the length of one interaction. */
+  private snapCache: { doc: Document; key: string; targets: SnapTargets } | null = null;
 
   constructor(
     private readonly store: EditorStore,
@@ -159,6 +173,38 @@ export class InteractionController {
 
   private toWorld(p: Point): Point {
     return screenToWorld(this.state.viewport, p);
+  }
+
+  /**
+   * The lines available for snapping in one or more containers, leaving out
+   * the layers being transformed. Cached per interaction, since the layers
+   * that are not moving do not change while it lasts.
+   */
+  private snapTargets(doc: Document, containerIds: readonly NodeId[], exclude: ReadonlySet<NodeId>): SnapTargets {
+    const key = containerIds.join(',');
+    if (this.snapCache && this.snapCache.doc === doc && this.snapCache.key === key) return this.snapCache.targets;
+    const targets: SnapTargets = { xs: [], ys: [] };
+    for (const id of new Set(containerIds)) {
+      const part = collectSnapTargets(doc, id, exclude);
+      targets.xs.push(...part.xs);
+      targets.ys.push(...part.ys);
+    }
+    this.snapCache = { doc, key, targets };
+    return targets;
+  }
+
+  /** Snaps a page-space point to nearby lines, if snapping is on, and shows the guides. */
+  private snapWorldPoint(point: Point, doc: Document, containerIds: readonly NodeId[], exclude: ReadonlySet<NodeId>, axes: SnapAxes): Point {
+    this.guides = [];
+    if (!this.state.snapping || (!axes.x && !axes.y)) return point;
+    const snapped = snapPoint(point, this.snapTargets(doc, containerIds, exclude), SNAP_DISTANCE_PX / this.state.viewport.zoom, axes);
+    this.guides = snapped.guides;
+    return snapped.point;
+  }
+
+  private endSnapping(): void {
+    this.guides = [];
+    this.snapCache = null;
   }
 
   /** Converts a page-space point into the coordinate space of `parentId`. */
@@ -236,6 +282,7 @@ export class InteractionController {
   pointerUp(e: PointerInput): void {
     const mode = this.mode;
     this.mode = { kind: 'idle' };
+    this.endSnapping();
     const state = this.state;
     switch (mode.kind) {
       case 'idle':
@@ -271,6 +318,8 @@ export class InteractionController {
         this.createText(mode, e);
         break;
     }
+    // Finishing a draw computes its final box, which may snap once more; nothing stays snapped afterwards.
+    this.endSnapping();
     this.updateHover(e);
     this.host.requestRender();
   }
@@ -281,6 +330,7 @@ export class InteractionController {
     if (mode.kind === 'idle') return false;
     this.mode = { kind: 'idle' };
     this.marquee = null;
+    this.endSnapping();
     this.state.cancelGesture();
     if (mode.kind === 'draw' || mode.kind === 'text') this.state.setTool('move');
     this.host.setCursor(this.idleCursor());
@@ -477,6 +527,27 @@ export class InteractionController {
       else dx = 0;
     }
     const pageId = this.state.pageId;
+
+    // Snap the moving bounds to the layers around them. An axis locked by Shift is left alone.
+    this.guides = [];
+    const bounds = this.state.snapping ? unionRects(mode.ids.map((id) => getWorldBounds(mode.base, id))) : null;
+    if (bounds) {
+      const exclude = new Set(mode.ids);
+      const first = mode.base.nodes[mode.ids[0] as NodeId];
+      // Offer the frame under the pointer and, for a layer inside a group, its fellow group members.
+      const containers = [containerAt(mode.base, pageId, world, exclude)];
+      if (first?.parentId && mode.base.nodes[first.parentId]?.type === 'GROUP') containers.push(first.parentId);
+      const snap = snapRect(
+        { x: bounds.x + dx, y: bounds.y + dy, width: bounds.width, height: bounds.height },
+        this.snapTargets(mode.base, containers, exclude),
+        SNAP_DISTANCE_PX / this.state.viewport.zoom,
+        { x: !(e.shiftKey && dx === 0), y: !(e.shiftKey && dy === 0) },
+      );
+      dx += snap.dx;
+      dy += snap.dy;
+      this.guides = snap.guides;
+    }
+
     this.state.updateGesture(() => {
       let doc = moveNodesBy(mode.base, mode.ids, dx, dy, true);
       // Dropping onto a frame puts the layers inside it; dragging out takes them out.
@@ -496,6 +567,11 @@ export class InteractionController {
   private updateResize(mode: Extract<Mode, { kind: 'resize' }>, world: Point, e: PointerInput): void {
     const { frame, base, handle } = mode;
     const single = frame.single ? getLayer(base, frame.single) : undefined;
+    // The dragged edges snap to neighbouring layers, unless the box is rotated or proportions are locked.
+    const firstParent = base.nodes[mode.ids[0] as NodeId]?.parentId;
+    if (firstParent && frame.rotation === 0 && !e.shiftKey && !e.altKey) {
+      world = this.snapWorldPoint(world, base, [firstParent], new Set(mode.ids), { x: handle.hx !== 0, y: handle.hy !== 0 });
+    } else this.guides = [];
     if (single) {
       const pointer = this.toParent(base, single.parentId, world);
       const box = resizeBox(single, handle, pointer, {
@@ -599,7 +675,11 @@ export class InteractionController {
   }
 
   private drawBox(mode: Extract<Mode, { kind: 'draw' }>, e: PointerInput): LayerPatch {
-    const world = this.toWorld(e);
+    const constrained = e.shiftKey || e.altKey;
+    const world = constrained
+      ? this.toWorld(e)
+      : this.snapWorldPoint(this.toWorld(e), mode.base, [mode.parentId], new Set([mode.id]), { x: true, y: true });
+    if (constrained) this.guides = [];
     const a = this.toParent(mode.base, mode.parentId, mode.startWorld);
     let b = this.toParent(mode.base, mode.parentId, { x: Math.round(world.x), y: Math.round(world.y) });
 

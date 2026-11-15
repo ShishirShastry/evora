@@ -18,7 +18,7 @@ interface MenuListProps {
 function focusSibling(current: HTMLElement, direction: 1 | -1): void {
   const menu = current.closest('[role="menu"]');
   if (!menu) return;
-  const items = [...menu.querySelectorAll<HTMLElement>(':scope > [role="menuitem"]:not([aria-disabled="true"])')];
+  const items = [...menu.querySelectorAll<HTMLElement>(':scope > [role^="menuitem"]:not([aria-disabled="true"])')];
   const index = items.indexOf(current);
   const next = items[(index + direction + items.length) % items.length];
   next?.focus();
@@ -30,7 +30,7 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
 
   useEffect(() => {
     if (!autoFocus) return;
-    ref.current?.querySelector<HTMLElement>(':scope > [role="menuitem"]:not([aria-disabled="true"])')?.focus();
+    ref.current?.querySelector<HTMLElement>(':scope > [role^="menuitem"]:not([aria-disabled="true"])')?.focus();
   }, [autoFocus]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>, index: number, item: MenuItem): void => {
@@ -86,7 +86,7 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
                     autoFocus
                     onBack={() => {
                       setOpenIndex(null);
-                      ref.current?.querySelectorAll<HTMLElement>(':scope > [role="menuitem"]')[
+                      ref.current?.querySelectorAll<HTMLElement>(':scope > [role^="menuitem"]')[
                         items.slice(0, index).filter((i) => i.type !== 'separator').length
                       ]?.focus();
                     }}
@@ -100,7 +100,8 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
           <button
             key={index}
             type="button"
-            role="menuitem"
+            role={item.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
+            aria-checked={item.checked}
             tabIndex={-1}
             aria-disabled={item.disabled ? 'true' : undefined}
             className={`flex h-7 w-full cursor-default items-center justify-between gap-6 border-0 bg-transparent px-3 text-left outline-none ${

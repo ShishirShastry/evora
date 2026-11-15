@@ -10,6 +10,7 @@ import {
   type NodeId,
   type Point,
   type Rect,
+  type SnapGuide,
 } from '../../core';
 import { getSelectionFrame } from '../input/selectionFrame';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
@@ -18,6 +19,7 @@ import { traceLayerPath } from './paint';
 export const ACCENT = '#19c2b3';
 const ACCENT_FILL = 'rgba(25, 194, 179, 0.12)';
 const LABEL_COLOR = '#8d9797';
+const GUIDE_COLOR = '#ff4f7b';
 const LABEL_FONT = '11px Inter, "Segoe UI", system-ui, sans-serif';
 const LABEL_HEIGHT = 16;
 const HANDLE_SIZE = 8;
@@ -45,6 +47,8 @@ export interface OverlayInput {
   marquee: Rect | null;
   /** Hide handles and the size badge while the selection is being transformed. */
   showHandles: boolean;
+  /** Smart guides to draw while something is snapped. */
+  guides?: readonly SnapGuide[];
 }
 
 type Ctx = CanvasRenderingContext2D;
@@ -163,6 +167,21 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
       ctx.fillText(text, -textWidth / 2, 16);
       ctx.restore();
     }
+  }
+
+  // Smart guides: the lines the selection is currently snapped to.
+  if (input.guides && input.guides.length > 0) {
+    ctx.strokeStyle = GUIDE_COLOR;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const guide of input.guides) {
+      const a = toScreen(guide.axis === 'x' ? { x: guide.position, y: guide.from } : { x: guide.from, y: guide.position });
+      const b = toScreen(guide.axis === 'x' ? { x: guide.position, y: guide.to } : { x: guide.to, y: guide.position });
+      // Half-pixel offsets keep 1px lines crisp.
+      ctx.moveTo(Math.round(a.x) + 0.5, Math.round(a.y) + 0.5);
+      ctx.lineTo(Math.round(b.x) + 0.5, Math.round(b.y) + 0.5);
+    }
+    ctx.stroke();
   }
 
   if (input.marquee) {

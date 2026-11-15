@@ -110,6 +110,7 @@ export function CanvasView() {
         selection: state.selection,
         hoveredId: state.hoveredId,
         marquee: controller.marquee,
+        guides: controller.guides,
         showHandles: !controller.isTransforming && state.editingTextId === null,
       });
       controller.labels = result.labels;
