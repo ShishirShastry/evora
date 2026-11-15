@@ -3,6 +3,7 @@ import {
   gradientAngle,
   gradientHandles,
   gradientPaint,
+  imagePaint,
   isGradient,
   paintColor,
   patchNodes,
@@ -11,6 +12,8 @@ import {
   type GradientPaint,
   type GradientStop,
   type GradientType,
+  type ImagePaint,
+  type ImageScaleMode,
   type LayerNode,
   type LayerPatch,
   type NodeId,
@@ -19,21 +22,32 @@ import {
 } from '../../core';
 import { ColorField, NumberField } from '../components/Fields';
 import { Icon } from '../components/Icon';
-import { useEditorContext } from '../editor/EditorContext';
+import { useEditor, useEditorContext } from '../editor/EditorContext';
 import { applyLive, Row, sameList, Section, SelectField } from './panelParts';
 
 type PaintType = Paint['type'];
 
-const PAINT_TYPES: readonly (readonly [PaintType, string])[] = [
+const COLOUR_TYPES: readonly (readonly [PaintType, string])[] = [
   ['SOLID', 'Solid'],
   ['GRADIENT_LINEAR', 'Linear'],
   ['GRADIENT_RADIAL', 'Radial'],
   ['GRADIENT_ANGULAR', 'Angular'],
   ['GRADIENT_DIAMOND', 'Diamond'],
 ];
+const TYPES_WITH_IMAGE: readonly (readonly [PaintType, string])[] = [...COLOUR_TYPES, ['IMAGE', 'Image']];
 
-/** Converts a paint to another kind, keeping as much of it as makes sense. */
-export function convertPaint(paint: Paint, type: PaintType): Paint {
+const SCALE_MODES: readonly (readonly [ImageScaleMode, string])[] = [
+  ['FILL', 'Fill'],
+  ['FIT', 'Fit'],
+  ['CROP', 'Crop'],
+  ['TILE', 'Tile'],
+];
+
+/**
+ * Converts a paint to a solid colour or a gradient, keeping as much of it as
+ * makes sense. (Converting to an image needs a file and is done by the panel.)
+ */
+export function convertPaint(paint: Paint, type: Exclude<PaintType, 'IMAGE'>): Paint {
   if (paint.type === type) return paint;
   if (type === 'SOLID') return { ...solidPaint(paintColor(paint), paint.opacity), visible: paint.visible };
   if (isGradient(paint)) {
@@ -41,8 +55,9 @@ export function convertPaint(paint: Paint, type: PaintType): Paint {
     const fresh = gradientPaint(type as GradientType, WHITE, WHITE, type === 'GRADIENT_LINEAR' ? gradientAngle(paint) : 0);
     return { ...fresh, stops: paint.stops, opacity: paint.opacity, visible: paint.visible };
   }
-  // Solid to gradient: from the solid colour to the same colour fully transparent.
-  const gradient = gradientPaint(type as GradientType, paint.color, paint.color);
+  // Solid (or image) to gradient: from its colour to the same colour fully transparent.
+  const color = paintColor(paint);
+  const gradient = gradientPaint(type as GradientType, color, color);
   const last = gradient.stops[1] as GradientStop;
   return { ...gradient, stops: [gradient.stops[0] as GradientStop, { ...last, opacity: 0 }], opacity: paint.opacity, visible: paint.visible };
 }
@@ -81,17 +96,38 @@ function addStop(stops: GradientStop[]): GradientStop[] {
   return [...stops.slice(0, at + 1), middle, ...stops.slice(at + 1)];
 }
 
+/** Changes one side of an image's crop, keeping the crop inside the image. */
+export function withCrop(paint: ImagePaint, patch: Partial<ImagePaint['crop']>): ImagePaint {
+  const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
+  const x = clamp(patch.x ?? paint.crop.x, 0, 0.99);
+  const y = clamp(patch.y ?? paint.crop.y, 0, 0.99);
+  const tidy = (v: number): number => Math.round(v * 1e4) / 1e4;
+  return {
+    ...paint,
+    crop: {
+      x: tidy(x),
+      y: tidy(y),
+      width: tidy(clamp(patch.width ?? paint.crop.width, 0.01, 1 - x)),
+      height: tidy(clamp(patch.height ?? paint.crop.height, 0.01, 1 - y)),
+    },
+  };
+}
+
 interface PaintListProps {
   title: string;
   paintKey: 'fills' | 'strokes';
   layers: LayerNode[];
   defaultColor: RGB;
+  /** Offer "Image" as a paint type. Images fill shapes; they are not offered for strokes or text. */
+  allowImage?: boolean;
   children?: ReactNode;
 }
 
-/** Editable stack of paints (fills or strokes) for the selected layers: solid colours and gradients. */
-export function PaintList({ title, paintKey, layers, defaultColor, children }: PaintListProps) {
-  const { store } = useEditorContext();
+/** Editable stack of paints (fills or strokes) for the selected layers: solid colours, gradients and images. */
+export function PaintList({ title, paintKey, layers, defaultColor, allowImage = false, children }: PaintListProps) {
+  const context = useEditorContext();
+  const { store } = context;
+  const assets = useEditor((s) => s.doc.assets);
   const ids = layers.map((layer) => layer.id);
   const mixed = !sameList(layers, paintKey);
   const paints = mixed ? [] : (layers[0] as LayerNode)[paintKey];
@@ -104,6 +140,19 @@ export function PaintList({ title, paintKey, layers, defaultColor, children }: P
   };
   const replace = (index: number, paint: Paint, label: string, phase: 'live' | 'commit' = 'commit'): void =>
     setPaints(label, paints.map((other, i) => (i === index ? paint : other)), phase);
+
+  /** Lets the user choose an image file and makes this paint an image fill showing it. */
+  const chooseImage = async (index: number, current: Paint): Promise<void> => {
+    const hash = await context.pickImage();
+    if (!hash) return;
+    const base = current.type === 'IMAGE' ? current : imagePaint(hash);
+    // Read the paints again: choosing a file takes time and the selection may have been edited meanwhile.
+    const latest = (store.getState().doc.nodes[ids[0] as NodeId] as LayerNode | undefined)?.[paintKey] ?? [];
+    const next = latest.map((other, i) => (i === index ? { ...base, imageHash: hash, opacity: current.opacity, visible: current.visible } : other));
+    const patches: Record<NodeId, LayerPatch> = {};
+    for (const id of ids) patches[id] = { [paintKey]: next };
+    store.getState().apply(current.type === 'IMAGE' ? 'Replace image' : `Change ${noun} type`, (doc) => patchNodes(doc, patches));
+  };
 
   return (
     <Section
@@ -130,8 +179,11 @@ export function PaintList({ title, paintKey, layers, defaultColor, children }: P
               <SelectField<PaintType>
                 label={`${name} type`}
                 value={paint.type}
-                options={PAINT_TYPES}
-                onChange={(type) => replace(index, convertPaint(paint, type), `Change ${noun} type`)}
+                options={allowImage || paint.type === 'IMAGE' ? TYPES_WITH_IMAGE : COLOUR_TYPES}
+                onChange={(type) => {
+                  if (type === 'IMAGE') void chooseImage(index, paint);
+                  else replace(index, convertPaint(paint, type), `Change ${noun} type`);
+                }}
               />
               <div className="w-16 flex-none">
                 <NumberField
@@ -163,7 +215,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, children }: P
               </button>
             </Row>
 
-            {paint.type === 'SOLID' ? (
+            {paint.type === 'SOLID' && (
               <Row>
                 <ColorField
                   label={`${name} colour`}
@@ -171,7 +223,70 @@ export function PaintList({ title, paintKey, layers, defaultColor, children }: P
                   onChange={(color, phase) => replace(index, { ...paint, color }, `Change ${noun} colour`, phase)}
                 />
               </Row>
-            ) : (
+            )}
+
+            {paint.type === 'IMAGE' && (
+              <>
+                <Row>
+                  <span className="min-w-0 flex-1 truncate text-dim" title={assets[paint.imageHash]?.name}>
+                    {assets[paint.imageHash]?.name ?? 'Missing image'}
+                  </span>
+                  <button
+                    type="button"
+                    className="od-button !h-[26px] flex-none !px-2"
+                    aria-label={`Replace image in ${name}`}
+                    onClick={() => void chooseImage(index, paint)}
+                  >
+                    Replace…
+                  </button>
+                </Row>
+                <Row>
+                  <SelectField<ImageScaleMode>
+                    label={`${name} image fit`}
+                    value={paint.scaleMode}
+                    options={SCALE_MODES}
+                    onChange={(scaleMode) => replace(index, { ...paint, scaleMode }, 'Change image fit')}
+                  />
+                  {paint.scaleMode === 'TILE' && (
+                    <div className="w-[84px] flex-none">
+                      <NumberField
+                        label={`${name} tile size`}
+                        suffix="%"
+                        min={1}
+                        max={10000}
+                        value={Math.round(paint.tileScale * 100)}
+                        onCommit={(value) => replace(index, { ...paint, tileScale: value / 100 }, 'Change tile size')}
+                      />
+                    </div>
+                  )}
+                </Row>
+                {paint.scaleMode === 'CROP' && (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        ['x', 'left', 'X'],
+                        ['y', 'top', 'Y'],
+                        ['width', 'width', 'W'],
+                        ['height', 'height', 'H'],
+                      ] as const
+                    ).map(([key, word, prefix]) => (
+                      <NumberField
+                        key={key}
+                        label={`${name} crop ${word}`}
+                        prefix={prefix}
+                        suffix="%"
+                        min={key === 'x' || key === 'y' ? 0 : 1}
+                        max={key === 'x' || key === 'y' ? 99 : 100}
+                        value={Math.round(paint.crop[key] * 10000) / 100}
+                        onCommit={(value) => replace(index, withCrop(paint, { [key]: value / 100 }), 'Crop image')}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {isGradient(paint) && (
               <>
                 <Row>
                   <NumberField
@@ -195,14 +310,11 @@ export function PaintList({ title, paintKey, layers, defaultColor, children }: P
                 </Row>
                 {paint.stops.map((stop, stopIndex) => {
                   const stopName = `${name} stop ${stopIndex + 1}`;
-                  const setStop = (patch: Partial<GradientStop>, label: string, phase: 'live' | 'commit' = 'commit'): void =>
-                    replace(
-                      index,
-                      // Stops are kept in position order, except while a colour is being dragged.
-                      { ...paint, stops: (phase === 'live' ? (s: GradientStop[]) => s : sortStops)(paint.stops.map((s, i) => (i === stopIndex ? { ...s, ...patch } : s))) },
-                      label,
-                      phase,
-                    );
+                  const setStop = (patch: Partial<GradientStop>, label: string, phase: 'live' | 'commit' = 'commit'): void => {
+                    const stops = paint.stops.map((s, i) => (i === stopIndex ? { ...s, ...patch } : s));
+                    // Stops are kept in position order, except while a colour is being dragged.
+                    replace(index, { ...paint, stops: phase === 'live' ? stops : sortStops(stops) }, label, phase);
+                  };
                   return (
                     <Row key={stopIndex}>
                       <ColorField label={`${stopName} colour`} value={stop.color} onChange={(color, phase) => setStop({ color }, 'Change stop colour', phase)} />

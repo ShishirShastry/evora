@@ -534,7 +534,13 @@ export function DesignPanel() {
       </Section>
 
       {paintable.some((l) => l.type !== 'LINE') && (
-        <PaintList title="Fill" paintKey="fills" layers={paintable.filter((l) => l.type !== 'LINE')} defaultColor={DEFAULT_SHAPE_FILL} />
+        <PaintList
+          title="Fill"
+          paintKey="fills"
+          layers={paintable.filter((l) => l.type !== 'LINE')}
+          defaultColor={DEFAULT_SHAPE_FILL}
+          allowImage={textLayers.length === 0}
+        />
       )}
 
       {paintable.length > 0 && (

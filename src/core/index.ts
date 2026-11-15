@@ -1,5 +1,6 @@
 /** Public surface of the framework-independent core. */
 export * from './ids';
+export * from './assets';
 export * from './math/geometry';
 export * from './math/matrix';
 export * from './document/schema';

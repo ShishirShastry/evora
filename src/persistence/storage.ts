@@ -10,9 +10,18 @@ export interface FileSummary {
   layerCount: number;
 }
 
+/** The bytes of an image asset, as they were imported. */
+export interface StoredAsset {
+  mimeType: string;
+  bytes: ArrayBuffer;
+}
+
 /**
  * Where files live. The local implementation uses IndexedDB; a server-backed
  * implementation can provide the same interface later.
+ *
+ * Image assets are stored once per device, keyed by the hash of their bytes,
+ * and shared by every file that uses them.
  */
 export interface DocumentStorage {
   list(): Promise<FileSummary[]>;
@@ -21,6 +30,9 @@ export interface DocumentStorage {
   /** Creates or replaces a file. The document and its summary are written atomically. */
   save(file: OpenDesignFile): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Stores an asset under its hash. Storing the same hash again is harmless. */
+  saveAsset(hash: string, asset: StoredAsset): Promise<void>;
+  loadAsset(hash: string): Promise<StoredAsset | null>;
 }
 
 export function summarize(file: OpenDesignFile): FileSummary {
@@ -38,6 +50,7 @@ export function summarize(file: OpenDesignFile): FileSummary {
 /** In-memory storage, used by tests and as a fallback when IndexedDB is unavailable. */
 export class MemoryStorage implements DocumentStorage {
   private readonly files = new Map<string, string>();
+  private readonly assets = new Map<string, StoredAsset>();
 
   async list(): Promise<FileSummary[]> {
     return [...this.files.values()].map((json) => summarize(JSON.parse(json) as OpenDesignFile));
@@ -54,5 +67,14 @@ export class MemoryStorage implements DocumentStorage {
 
   async remove(id: string): Promise<void> {
     this.files.delete(id);
+  }
+
+  async saveAsset(hash: string, asset: StoredAsset): Promise<void> {
+    this.assets.set(hash, { mimeType: asset.mimeType, bytes: asset.bytes.slice(0) });
+  }
+
+  async loadAsset(hash: string): Promise<StoredAsset | null> {
+    const asset = this.assets.get(hash);
+    return asset ? { mimeType: asset.mimeType, bytes: asset.bytes.slice(0) } : null;
   }
 }

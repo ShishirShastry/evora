@@ -1,14 +1,17 @@
 import {
+  base64ToBytes,
+  bytesToBase64,
   createDocument,
   createId,
   FILE_EXTENSION,
+  FileFormatError,
   parseFile,
-  parseFileText,
+  referencedAssetHashes,
   serializeFile,
+  sha256Hex,
   toFile,
   type Document,
   type FileMeta,
-  type OpenDesignFile,
 } from '../core';
 import type { DocumentStorage, FileSummary } from './storage';
 
@@ -54,6 +57,7 @@ export async function renameFile(storage: DocumentStorage, id: string, name: str
   await saveDocument(storage, { ...opened.doc, name: trimmed }, opened.meta.createdAt);
 }
 
+/** Copies a file. Image assets are shared between the two: they are stored once, by hash. */
 export async function duplicateFile(storage: DocumentStorage, id: string): Promise<string | null> {
   const opened = await openFile(storage, id);
   if (!opened) return null;
@@ -64,20 +68,65 @@ export async function duplicateFile(storage: DocumentStorage, id: string): Promi
 }
 
 /**
+ * The text of a `.opendesign` file for a document: the document itself plus
+ * the bytes of every image it uses, so the file is complete on its own and
+ * opens on another machine. An image whose bytes cannot be found on this
+ * device is left out; the layer that uses it then shows as a placeholder.
+ */
+export async function exportFileText(storage: DocumentStorage, doc: Document, meta: FileMeta): Promise<string> {
+  const file = toFile(doc, meta);
+  const assetData: Record<string, string> = {};
+  for (const hash of referencedAssetHashes(doc)) {
+    const asset = await storage.loadAsset(hash);
+    if (asset) assetData[hash] = bytesToBase64(new Uint8Array(asset.bytes));
+  }
+  return serializeFile(Object.keys(assetData).length > 0 ? { ...file, assetData } : file);
+}
+
+/**
  * Imports the text of a `.opendesign` file as a new local file. The import
  * always gets a fresh document ID, so importing never overwrites an existing
  * file, even when the same file is imported twice.
+ *
+ * Images bundled in the file are checked against their hashes before they are
+ * stored: bytes that do not match the name they are filed under are refused,
+ * because every file that uses that hash would otherwise show the wrong image.
  */
 export async function importFileText(storage: DocumentStorage, text: string): Promise<{ id: string; repairs: string[] }> {
-  const { file, repairs } = parseFileText(text);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new FileFormatError('This file is damaged or is not an OPEN DESIGN file (it is not valid JSON).');
+  }
+  const { file, repairs } = parseFile(raw);
+
+  const bundled = typeof raw === 'object' && raw !== null ? (raw as { assetData?: unknown }).assetData : undefined;
+  const assetData = typeof bundled === 'object' && bundled !== null ? (bundled as Record<string, unknown>) : {};
+  let rejected = 0;
+  let missing = 0;
+  for (const hash of referencedAssetHashes(file.document)) {
+    const info = file.document.assets[hash];
+    const encoded = assetData[hash];
+    const bytes = typeof encoded === 'string' ? base64ToBytes(encoded) : null;
+    if (bytes && info) {
+      if ((await sha256Hex(bytes)) === hash) {
+        const copy = new Uint8Array(bytes.byteLength);
+        copy.set(bytes);
+        await storage.saveAsset(hash, { mimeType: info.mimeType, bytes: copy.buffer });
+        continue;
+      }
+      rejected++;
+    }
+    if (!(await storage.loadAsset(hash))) missing++;
+  }
+  if (rejected > 0) repairs.push(`${rejected} image(s) in the file were damaged and were not imported.`);
+  if (missing > 0) repairs.push(`${missing} image(s) used by the file are missing; those layers show a placeholder.`);
+
   const now = new Date().toISOString();
   const doc: Document = { ...file.document, id: createId() };
   await storage.save(toFile(doc, { createdAt: file.meta.createdAt, updatedAt: now }));
   return { id: doc.id, repairs };
-}
-
-export function exportFileText(doc: Document, meta: FileMeta): string {
-  return serializeFile(toFile(doc, meta) as OpenDesignFile);
 }
 
 export function exportFileName(name: string): string {

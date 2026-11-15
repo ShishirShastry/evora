@@ -188,7 +188,7 @@ describe('snapping in the tools', () => {
     const command = commandForKey({ code: 'Quote', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false });
     expect(command?.id).toBe('view.snapping');
     expect(getCommand('view.snapping')?.checked?.(store.getState())).toBe(true);
-    const app = { cancelInteraction: () => false, openShortcuts: () => undefined, saveNow: () => undefined, saveAs: () => undefined, goHome: () => undefined };
+    const app = { cancelInteraction: () => false, openShortcuts: () => undefined, saveNow: () => undefined, saveAs: () => undefined, placeImage: () => undefined, goHome: () => undefined };
     if (command) runCommand(command, { store, app });
     expect(store.getState().snapping).toBe(false);
     expect(getCommand('view.snapping')?.checked?.(store.getState())).toBe(false);

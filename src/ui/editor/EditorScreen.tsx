@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileFormatError, type FileMeta } from '../../core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FileFormatError, type FileMeta, type Point } from '../../core';
+import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { getBrowserMeasurer } from '../../engine/text/measure';
 import { createAutosaver, type Autosaver } from '../../persistence/autosave';
-import { saveTextToDisk } from '../../persistence/diskIO';
+import { pickImageFiles, saveTextToDisk } from '../../persistence/diskIO';
 import { exportFileName, exportFileText, openFile } from '../../persistence/files';
 import { loadPreferences, savePreferences } from '../../persistence/prefs';
 import { loadSession, saveSession } from '../../persistence/session';
 import type { DocumentStorage } from '../../persistence/storage';
-import { commandForKey, runCommand, type AppActions } from '../../state/commands';
+import { commandForKey, getCommand, runCommand, type AppActions } from '../../state/commands';
+import { imageTypeOf, importImageFiles, placeImages } from '../../state/images';
 import { createEditorStore, getSession, type EditorStore } from '../../state/editorStore';
 import { Dialog } from '../components/Dialog';
 import { Logo } from '../components/Icon';
@@ -99,9 +101,39 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   const controller = useRef<InteractionController | null>(null);
   const saver = useRef<Autosaver | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [notice, setNotice] = useState<string[]>(repairs);
+  const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(
+    repairs.length > 0 ? { title: 'This file had problems that were repaired when it was opened.', lines: repairs } : null,
+  );
   const exit = useRef(onExit);
   exit.current = onExit;
+  const images = useMemo(() => new ImageCache((hash) => storage.loadAsset(hash)), [storage]);
+
+  const placeFiles = useCallback(
+    async (files: readonly File[], at?: Point): Promise<void> => {
+      const { imported, failed } = await importImageFiles(storage, images, files);
+      placeImages(store, imported, at);
+      if (failed > 0) {
+        setNotice({
+          title: failed === 1 ? 'One file could not be placed.' : `${failed} files could not be placed.`,
+          lines: ['Images can be PNG, JPEG, WebP, GIF or SVG.'],
+        });
+      }
+    },
+    [storage, images, store],
+  );
+
+  const pickImage = useCallback(async (): Promise<string | null> => {
+    const [file] = await pickImageFiles(false);
+    if (!file) return null;
+    const { imported } = await importImageFiles(storage, images, [file]);
+    const first = imported[0];
+    if (!first) {
+      setNotice({ title: 'That file could not be used as an image.', lines: ['Images can be PNG, JPEG, WebP, GIF or SVG.'] });
+      return null;
+    }
+    store.getState().addAssets({ [first.hash]: first.info });
+    return first.hash;
+  }, [storage, images, store]);
 
   const app = useMemo<AppActions>(
     () => ({
@@ -111,17 +143,23 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       saveAs: () => {
         const state = store.getState();
         const fileMeta = saver.current?.meta() ?? meta;
-        void saveTextToDisk(exportFileName(state.doc.name), exportFileText(state.doc, fileMeta));
+        void exportFileText(storage, state.doc, fileMeta).then((text) => saveTextToDisk(exportFileName(state.doc.name), text));
+      },
+      placeImage: () => {
+        void pickImageFiles().then((files) => (files.length > 0 ? placeFiles(files) : undefined));
       },
       goHome: () => {
         const pending = saver.current?.flush() ?? Promise.resolve();
         void pending.then(() => exit.current());
       },
     }),
-    [store, meta],
+    [store, meta, storage, placeFiles],
   );
 
-  const context = useMemo<EditorContextValue>(() => ({ store, app, controller }), [store, app]);
+  const context = useMemo<EditorContextValue>(
+    () => ({ store, app, controller, storage, images, placeFiles, pickImage }),
+    [store, app, storage, images, placeFiles, pickImage],
+  );
 
   // Autosave, and remembering the view, for as long as the file is open.
   useEffect(() => {
@@ -194,6 +232,9 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       if ((event.code === 'Enter' || event.code === 'NumpadEnter') && onControl(event.target)) return;
       const command = commandForKey(event);
       if (!command) return;
+      // Ctrl+V is left to the browser so that it raises a paste event, which
+      // is the only way to see whether the clipboard holds an image.
+      if (command.id === 'edit.paste') return;
       const ran = runCommand(command, { store, app });
       // Also swallow modified keys whose command is unavailable right now, so the
       // browser does not act on them instead (Ctrl+D would bookmark the page).
@@ -204,15 +245,29 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     };
     const onBlur = (): void => controller.current?.setSpaceDown(false);
 
+    /** Paste: images from the system clipboard are placed; otherwise layers copied in the editor are pasted. */
+    const onPaste = (event: ClipboardEvent): void => {
+      if (isTyping(event.target) || overlayOpen()) return;
+      event.preventDefault();
+      const files = [...(event.clipboardData?.files ?? [])].filter((file) => imageTypeOf(file) !== null);
+      if (files.length > 0) void placeFiles(files);
+      else {
+        const paste = getCommand('edit.paste');
+        if (paste) runCommand(paste, { store, app });
+      }
+    };
+
+    window.addEventListener('paste', onPaste);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
     return () => {
+      window.removeEventListener('paste', onPaste);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [store, app]);
+  }, [store, app, placeFiles]);
 
   // Show the file name in the browser tab.
   useEffect(() => {
@@ -233,17 +288,17 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     <EditorContext.Provider value={context}>
       <div className="flex h-full flex-col">
         <TopBar />
-        {notice.length > 0 && (
+        {notice && (
           <div role="alert" className="flex flex-none items-start gap-3 border-b border-line bg-field px-3 py-2">
             <div className="min-w-0 flex-1">
-              <strong>This file had problems that were repaired when it was opened.</strong>
+              <strong>{notice.title}</strong>
               <ul className="m-0 mt-1 pl-4 text-dim">
-                {notice.map((line) => (
+                {notice.lines.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>
             </div>
-            <button type="button" className="od-button" onClick={() => setNotice([])}>
+            <button type="button" className="od-button" onClick={() => setNotice(null)}>
               Dismiss
             </button>
           </div>

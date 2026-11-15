@@ -43,6 +43,19 @@ export async function saveTextToDisk(fileName: string, text: string): Promise<bo
   return true;
 }
 
+/** Lets the user choose image files. Returns an empty list if they cancelled. */
+export function pickImageFiles(multiple = true): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp,image/gif,image/svg+xml';
+    input.multiple = multiple;
+    input.onchange = () => resolve([...(input.files ?? [])]);
+    input.oncancel = () => resolve([]);
+    input.click();
+  });
+}
+
 /** Lets the user choose a file and returns its text, or null if they cancelled. */
 export async function pickTextFile(): Promise<string | null> {
   const picker = (window as unknown as PickerWindow).showOpenFilePicker;

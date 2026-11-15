@@ -8,6 +8,7 @@ import {
   getPages,
   isLayer,
   normalizeGroups,
+  type AssetInfo,
   type Document,
   type DocumentPatch,
   type NodeId,
@@ -108,6 +109,11 @@ export interface EditorActions {
   setSnapping(snapping: boolean): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
+  /**
+   * Records image assets in the document's asset table. Not an undo step:
+   * the table only ever grows, and an entry no layer uses costs nothing.
+   */
+  addAssets(assets: Readonly<Record<string, AssetInfo>>): void;
   setSaveStatus(status: SaveStatus, error?: string | null): void;
 }
 
@@ -356,6 +362,16 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const state = get();
         if (!trimmed || trimmed === state.doc.name) return;
         set({ doc: { ...state.doc, name: trimmed } });
+      },
+
+      addAssets(assets) {
+        const state = get();
+        const fresh: Record<string, AssetInfo> = {};
+        for (const hash in assets) if (!state.doc.assets[hash]) fresh[hash] = assets[hash] as AssetInfo;
+        if (Object.keys(fresh).length === 0) return;
+        const withAssets = (doc: Document): Document => ({ ...doc, assets: { ...doc.assets, ...fresh } });
+        // Keep an open gesture's snapshot in step, so cancelling it does not forget the assets.
+        set({ doc: withAssets(state.doc), gesture: state.gesture ? { ...state.gesture, doc: withAssets(state.gesture.doc) } : null });
       },
 
       setSaveStatus(status, error = null) {

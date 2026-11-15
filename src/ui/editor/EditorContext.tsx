@@ -1,6 +1,9 @@
 import { createContext, useContext } from 'react';
 import { useStore } from 'zustand';
+import type { Point } from '../../core';
+import type { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
+import type { DocumentStorage } from '../../persistence/storage';
 import type { AppActions, Command, CommandEnv } from '../../state/commands';
 import { runCommand } from '../../state/commands';
 import type { EditorActions, EditorState, EditorStore } from '../../state/editorStore';
@@ -10,6 +13,13 @@ export interface EditorContextValue {
   app: AppActions;
   /** The canvas registers its controller here so commands can cancel a drag. */
   controller: { current: InteractionController | null };
+  storage: DocumentStorage;
+  /** Decoded images for image fills, shared by the canvas and the panels. */
+  images: ImageCache;
+  /** Imports image files and places them on the page, at a page-space point or in the middle of the view. */
+  placeFiles(files: readonly File[], at?: Point): Promise<void>;
+  /** Lets the user choose one image file, imports it, and returns its asset hash. Null if they cancelled. */
+  pickImage(): Promise<string | null>;
 }
 
 export const EditorContext = createContext<EditorContextValue | null>(null);

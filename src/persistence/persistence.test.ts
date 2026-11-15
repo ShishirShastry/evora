@@ -125,7 +125,7 @@ describe('file operations', () => {
 
   it('exports to text and imports it back as a separate file every time', async () => {
     const { doc } = sampleDocument();
-    const text = exportFileText(doc, meta);
+    const text = await exportFileText(storage, doc, meta);
     const first = await importFileText(storage, text);
     const second = await importFileText(storage, text);
     expect(first.repairs).toEqual([]);
@@ -215,6 +215,8 @@ describe('autosave', () => {
       list: () => inner.list(),
       load: (id) => inner.load(id),
       remove: (id) => inner.remove(id),
+      saveAsset: (hash, asset) => inner.saveAsset(hash, asset),
+      loadAsset: (hash) => inner.loadAsset(hash),
       save: async (file: OpenDesignFile) => {
         if (failing) throw new Error('disk full');
         await inner.save(file);

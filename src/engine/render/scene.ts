@@ -24,6 +24,7 @@ import {
   type TextMeasurer,
   type TextNode,
 } from '../../core';
+import type { ImageSource } from '../images/imageCache';
 import { applyTextStyle } from '../text/measure';
 import { visibleRect, type Size, type Viewport } from '../viewport';
 import { fillWithPaint, paintStyle, rgbToCss, traceLayerPath } from './paint';
@@ -58,6 +59,8 @@ export interface RenderOptions {
   measurer?: TextMeasurer;
   /** Layers to leave out, for example a text layer that is being edited in place. */
   hiddenIds?: ReadonlySet<NodeId>;
+  /** Decoded images for image fills. Without it, image fills are drawn as placeholders. */
+  images?: ImageSource;
 }
 
 const CAPS: Record<StrokeCap, CanvasLineCap> = { NONE: 'butt', ROUND: 'round', SQUARE: 'square' };
@@ -212,7 +215,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     for (const paint of node.fills) {
       if (!paint.visible || paint.opacity <= 0) continue;
       traceLayerPath(target, node);
-      fillWithPaint(target, paint, node.width, node.height);
+      fillWithPaint(target, paint, node.width, node.height, options.images);
     }
   };
 

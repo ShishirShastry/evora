@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **4**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, and version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **5**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, and version 5 image paints with the document's asset table. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -34,7 +34,14 @@ The native file extension is `.opendesign`. The content is UTF-8 JSON:
 
 The same object is what IndexedDB stores for each local file, in a record that additionally indexes `id`, `name` and `updatedAt` for the file browser.
 
-Binary assets (Phase 2) will not be inlined in `document`. They are stored content-addressed (SHA-256) beside it and bundled with the JSON into a zip container when a file is exported. That change will be schema version 2 and will keep reading version 1 files.
+**Image assets (version 5).** The bytes of an image are never part of `document`. An image is identified by the SHA-256 of its bytes; the document records what it knows about each one in `document.assets` and image paints refer to it by that hash.
+
+- On a device, the bytes are kept in asset storage (an IndexedDB object store keyed by hash), once however many files use them.
+- A file exported to disk carries them in a top-level `assetData` object, `{ "<hash>": "<base64 of the bytes>" }`, holding exactly the assets the document's layers use, so the file is complete on its own. Local storage never writes `assetData`.
+- On import each bundled image is hashed again and stored only if the hash matches its key. A mismatch is refused, because every file that uses that hash would otherwise show the wrong image.
+- A document whose image bytes cannot be found still opens; the layers that use them show a placeholder.
+
+A zip container (to avoid base64's one-third size overhead) remains an option for a later version; it would keep reading these files.
 
 ---
 
@@ -45,6 +52,14 @@ interface Document {
   id: string;                          // stable document ID
   name: string;                        // file name shown in the UI
   nodes: Record<NodeId, DesignNode>;   // every page and every layer, flat
+  assets: Record<Hash, AssetInfo>;     // version 5: image assets used by the document
+}
+
+interface AssetInfo {
+  mimeType: string;                    // image/png, image/jpeg, image/webp, image/gif or image/svg+xml
+  width: number;                       // natural size in pixels
+  height: number;
+  name: string;                        // the file it was imported from, for display
 }
 ```
 
@@ -220,8 +235,21 @@ interface GradientPaint {
   visible: boolean;
 }
 
-type Paint = SolidPaint | GradientPaint;     // image paints are still to come
+// Version 5
+interface ImagePaint {
+  type: 'IMAGE';
+  imageHash: string;         // 64 lowercase hex characters; a key of Document.assets
+  scaleMode: 'FILL' | 'FIT' | 'CROP' | 'TILE';
+  crop: { x: number; y: number; width: number; height: number };   // CROP: the part shown, in the image's unit square
+  tileScale: number;         // TILE: tile size relative to the image's natural size
+  opacity: number;
+  visible: boolean;
+}
+
+type Paint = SolidPaint | GradientPaint | ImagePaint;
 ```
+
+An image paint fills a shape: FILL covers the box keeping the image's proportions, FIT shows the whole image inside it, CROP stretches the chosen part over it, TILE repeats it. Image paints are not drawn on strokes or on text.
 
 A linear gradient runs from `from` to `to`, with its bands at right angles to that line in pixel space. For the other kinds `from` is the centre and `to` gives the radius and the direction of the first stop; they are laid out in the layer's unit square, so they stretch with the box (a radial gradient in a wide rectangle is an ellipse). On text and on strokes, which cannot be stretched that way, the round kinds are circular and a diamond falls back to radial.
 
@@ -304,6 +332,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // effects [] and blendMode 'NORMAL'; frames and rectangles get cornerRadii null.
   // These are the values that paint exactly what the layer painted before.
   3: addVersion4Defaults,
+  // 4 -> 5: adds image paints and Document.assets. Older documents use no images: assets is {}.
+  4: (file) => ({ ...file, schemaVersion: 5, document: { ...file.document, assets: {} } }),
 };
 ```
 
@@ -312,6 +342,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 1 | 2 | `GROUP` layer type added | `src/core/ops/arrange.test.ts` ("schema migration") |
 | 2 | 3 | `TEXT` layer type added | `src/core/text/layout.test.ts` ("text in the file format") |
 | 3 | 4 | Gradient paints; stroke cap, join and dashes; per-corner radii; effects; blend modes | `src/appearance.test.ts` ("version 3 files") |
+| 4 | 5 | Image paints; `Document.assets`; `assetData` in exported files | `src/images.test.ts` ("opens a version 4 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -340,7 +371,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | Per-range text styles, `IMAGE` fills with an asset table, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4.) |
+| 2 | Per-range text styles, `flipX/flipY`, `constraints`, `layoutGrids[]`, page `guides[]`. (Done: `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5.) |
 | 3 | `VECTOR` (vector network: vertices, segments with Bézier handles, regions), `BOOLEAN_OPERATION`, arc data on ellipses. |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |

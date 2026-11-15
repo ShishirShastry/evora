@@ -139,7 +139,7 @@ describe('editing existing text', () => {
 
     const enter = commandForKey({ code: 'Enter', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false });
     expect(enter?.id).toBe('object.editText');
-    const app = { cancelInteraction: () => false, openShortcuts: () => undefined, saveNow: () => undefined, saveAs: () => undefined, goHome: () => undefined };
+    const app = { cancelInteraction: () => false, openShortcuts: () => undefined, saveNow: () => undefined, saveAs: () => undefined, placeImage: () => undefined, goHome: () => undefined };
     if (enter) runCommand(enter, { store, app });
     expect(store.getState().editingTextId).toBe(id);
   });

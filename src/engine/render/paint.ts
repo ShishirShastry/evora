@@ -1,5 +1,6 @@
-import type { CornerRadii, GradientPaint, LayerNode, Paint, RGB, SolidPaint } from '../../core';
-import { outlinePoints } from '../../core';
+import type { CornerRadii, GradientPaint, ImagePaint, LayerNode, Paint, RGB, SolidPaint } from '../../core';
+import { imagePlacement, outlinePoints } from '../../core';
+import type { ImageSource } from '../images/imageCache';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -128,9 +129,44 @@ export function gradientInPixels(ctx: Ctx, paint: GradientPaint, width: number, 
   return addStops(ctx.createRadialGradient(fx, fy, 0, fx, fy, Math.max(0.001, Math.hypot(tx - fx, ty - fy))), paint);
 }
 
-/** The fill or stroke style for a paint, in the layer's pixel space. Its opacity is applied separately. */
+/**
+ * The fill or stroke style for a paint, in the layer's pixel space. Its
+ * opacity is applied separately. Images are fills for shapes only; as a style
+ * for strokes or text an image paint draws nothing.
+ */
 export function paintStyle(ctx: Ctx, paint: Paint, width: number, height: number): string | CanvasGradient {
-  return paint.type === 'SOLID' ? rgbToCss(paint.color) : gradientInPixels(ctx, paint, width, height);
+  if (paint.type === 'SOLID') return rgbToCss(paint.color);
+  if (paint.type === 'IMAGE') return 'rgba(0, 0, 0, 0)';
+  return gradientInPixels(ctx, paint, width, height);
+}
+
+/** Shown where an image has not been decoded yet, or cannot be found. */
+const IMAGE_PLACEHOLDER = 'rgba(128, 138, 138, 0.35)';
+
+/** Draws an image paint into the layer's box. The caller has already clipped to the layer's outline. */
+function drawImagePaint(ctx: Ctx, paint: ImagePaint, width: number, height: number, images: ImageSource | undefined): void {
+  const decoded = images?.get(paint.imageHash) ?? null;
+  if (!decoded) {
+    ctx.fillStyle = IMAGE_PLACEHOLDER;
+    ctx.fillRect(0, 0, width, height);
+    return;
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  if (paint.scaleMode === 'TILE') {
+    const pattern = ctx.createPattern(decoded.image, 'repeat');
+    if (!pattern) return;
+    // Scale the space rather than the pattern, so the tile size follows tileScale.
+    const scale = Math.max(0.01, paint.tileScale);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = pattern;
+    ctx.fillRect(0, 0, width / scale, height / scale);
+    return;
+  }
+  const placement = imagePlacement(paint.scaleMode, decoded.width, decoded.height, width, height, paint.crop);
+  if (!placement) return;
+  const { source, target } = placement;
+  ctx.drawImage(decoded.image, source.x, source.y, source.width, source.height, target.x, target.y, target.width, target.height);
 }
 
 /**
@@ -139,12 +175,17 @@ export function paintStyle(ctx: Ctx, paint: Paint, width: number, height: number
  * layer's unit square, so they stretch with the box: a radial gradient in a
  * wide rectangle is an ellipse, as designers expect.
  */
-export function fillWithPaint(ctx: Ctx, paint: Paint, width: number, height: number): void {
+export function fillWithPaint(ctx: Ctx, paint: Paint, width: number, height: number, images?: ImageSource): void {
   const previousAlpha = ctx.globalAlpha;
   ctx.globalAlpha = previousAlpha * paint.opacity;
   if (paint.type === 'SOLID') {
     ctx.fillStyle = rgbToCss(paint.color);
     ctx.fill();
+  } else if (paint.type === 'IMAGE') {
+    ctx.save();
+    ctx.clip();
+    drawImagePaint(ctx, paint, width, height, images);
+    ctx.restore();
   } else if (paint.type === 'GRADIENT_LINEAR' || width <= 0 || height <= 0) {
     ctx.fillStyle = gradientInPixels(ctx, paint, width, height);
     ctx.fill();

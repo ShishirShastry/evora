@@ -62,7 +62,7 @@ export function canvasMenu(env: CommandEnv, state: EditorState): MenuItem[] {
 }
 
 const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
-  File: ['file.home', '-', 'file.save', 'file.saveAs'],
+  File: ['file.home', '-', 'file.placeImage', '-', 'file.save', 'file.saveAs'],
   Edit: [
     'edit.undo',
     'edit.redo',

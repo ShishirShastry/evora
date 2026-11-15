@@ -1,12 +1,12 @@
 /**
- * OPEN DESIGN document schema, version 4.
- * Version 2 added the GROUP layer type, version 3 TEXT, and version 4
- * gradient paints, stroke caps/joins/dashes, per-corner radii, effects and
- * blend modes.
+ * OPEN DESIGN document schema, version 5.
+ * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
+ * paints, stroke caps/joins/dashes, per-corner radii, effects and blend
+ * modes, and version 5 image paints with the document's asset table.
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -64,10 +64,44 @@ export interface GradientPaint {
   visible: boolean;
 }
 
-export type Paint = SolidPaint | GradientPaint;
+export type ImageScaleMode = 'FILL' | 'FIT' | 'CROP' | 'TILE';
+export const IMAGE_SCALE_MODES: readonly ImageScaleMode[] = ['FILL', 'FIT', 'CROP', 'TILE'];
+
+/**
+ * An image used as a fill. The image itself is an asset stored outside the
+ * document; the paint refers to it by the hash of its bytes.
+ */
+export interface ImagePaint {
+  type: 'IMAGE';
+  /** SHA-256 of the image file's bytes, in lowercase hex. A key of `Document.assets`. */
+  imageHash: string;
+  scaleMode: ImageScaleMode;
+  /** For CROP: the part of the image that is shown, in the image's unit square. */
+  crop: { x: number; y: number; width: number; height: number };
+  /** For TILE: the size of one tile relative to the image's natural size. */
+  tileScale: number;
+  opacity: number;
+  visible: boolean;
+}
+
+export type Paint = SolidPaint | GradientPaint | ImagePaint;
 
 export function isGradient(paint: Paint): paint is GradientPaint {
-  return paint.type !== 'SOLID';
+  return paint.type !== 'SOLID' && paint.type !== 'IMAGE';
+}
+
+export function isImagePaint(paint: Paint): paint is ImagePaint {
+  return paint.type === 'IMAGE';
+}
+
+/** What the document records about an image asset. The bytes live in asset storage, keyed by hash. */
+export interface AssetInfo {
+  mimeType: string;
+  /** Natural size in pixels. */
+  width: number;
+  height: number;
+  /** The file name it was imported from, for display. */
+  name: string;
 }
 
 export type StrokeAlign = 'INSIDE' | 'CENTER' | 'OUTSIDE';
@@ -275,6 +309,8 @@ export interface Document {
   id: string;
   name: string;
   nodes: NodeMap;
+  /** Image assets used by this document, by hash. Entries are only ever added. */
+  assets: Readonly<Record<string, AssetInfo>>;
 }
 
 export interface FileMeta {
@@ -288,6 +324,12 @@ export interface OpenDesignFile {
   schemaVersion: number;
   meta: FileMeta;
   document: Document;
+  /**
+   * Only in files exported to disk: the bytes of every asset the document
+   * uses, base64-encoded, by hash, so that the file is complete on its own.
+   * Local storage keeps assets separately and never sets this.
+   */
+  assetData?: Record<string, string>;
 }
 
 export function isPage(node: DesignNode | undefined): node is PageNode {

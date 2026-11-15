@@ -5,6 +5,7 @@ import {
   BLEND_MODES,
   CONTAINER_TYPES,
   GRADIENT_TYPES,
+  IMAGE_SCALE_MODES,
   LAYER_TYPES,
   STROKE_CAPS,
   STROKE_JOINS,
@@ -13,6 +14,7 @@ import {
   TEXT_CASES,
   TEXT_DECORATIONS,
   VERTICAL_ALIGNS,
+  type AssetInfo,
   type CornerRadii,
   type DesignNode,
   type Document,
@@ -51,6 +53,10 @@ function rgb(value: unknown, fallback: RGB): RGB {
 }
 
 const BLACK_RGB: RGB = { r: 0, g: 0, b: 0 };
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
 
 function unitPoint(value: unknown, fallback: { x: number; y: number }): { x: number; y: number } {
   if (!isObject(value)) return { ...fallback };
@@ -93,8 +99,41 @@ function paints(value: unknown): Paint[] {
         opacity,
         visible,
       });
+    } else if (item.type === 'IMAGE' && typeof item.imageHash === 'string' && HASH.test(item.imageHash)) {
+      const crop = isObject(item.crop) ? item.crop : {};
+      const x = finite(crop.x, 0, 0, 1);
+      const y = finite(crop.y, 0, 0, 1);
+      out.push({
+        type: 'IMAGE',
+        imageHash: item.imageHash,
+        scaleMode: oneOf(item.scaleMode, IMAGE_SCALE_MODES, 'FILL'),
+        // The crop must stay inside the image and keep some area.
+        crop: { x, y, width: finite(crop.width, 1, 0.001, 1 - x || 0.001), height: finite(crop.height, 1, 0.001, 1 - y || 0.001) },
+        tileScale: finite(item.tileScale, 1, 0.01, 100),
+        opacity,
+        visible,
+      });
     }
     // Paints of a kind this version does not know are dropped.
+  }
+  return out;
+}
+
+const HASH = /^[0-9a-f]{64}$/;
+
+/** The asset table: entries with a malformed hash or missing details are dropped. */
+function assets(value: unknown): Record<string, AssetInfo> {
+  const out: Record<string, AssetInfo> = {};
+  if (!isObject(value)) return out;
+  for (const hash in value) {
+    const item = value[hash];
+    if (!HASH.test(hash) || !isObject(item) || typeof item.mimeType !== 'string') continue;
+    out[hash] = {
+      mimeType: item.mimeType,
+      width: finite(item.width, 1, 1, 100000),
+      height: finite(item.height, 1, 1, 100000),
+      name: typeof item.name === 'string' ? item.name : 'Image',
+    };
   }
   return out;
 }
@@ -136,10 +175,6 @@ function cornerRadii(value: unknown): CornerRadii | null {
 }
 
 const STROKE_ALIGNS: readonly StrokeAlign[] = ['INSIDE', 'CENTER', 'OUTSIDE'];
-
-function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
-  return allowed.includes(value as T) ? (value as T) : fallback;
-}
 
 /** Rebuilds a node from raw data, keeping every valid field and defaulting or clamping the rest. */
 function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
@@ -228,6 +263,10 @@ export function repairDocument(input: unknown): RepairResult {
   const id = typeof source.id === 'string' && source.id ? source.id : createId();
   const name = typeof source.name === 'string' && source.name ? source.name : 'Untitled';
   const rawNodes = isObject(source.nodes) ? source.nodes : {};
+  const assetTable = assets(source.assets);
+  if (JSON.stringify(assetTable) !== JSON.stringify(isObject(source.assets) ? source.assets : null)) {
+    repairs.push('The list of image assets was damaged and has been rebuilt.');
+  }
 
   const nodes: Record<NodeId, DesignNode> = {};
   let dropped = 0;
@@ -335,7 +374,7 @@ export function repairDocument(input: unknown): RepairResult {
   }
   if (rekeyedGroups > 0) repairs.push(`Layer order was rebuilt in ${rekeyedGroups} place(s).`);
 
-  return { doc: { id, name, nodes }, repairs };
+  return { doc: { id, name, nodes, assets: assetTable }, repairs };
 }
 
 /** Lists what is wrong with a document. An empty list means it is valid. */

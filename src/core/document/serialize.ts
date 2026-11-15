@@ -51,6 +51,9 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 4, document: { ...body, nodes: upgraded } };
   },
+  // Version 5 adds image paints and the document's table of image assets.
+  // Older documents use no images, so their table is empty.
+  4: (file) => ({ ...file, schemaVersion: 5, document: { ...(isObject(file.document) ? file.document : {}), assets: {} } }),
 };
 
 /**

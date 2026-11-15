@@ -4,6 +4,7 @@ import type {
   Document,
   GradientPaint,
   GradientType,
+  ImagePaint,
   LayerNode,
   LayerPatch,
   LayerType,
@@ -73,7 +74,14 @@ export function gradientPaint(type: GradientType, start: RGB, end: RGB, angle = 
 
 /** One colour that stands for a paint, for swatches and text carets: the solid colour or the first stop. */
 export function paintColor(paint: Paint): RGB {
-  return paint.type === 'SOLID' ? paint.color : (paint.stops[0]?.color ?? BLACK);
+  if (paint.type === 'SOLID') return paint.color;
+  if (paint.type === 'IMAGE') return DEFAULT_SHAPE_FILL;
+  return paint.stops[0]?.color ?? BLACK;
+}
+
+/** An image fill that covers the layer and shows the whole image when cropping is switched on. */
+export function imagePaint(imageHash: string): ImagePaint {
+  return { type: 'IMAGE', imageHash, scaleMode: 'FILL', crop: { x: 0, y: 0, width: 1, height: 1 }, tileScale: 1, opacity: 1, visible: true };
 }
 
 export function dropShadow(): ShadowEffect {
@@ -94,7 +102,7 @@ export function createPage(name: string, order: string): PageNode {
 /** A new document with one empty page. */
 export function createDocument(name = 'Untitled'): Document {
   const page = createPage('Page 1', freshKeys(1)[0] as string);
-  return { id: createId(), name, nodes: { [page.id]: page } };
+  return { id: createId(), name, nodes: { [page.id]: page }, assets: {} };
 }
 
 /**

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { InteractionController, type PointerInput } from '../../engine/input/controller';
 import { renderOverlay } from '../../engine/render/overlay';
 import { renderScene } from '../../engine/render/scene';
+import { screenToWorld } from '../../engine/viewport';
 import { getBrowserMeasurer } from '../../engine/text/measure';
 import { zoomToFit } from '../../state/commands';
 import { PopupMenu, type MenuItem } from '../components/Menu';
@@ -90,6 +91,7 @@ export function CanvasView() {
           dpr,
           viewport: state.viewport,
           measurer,
+          images: context.images,
           // The text being edited is shown by the in-place editor instead.
           hiddenIds: state.editingTextId ? new Set([state.editingTextId]) : undefined,
           createCanvas: (w, h) => {
@@ -143,6 +145,12 @@ export function CanvasView() {
       visited.add(pageId);
       zoomToFit(store);
     };
+
+    // Repaint when an image finishes decoding.
+    const stopWatchingImages = context.images.onChange(() => {
+      lastScene = null;
+      schedule();
+    });
 
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -206,6 +214,23 @@ export function CanvasView() {
       setMenu({ x: event.clientX, y: event.clientY, items });
     };
 
+    // Image files dragged in from outside are placed where they are dropped.
+    const onDragOver = (event: DragEvent): void => {
+      if (!event.dataTransfer || ![...event.dataTransfer.types].includes('Files')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    };
+    const onDrop = (event: DragEvent): void => {
+      const files = [...(event.dataTransfer?.files ?? [])];
+      if (files.length === 0) return;
+      event.preventDefault();
+      const rect = rectOf();
+      const at = screenToWorld(store.getState().viewport, { x: event.clientX - rect.left, y: event.clientY - rect.top });
+      void context.placeFiles(files, { x: Math.round(at.x), y: Math.round(at.y) });
+    };
+
+    overlay.addEventListener('dragover', onDragOver);
+    overlay.addEventListener('drop', onDrop);
     overlay.addEventListener('pointerdown', onPointerDown);
     overlay.addEventListener('pointermove', onPointerMove);
     overlay.addEventListener('pointerup', onPointerUp);
@@ -216,6 +241,9 @@ export function CanvasView() {
 
     return () => {
       observer.disconnect();
+      stopWatchingImages();
+      overlay.removeEventListener('dragover', onDragOver);
+      overlay.removeEventListener('drop', onDrop);
       unsubscribe();
       if (frame !== 0) cancelAnimationFrame(frame);
       overlay.removeEventListener('pointerdown', onPointerDown);

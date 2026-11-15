@@ -339,6 +339,8 @@ export interface AppActions {
   saveNow(): void;
   /** Saves a `.opendesign` copy to disk. */
   saveAs(): void;
+  /** Lets the user choose image files and places them on the canvas. */
+  placeImage(): void;
   goHome(): void;
 }
 
@@ -440,6 +442,14 @@ export const COMMANDS: readonly Command[] = [
     shortcut: 'Ctrl+Shift+S',
     keys: [{ code: 'KeyS', ctrl: true, shift: true }],
     run: ({ app }) => app.saveAs(),
+  },
+  {
+    id: 'file.placeImage',
+    label: 'Place image…',
+    group: 'File',
+    shortcut: 'Ctrl+Shift+K',
+    keys: [{ code: 'KeyK', ctrl: true, shift: true }],
+    run: ({ app }) => app.placeImage(),
   },
   { id: 'file.home', label: 'Back to files', group: 'File', run: ({ app }) => app.goHome() },
 
