@@ -53,6 +53,31 @@ export function patchNodes(doc: Document, patches: Readonly<Record<NodeId, NodeP
   return setNodes(doc, changes);
 }
 
+type TableName = 'styles' | 'variables' | 'variableCollections';
+
+/**
+ * Adds, replaces (an entry) or removes (`null`) entries of one of the
+ * document's tables of styles, variables or variable collections. Returns
+ * the same document when nothing changed.
+ */
+export function setTable<K extends TableName>(doc: Document, table: K, changes: Readonly<Record<string, Document[K][string] | null>>): Document {
+  const next: Record<string, Document[K][string]> = { ...(doc[table] as Record<string, Document[K][string]>) };
+  let changed = false;
+  for (const id in changes) {
+    const value = changes[id] as Document[K][string] | null;
+    if (value === null) {
+      if (id in next) {
+        delete next[id];
+        changed = true;
+      }
+    } else if (JSON.stringify(next[id]) !== JSON.stringify(value)) {
+      next[id] = value;
+      changed = true;
+    }
+  }
+  return changed ? { ...doc, [table]: next } : doc;
+}
+
 export function patchNode(doc: Document, id: NodeId, patch: NodePatch): Document {
   return patchNodes(doc, { [id]: patch });
 }

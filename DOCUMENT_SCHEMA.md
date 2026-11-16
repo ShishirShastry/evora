@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **19**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, and version 19 component sets, variants and component properties. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **20**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, and version 20 styles and variables with modes. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -53,6 +53,10 @@ interface Document {
   name: string;                        // file name shown in the UI
   nodes: Record<NodeId, DesignNode>;   // every page and every layer, flat
   assets: Record<Hash, AssetInfo>;     // version 5: image assets used by the document
+  // Version 20: the design system of the document (see §5.9)
+  styles: Record<string, Style>;
+  variables: Record<string, Variable>;
+  variableCollections: Record<string, VariableCollection>;
 }
 
 interface AssetInfo {
@@ -115,6 +119,7 @@ interface PageNode extends NodeBase {
   parentId: null;
   backgroundColor: RGB;      // canvas colour behind the page content
   guides: Guide[];           // version 7: ruler guides
+  variableModes: Record<string, string>;   // version 20: the mode chosen for this page, by collection ID
 }
 
 interface Guide {
@@ -172,6 +177,11 @@ interface LayerBase extends NodeBase {
 
   // Version 19: component properties (see §5.8)
   propRefs: { visible?: string; characters?: string; componentId?: string };   // in a component: the properties, by ID, that decide these
+
+  // Version 20: styles and variables (see §5.9)
+  styleRefs: { fills?: string; strokes?: string; text?: string; effects?: string; grids?: string };   // the styles this layer uses, by style ID
+  boundVariables: Record<string, string>;   // a property ("width", "fills.0") to the ID of the variable it is bound to
+  variableModes: Record<string, string>;    // the mode chosen on this layer, for it and what is in it, by collection ID
 }
 ```
 
@@ -490,6 +500,49 @@ A component and an instance are frames (`type: 'FRAME'`) whose `kind` says so, w
 
 ---
 
+### 5.9 Styles and variables (version 20)
+
+```ts
+interface Style {
+  id: string;
+  name: string;
+  description: string;
+  type: 'PAINT' | 'TEXT' | 'EFFECT' | 'GRID';
+  paints: Paint[];            // PAINT: used for fills or for strokes
+  text: { fontFamily; fontSize; fontWeight; italic; lineHeight; letterSpacing; textDecoration; textCase };   // TEXT
+  effects: Effect[];          // EFFECT
+  grids: LayoutGrid[];        // GRID
+}
+
+interface VariableCollection {
+  id: string;
+  name: string;
+  modes: { id: string; name: string }[];   // at least one; the first applies where none is chosen
+}
+
+interface Variable {
+  id: string;
+  name: string;
+  description: string;
+  collectionId: string;
+  type: 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN';
+  scopes: string[];           // the kinds of property it is offered for (FILL, STROKE, SIZE, GAP, RADIUS, OPACITY, TEXT, VISIBILITY); [] for all
+  valuesByMode: Record<string, RGB | number | string | boolean | { alias: string }>;   // one for each mode of its collection
+}
+```
+
+**Stored results, as everywhere else.** A layer that uses a style or is bound to a variable still has the resulting value in its ordinary properties (`fills`, `width`, `fontSize`…), so painting, export, layout and every reader of the file need to know nothing about tokens. `applyTokens` (`src/core/tokens/tokens.ts`), which the editor runs as part of `restoreLayout` after every change, writes the value of each style and variable into the layers that use it; that is why changing a token changes everything bound to it in the same undo step.
+
+**Styles.** `styleRefs` names the style a layer takes its fills, its strokes, its type settings (text layers), its effects or its layout grids (frames) from. Only the part of a `Style` that goes with its type is used. Changing a styled property of a layer by hand removes the reference (the layer is detached from the style and keeps its new value). Removing a style leaves every layer with the look it gave.
+
+**Variables.** A key of `boundVariables` is a property name, or `fills.N` / `strokes.N` for the colour of the Nth paint when it is solid. Colour variables bind to those; number variables to `width`, `height`, `opacity` (in percent), `strokeWeight`, `cornerRadius`, `itemSpacing`, the four paddings, `fontSize`, `lineHeight` and `letterSpacing`; string variables to `characters` and `fontFamily`; boolean variables to `visible`. A bound width or height applies while the layer's sizing on that axis is `FIXED` (binding sets it). Where a style and a variable both decide a property, the style does. Changing a bound property by hand removes the binding.
+
+**Modes.** The mode of a collection that applies to a layer is the one named in `variableModes` on the layer or on its nearest ancestor that names one (up to its page), or else the collection's first mode. A variable's value for a layer is its value in that mode.
+
+**Aliases (semantic tokens).** A value `{ alias: id }` makes a variable stand for another of the same type, in that mode; the other is resolved for the same layer, with the mode of its own collection, and may itself be an alias. A variable never stands for itself, however indirectly (the operation refuses it). An alias to a variable that is gone has no value: what is bound keeps what it last had.
+
+**In instances.** `styleRefs`, `boundVariables` and `variableModes` are overridable like any other look of a layer in an instance. What a style or variable writes into a layer of an instance is not an override: it is resolved where the instance is, so an instance under a dark mode is dark while its component is light. The instance itself takes the component's style references and bindings for its look (fills, strokes, effects, radius, spacing, padding) and keeps its own for everything else. Where an instance overrides a property, the component's style or variable for that property does not apply to it.
+
 ## 6. Coordinate system and transforms
 
 - The page is an unbounded plane. X grows to the right, Y grows downwards. Units are CSS pixels at 100% zoom.
@@ -527,6 +580,7 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 
 | 12 | A text layer's layout sizing is `HUG` exactly where its `textAutoResize` fits it to its content. Padding is ≥ 0; a size limit is ≥ 0 or null. | Set the sizing from `textAutoResize`; clamp. |
 | 14 | Only an instance has a `componentId`, `overrides` and `propValues`. Property definitions have an ID, a known type and a name; `propRefs` and `variantProps` hold strings. | Set to null and {}; drop what is malformed. |
+| 14a | A style has a known type; a collection has at least one mode; a variable is in a collection that exists and has a value of its own type (or an alias) for each of that collection's modes and no others. | Drop the entry; give a missing or wrong value the type's blank value. A reference from a layer to a style or variable that is gone is dropped by `applyTokens` at the next change. |
 | 15 | Every instance is in step with its component (§5.8): it holds exactly one mirror of each of the component's layers, with the component's properties and its own overrides, and no layer has a `sourceId` outside an instance. | Not by `repairDocument`: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 | 13 | Layout sizing and positioning are ones that can apply where the layer is (§5.7), and every frame with a layout is laid out: the boxes of the layers in its flow, and its own where it hugs, are what the layout gives. | Not by `repairDocument`, which cannot measure text: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 
@@ -537,7 +591,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 19;
+const CURRENT_SCHEMA_VERSION = 20;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -584,6 +638,9 @@ const MIGRATIONS: Record<number, (file) => file> = {
   17: addComponents,
   // 18 -> 19: every layer gets propRefs {}; every frame gets componentProps [], variantProps {} and propValues {}.
   18: addComponentProperties,
+  // 19 -> 20: the document gets styles {}, variables {} and variableCollections {}; every layer styleRefs {},
+  // boundVariables {} and variableModes {}; every page variableModes {}.
+  19: addStylesAndVariables,
 };
 ```
 
@@ -607,6 +664,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 16 | 17 | `layoutWrap: 'WRAP'` on columns as well as rows | `src/autolayout.test.ts` ("opens a version 16 file, where only rows wrap") |
 | 17 | 18 | Components and instances: `sourceId` on every layer; `kind`, `description`, `componentId` and `overrides` on frames | `src/components.test.ts` ("opens a version 17 file, where nothing is a component") |
 | 18 | 19 | Component sets (`kind: 'COMPONENT_SET'`), `variantProps`, `componentProps`, `propValues` on frames; `propRefs` on every layer | `src/variants.test.ts` ("opens a version 18 file") |
+| 19 | 20 | Document tables `styles`, `variables`, `variableCollections`; `styleRefs`, `boundVariables` and `variableModes` on every layer; `variableModes` on pages | `src/tokens.test.ts` ("opens a version 19 file, which has none") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -638,7 +696,7 @@ These are reserved so that later versions extend the schema without restructurin
 | 2 | (Done: mirrored text and image fills and guides on frames in version 14; per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | (Done in version 15: Auto Layout properties on frames and on every layer, §5.7; the stretch alignment in version 16; wrapping columns in version 17.) |
-| 5 | (Done in version 18: components and instances with overrides, as kinds of frame, §5.8.) Done in version 19: component sets, variants and component properties. Still to come: document-level `styles`, `variableCollections`, `variables`; property bindings; libraries. |
+| 5 | (Done in version 18: components and instances with overrides, as kinds of frame, §5.8.) Done in version 19: component sets, variants and component properties. Done in version 20: document-level `styles`, `variableCollections`, `variables`, property bindings and modes (§5.9). Still to come: libraries. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |
 | 7 | `exportSettings[]`, annotations, development status. |
 | 8 | Comments are stored outside the document body, keyed by document and node ID. |

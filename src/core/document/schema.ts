@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 19 (adds component sets, variants and component properties; version 18
+ * OPEN DESIGN document schema, version 20 (adds styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 19;
+export const CURRENT_SCHEMA_VERSION = 20;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -298,6 +298,8 @@ export interface PageNode extends NodeBase {
   backgroundColor: RGB;
   /** Ruler guides. Like layout grids they help while designing and are never exported. */
   guides: Guide[];
+  /** The mode chosen for this page of each variable collection that has one chosen. */
+  variableModes: Readonly<Record<string, string>>;
 }
 
 interface LayerBase extends NodeBase {
@@ -363,6 +365,77 @@ interface LayerBase extends NodeBase {
    * something about it in each instance. Each names a property by its ID.
    */
   propRefs: PropRefs;
+  /** The styles this layer takes its paints, type settings, effects or layout grids from, by style ID. */
+  styleRefs: StyleRefs;
+  /** The variables that properties of this layer are bound to: a property ("width", "fills.0" for the first fill's colour) to a variable ID. */
+  boundVariables: Readonly<Record<string, string>>;
+  /** The mode chosen here, for this layer and everything in it, of each variable collection that has one chosen. */
+  variableModes: Readonly<Record<string, string>>;
+}
+
+export type StyleType = 'PAINT' | 'TEXT' | 'EFFECT' | 'GRID';
+export const STYLE_TYPES: readonly StyleType[] = ['PAINT', 'TEXT', 'EFFECT', 'GRID'];
+
+/** What a text style sets on a text layer. */
+export interface TextStyleValues {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  italic: boolean;
+  lineHeight: number | null;
+  letterSpacing: number;
+  textDecoration: TextDecoration;
+  textCase: TextCase;
+}
+
+/**
+ * A named look that layers can share: paints (for fills or strokes), type
+ * settings, effects or layout grids. Only the part that goes with its type
+ * is used.
+ */
+export interface Style {
+  id: string;
+  name: string;
+  description: string;
+  type: StyleType;
+  paints: Paint[];
+  text: TextStyleValues;
+  effects: Effect[];
+  grids: LayoutGrid[];
+}
+
+/** Which style a layer uses for what. */
+export interface StyleRefs {
+  fills?: string;
+  strokes?: string;
+  text?: string;
+  effects?: string;
+  grids?: string;
+}
+
+export type VariableType = 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN';
+export const VARIABLE_TYPES: readonly VariableType[] = ['COLOR', 'FLOAT', 'STRING', 'BOOLEAN'];
+
+/** A value of a variable in one mode: a colour, number, string or switch, or another variable that it stands for. */
+export type VariableValue = RGB | number | string | boolean | { alias: string };
+
+/** A named value that properties of layers can be bound to, with a value for each mode of its collection. */
+export interface Variable {
+  id: string;
+  name: string;
+  description: string;
+  collectionId: string;
+  type: VariableType;
+  /** The kinds of property it is offered for. Empty for all. */
+  scopes: string[];
+  valuesByMode: Readonly<Record<string, VariableValue>>;
+}
+
+/** A group of variables that share modes: "Light" and "Dark", say. The first mode is the one that applies where none is chosen. */
+export interface VariableCollection {
+  id: string;
+  name: string;
+  modes: { id: string; name: string }[];
 }
 
 /** What a component property can decide about a layer: whether it shows, what a text says, which component an instance shows. */
@@ -658,6 +731,12 @@ export interface Document {
   nodes: NodeMap;
   /** Image assets used by this document, by hash. Entries are only ever added. */
   assets: Readonly<Record<string, AssetInfo>>;
+  /** The document's styles, by ID. */
+  styles: Readonly<Record<string, Style>>;
+  /** The document's variables, by ID. */
+  variables: Readonly<Record<string, Variable>>;
+  /** The collections the variables are in, by ID. */
+  variableCollections: Readonly<Record<string, VariableCollection>>;
 }
 
 export interface FileMeta {
@@ -758,6 +837,6 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   endArrow?: ArrowType;
 } & Partial<Omit<TextNode, keyof LayerBase>>;
 
-export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides'>>;
+export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides' | 'variableModes'>>;
 
 export type NodePatch = LayerPatch | PagePatch;

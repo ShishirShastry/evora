@@ -15,8 +15,28 @@ export interface NodeChange {
   after: Props | null;
 }
 
+/** The document's tables beside its nodes. An entry of one is changed as a whole. */
+const TABLES = ['styles', 'variables', 'variableCollections'] as const;
+type TableName = (typeof TABLES)[number];
+
 export interface DocumentPatch {
   nodes: Record<NodeId, NodeChange>;
+  /** For each table that changed: the entries that differ, whole, before and after (null where there is none). */
+  tables?: Partial<Record<TableName, Record<string, { before: unknown; after: unknown }>>>;
+}
+
+function diffTables(before: Document, after: Document): DocumentPatch['tables'] | null {
+  let out: NonNullable<DocumentPatch['tables']> | null = null;
+  for (const table of TABLES) {
+    const a = before[table] as Record<string, unknown>;
+    const b = after[table] as Record<string, unknown>;
+    if (a === b) continue;
+    const entries: Record<string, { before: unknown; after: unknown }> = {};
+    for (const id in b) if (!sameValue(a[id], b[id])) entries[id] = { before: a[id] ?? null, after: b[id] };
+    for (const id in a) if (!(id in b)) entries[id] = { before: a[id], after: null };
+    if (Object.keys(entries).length > 0) (out ??= {})[table] = entries;
+  }
+  return out;
 }
 
 function sameValue(a: unknown, b: unknown): boolean {
@@ -31,7 +51,8 @@ function sameValue(a: unknown, b: unknown): boolean {
  * single comparison each. Returns `null` when nothing differs.
  */
 export function diffDocuments(before: Document, after: Document): DocumentPatch | null {
-  if (before.nodes === after.nodes) return null;
+  const tables = diffTables(before, after);
+  if (before.nodes === after.nodes) return tables ? { nodes: {}, tables } : null;
   const nodes: Record<NodeId, NodeChange> = {};
   let any = false;
 
@@ -74,6 +95,7 @@ export function diffDocuments(before: Document, after: Document): DocumentPatch 
       any = true;
     }
   }
+  if (tables) return { nodes, tables };
   return any ? { nodes } : null;
 }
 
@@ -107,5 +129,18 @@ export function applyPatch(doc: Document, patch: DocumentPatch, direction: 'forw
     }
     changes[id] = merged as unknown as DesignNode;
   }
-  return setNodes(doc, changes);
+  let next = setNodes(doc, changes);
+  for (const table of TABLES) {
+    const entries = patch.tables?.[table];
+    if (!entries) continue;
+    const rows: Record<string, unknown> = { ...(next[table] as Record<string, unknown>) };
+    for (const id in entries) {
+      const entry = entries[id] as { before: unknown; after: unknown };
+      const to = direction === 'forward' ? entry.after : entry.before;
+      if (to === null) delete rows[id];
+      else rows[id] = to;
+    }
+    next = { ...next, [table]: rows };
+  }
+  return next;
 }

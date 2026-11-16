@@ -51,6 +51,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 import { AutoLayoutSection, ResizingSection } from './AutoLayoutSection';
 import { ComponentSection } from './ComponentSections';
+import { LocalTokens, StylesSection, VariablesSection } from './TokenSections';
 import { EffectsSection } from './EffectsSection';
 import { ConstraintsSection, LayoutGridSection } from './LayoutSections';
 import { PaintList } from './PaintList';
@@ -466,6 +467,7 @@ export function DesignPanel() {
     return (
       <aside aria-label="Design properties" className="h-full overflow-y-auto" data-text-tools>
         <PageProperties />
+        <LocalTokens />
       </aside>
     );
   }
@@ -861,6 +863,10 @@ export function DesignPanel() {
       )}
 
       <EffectsSection layers={layers} />
+
+      <StylesSection layers={layers} />
+
+      <VariablesSection layers={layers} />
     </aside>
   );
 }

@@ -33,6 +33,8 @@ export * from './layout/restore';
 export * from './components/instances';
 export * from './ops/components';
 export * from './ops/variants';
+export * from './tokens/tokens';
+export * from './ops/tokens';
 export * from './ops/autoLayout';
 export * from './vector/bezier';
 export * from './vector/network';

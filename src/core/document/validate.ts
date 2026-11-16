@@ -19,7 +19,14 @@ import {
   COUNTER_AXIS_ALIGN_CONTENTS,
   FRAME_KINDS,
   COMPONENT_PROP_TYPES,
+  STYLE_TYPES,
+  VARIABLE_TYPES,
   type ComponentProp,
+  type Style,
+  type StyleRefs,
+  type Variable,
+  type VariableCollection,
+  type VariableValue,
   GRADIENT_TYPES,
   IMAGE_SCALE_MODES,
   LAYER_TYPES,
@@ -293,6 +300,101 @@ function propRefs(value: unknown): { visible?: string; characters?: string; comp
   return out;
 }
 
+/** Which styles a layer uses: IDs, as strings, for the kinds of style there are. */
+function styleRefs(value: unknown): StyleRefs {
+  const out: StyleRefs = {};
+  if (!isObject(value)) return out;
+  for (const key of ['fills', 'strokes', 'text', 'effects', 'grids'] as const) {
+    const ref = value[key];
+    if (typeof ref === 'string' && ref) out[key] = ref;
+  }
+  return out;
+}
+
+/** The table of styles: an entry needs a known type; the parts a style has are checked like a layer's. */
+function styles(value: unknown): Record<string, Style> {
+  const out: Record<string, Style> = {};
+  if (!isObject(value)) return out;
+  for (const id in value) {
+    const item = value[id];
+    if (!isObject(item) || !(STYLE_TYPES as readonly unknown[]).includes(item.type)) continue;
+    const text = isObject(item.text) ? item.text : {};
+    out[id] = {
+      id,
+      name: typeof item.name === 'string' && item.name ? item.name : 'Style',
+      description: typeof item.description === 'string' ? item.description : '',
+      type: item.type as Style['type'],
+      paints: paints(item.paints),
+      text: {
+        fontFamily: typeof text.fontFamily === 'string' && text.fontFamily.trim() ? text.fontFamily : 'Inter',
+        fontSize: finite(text.fontSize, 16, 1, 2000),
+        fontWeight: Math.round(finite(text.fontWeight, 400, 100, 900) / 100) * 100,
+        italic: text.italic === true,
+        lineHeight: text.lineHeight === null || text.lineHeight === undefined ? null : finite(text.lineHeight, 19, 1, 10000),
+        letterSpacing: finite(text.letterSpacing, 0, -200, 2000),
+        textDecoration: oneOf(text.textDecoration, TEXT_DECORATIONS, 'NONE'),
+        textCase: oneOf(text.textCase, TEXT_CASES, 'ORIGINAL'),
+      },
+      effects: effects(item.effects),
+      grids: layoutGrids(item.grids),
+    };
+  }
+  return out;
+}
+
+/** The table of variable collections: each needs at least one mode. */
+function variableCollections(value: unknown): Record<string, VariableCollection> {
+  const out: Record<string, VariableCollection> = {};
+  if (!isObject(value)) return out;
+  for (const id in value) {
+    const item = value[id];
+    if (!isObject(item)) continue;
+    const modes: VariableCollection['modes'] = [];
+    const seen = new Set<string>();
+    for (const mode of Array.isArray(item.modes) ? item.modes : []) {
+      if (!isObject(mode) || typeof mode.id !== 'string' || !mode.id || seen.has(mode.id)) continue;
+      seen.add(mode.id);
+      modes.push({ id: mode.id, name: typeof mode.name === 'string' && mode.name ? mode.name : 'Mode' });
+    }
+    if (modes.length === 0) continue;
+    out[id] = { id, name: typeof item.name === 'string' && item.name ? item.name : 'Collection', modes };
+  }
+  return out;
+}
+
+/** The table of variables: each is in a collection that exists, and has values of its own type for that collection's modes. */
+function variables(value: unknown, collections: Record<string, VariableCollection>): Record<string, Variable> {
+  const out: Record<string, Variable> = {};
+  if (!isObject(value)) return out;
+  for (const id in value) {
+    const item = value[id];
+    if (!isObject(item) || !(VARIABLE_TYPES as readonly unknown[]).includes(item.type)) continue;
+    const collection = typeof item.collectionId === 'string' ? collections[item.collectionId] : undefined;
+    if (!collection) continue;
+    const type = item.type as Variable['type'];
+    const given = isObject(item.valuesByMode) ? item.valuesByMode : {};
+    const valuesByMode: Record<string, VariableValue> = {};
+    for (const mode of collection.modes) {
+      const entry = given[mode.id];
+      if (isObject(entry) && typeof entry.alias === 'string' && entry.alias) valuesByMode[mode.id] = { alias: entry.alias };
+      else if (type === 'COLOR') valuesByMode[mode.id] = rgb(entry, BLACK_RGB);
+      else if (type === 'FLOAT') valuesByMode[mode.id] = finite(entry, 0, -1e6, 1e6);
+      else if (type === 'STRING') valuesByMode[mode.id] = typeof entry === 'string' ? entry : '';
+      else valuesByMode[mode.id] = entry === true;
+    }
+    out[id] = {
+      id,
+      name: typeof item.name === 'string' && item.name ? item.name : 'Variable',
+      description: typeof item.description === 'string' ? item.description : '',
+      collectionId: collection.id,
+      type,
+      scopes: Array.isArray(item.scopes) ? item.scopes.filter((scope): scope is string => typeof scope === 'string') : [],
+      valuesByMode,
+    };
+  }
+  return out;
+}
+
 function componentProps(value: unknown): ComponentProp[] {
   const out: ComponentProp[] = [];
   if (!Array.isArray(value)) return out;
@@ -361,6 +463,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       order,
       backgroundColor: rgb(raw.backgroundColor, DEFAULT_PAGE_BACKGROUND),
       guides: guides(raw.guides),
+      variableModes: stringMap(raw.variableModes),
     };
     return page;
   }
@@ -404,6 +507,9 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     maxHeight: sizeLimit(raw.maxHeight),
     sourceId: typeof raw.sourceId === 'string' && raw.sourceId ? raw.sourceId : null,
     propRefs: propRefs(raw.propRefs),
+    styleRefs: styleRefs(raw.styleRefs),
+    boundVariables: stringMap(raw.boundVariables),
+    variableModes: stringMap(raw.variableModes),
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
@@ -493,6 +599,17 @@ export function repairDocument(input: unknown): RepairResult {
   const id = typeof source.id === 'string' && source.id ? source.id : createId();
   const name = typeof source.name === 'string' && source.name ? source.name : 'Untitled';
   const rawNodes = isObject(source.nodes) ? source.nodes : {};
+  const styleTable = styles(source.styles);
+  const collectionTable = variableCollections(source.variableCollections);
+  const variableTable = variables(source.variables, collectionTable);
+  const tables: [string, unknown, unknown][] = [
+    ['styles', styleTable, source.styles],
+    ['variable collections', collectionTable, source.variableCollections],
+    ['variables', variableTable, source.variables],
+  ];
+  for (const [what, checked, given] of tables) {
+    if (JSON.stringify(checked) !== JSON.stringify(isObject(given) ? given : null)) repairs.push(`The document's ${what} were damaged and have been rebuilt.`);
+  }
   const assetTable = assets(source.assets);
   if (JSON.stringify(assetTable) !== JSON.stringify(isObject(source.assets) ? source.assets : null)) {
     repairs.push('The list of image assets was damaged and has been rebuilt.');
@@ -604,7 +721,7 @@ export function repairDocument(input: unknown): RepairResult {
   }
   if (rekeyedGroups > 0) repairs.push(`Layer order was rebuilt in ${rekeyedGroups} place(s).`);
 
-  return { doc: { id, name, nodes, assets: assetTable }, repairs };
+  return { doc: { id, name, nodes, assets: assetTable, styles: styleTable, variables: variableTable, variableCollections: collectionTable }, repairs };
 }
 
 /** Lists what is wrong with a document. An empty list means it is valid. */

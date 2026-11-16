@@ -1,6 +1,7 @@
 import { setNodes } from '../document/mutate';
 import { isFrame, isLayer, type ComponentProp, type DesignNode, type Document, type FrameNode, type InstanceOverrides, type LayerNode, type NodeId } from '../document/schema';
 import { getAncestorIds, getChildIds } from '../scene/tree';
+import { refsBeside, tokenControlled } from '../tokens/tokens';
 
 /**
  * Components and instances. A component is a frame that is the original of a
@@ -51,6 +52,10 @@ export const OVERRIDABLE: readonly string[] = [
   'componentId',
   'overrides',
   'propValues',
+  // Its styles, the variables it is bound to, and the modes chosen on it.
+  'styleRefs',
+  'boundVariables',
+  'variableModes',
 ];
 
 /** What a component property can decide about a layer, and the type of property that decides it. */
@@ -254,9 +259,12 @@ function captureOverrides(previous: Document, doc: Document): Document {
     const was = before as unknown as Props;
     // Its own look, as an instance, when it differs from the component's, is recorded on itself.
     const own = isInstance(node) && isInstance(before) && node.componentId !== null && node.componentId === before.componentId;
+    // What a style or a variable decides is written by them, and is no change of the designer's.
+    const controlled = tokenControlled(node.styleRefs, node.boundVariables);
     if (own) {
       const props: Props = {};
-      for (const key of ROOT_OVERRIDABLE) if (!same(now[key], was[key])) props[key] = now[key];
+      for (const key of ROOT_OVERRIDABLE) if (!controlled.has(key) && !same(now[key], was[key])) props[key] = now[key];
+      for (const key of ['styleRefs', 'boundVariables']) if (!same(now[key], was[key])) props[key] = now[key];
       if (Object.keys(props).length > 0) record(id, node.componentId as NodeId, props);
     }
     if (node.sourceId === null) continue;
@@ -280,7 +288,7 @@ function captureOverrides(previous: Document, doc: Document): Document {
     const current = nodes[id] as unknown as Props;
     const props: Props = {};
     for (const key of OVERRIDABLE) {
-      if ((own && ROOT_OVERRIDABLE.includes(key)) || viaProperty.has(key)) continue;
+      if ((own && (ROOT_OVERRIDABLE.includes(key) || key === 'styleRefs' || key === 'boundVariables')) || viaProperty.has(key) || controlled.has(key)) continue;
       const now = current;
       if (!(key in now) || same(now[key], was[key])) continue;
       if (key === 'overrides') {
@@ -318,6 +326,29 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
   const root: Props = { ...(instance as unknown as Props) };
   const rootOverrides = instance.overrides[component.id] ?? {};
   for (const key of ROOT_COPIED) root[key] = key in rootOverrides && ROOT_OVERRIDABLE.includes(key) ? rootOverrides[key] : (component as unknown as Props)[key];
+  // Its styles and bindings for that look are the component's too, unless it has its own; those for anything else are its own.
+  if ('styleRefs' in rootOverrides) root.styleRefs = rootOverrides.styleRefs;
+  else {
+    const refs: Props = { ...instance.styleRefs };
+    for (const ref of ['fills', 'strokes', 'effects'] as const) {
+      if (component.styleRefs[ref] && !(ref in rootOverrides)) refs[ref] = component.styleRefs[ref];
+      else delete refs[ref];
+    }
+    root.styleRefs = refs;
+  }
+  if ('boundVariables' in rootOverrides) root.boundVariables = rootOverrides.boundVariables;
+  else {
+    const copied = (key: string): boolean => ROOT_COPIED.includes(key.split('.')[0] as string);
+    const bound: Record<string, string> = {};
+    for (const key in instance.boundVariables) if (!copied(key)) bound[key] = instance.boundVariables[key] as string;
+    for (const key in component.boundVariables) if (copied(key) && !((key.split('.')[0] as string) in rootOverrides)) bound[key] = component.boundVariables[key] as string;
+    root.boundVariables = bound;
+  }
+  if (!fresh) {
+    for (const key of tokenControlled(root.styleRefs as LayerNode['styleRefs'], root.boundVariables as LayerNode['boundVariables'])) {
+      if (ROOT_COPIED.includes(key) && !(key in rootOverrides)) root[key] = (instance as unknown as Props)[key];
+    }
+  }
   // It is as big as the component until it is given a size of its own, and follows the component while it is.
   if (isFrame(componentBefore) && !fresh) {
     if (instance.width === componentBefore.width && component.width !== componentBefore.width) root.width = component.width;
@@ -357,6 +388,14 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
       if (type === 'BOOLEAN' ? typeof value !== 'boolean' : typeof value !== 'string') continue;
       if (type === 'INSTANCE_SWAP' && !isComponent(doc.nodes[value as string])) continue;
       if (key in next) next[key] = value;
+    }
+    // Where the instance has its own value, the component's style or variable for it does not apply.
+    Object.assign(next, refsBeside(next.styleRefs as LayerNode['styleRefs'], next.boundVariables as LayerNode['boundVariables'], override));
+    // What a style or a variable decides here is theirs to write: the mode that applies in this instance may be another.
+    if (isLayer(existing) && !made) {
+      for (const key of tokenControlled(next.styleRefs as LayerNode['styleRefs'], next.boundVariables as LayerNode['boundVariables'])) {
+        if (key in (existing as unknown as Props)) next[key] = (existing as unknown as Props)[key];
+      }
     }
     next.id = id;
     next.sourceId = source.id;

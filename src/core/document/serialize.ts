@@ -279,6 +279,19 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 19, document: { ...body, nodes: upgraded } };
   },
+  // Version 20 adds styles and variables. Older documents have none, and no older layer uses one.
+  19: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node)) upgraded[id] = node;
+      else if (node.type === 'PAGE') upgraded[id] = { variableModes: {}, ...node };
+      else upgraded[id] = { styleRefs: {}, boundVariables: {}, variableModes: {}, ...node };
+    }
+    return { ...file, schemaVersion: 20, document: { styles: {}, variables: {}, variableCollections: {}, ...body, nodes: upgraded } };
+  },
 };
 
 /**
