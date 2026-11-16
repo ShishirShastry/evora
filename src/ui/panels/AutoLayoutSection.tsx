@@ -3,12 +3,12 @@ import {
   belongsToFlow,
   isAutoLayout,
   itemSpacingOf,
-  layoutDirection,
   lineSpacingOf,
   patchNodes,
   setItemSpacing,
   setLayoutDirection,
   setLayoutSizing,
+  setLayoutWrap,
   setLineSpacing,
   sizingChoices,
   stretchedAcross,
@@ -29,16 +29,14 @@ import { Icon } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 import { Row, Section, SelectField, shared } from './panelParts';
 
-/** What the direction menu offers. Wrapping is a row that carries on in new lines, so it is a third choice beside the two directions. */
 type Direction = LayoutDirection;
 
 const DIRECTIONS: readonly (readonly [Direction, string])[] = [
   ['HORIZONTAL', 'Horizontal'],
   ['VERTICAL', 'Vertical'],
-  ['WRAP', 'Wrap'],
 ];
 
-const directionOf = (frame: FrameNode): Direction => layoutDirection(frame) ?? 'HORIZONTAL';
+const directionOf = (frame: FrameNode): Direction => (frame.layoutMode === 'VERTICAL' ? 'VERTICAL' : 'HORIZONTAL');
 
 /** The names of the alignments along and across a layout, which depend on which way it runs. */
 function alignmentNames(direction: Direction | Mixed): {
@@ -210,7 +208,7 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
   const ids = frames.map((frame) => frame.id);
 
   const direction = shared(frames, (frame) => directionOf(frame as FrameNode));
-  const wraps = frames.every((frame) => directionOf(frame) === 'WRAP');
+  const wraps = frames.every((frame) => frame.layoutWrap === 'WRAP');
   const names = alignmentNames(direction);
   const along = shared(frames, (frame) => (frame as FrameNode).primaryAxisAlignItems);
   const lines = shared(frames, (frame) => (frame as FrameNode).counterAxisAlignContent);
@@ -241,16 +239,23 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
           value={direction}
           options={DIRECTIONS}
           onChange={(next) =>
-            store.getState().apply('Change layout direction', (doc) =>
-              setLayoutDirection(
-                doc,
-                frames.map((frame) => frame.id),
-                next,
-              ),
-            )
+            store.getState().apply('Change layout direction', (doc) => setLayoutDirection(doc, ids, next))
           }
         />
       </Row>
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          className="accent-[var(--od-accent)]"
+          aria-label="Wrap"
+          checked={wraps}
+          onChange={(event) => {
+            const wrap = event.currentTarget.checked;
+            store.getState().apply(wrap ? 'Wrap layout' : 'Stop wrapping layout', (doc) => setLayoutWrap(doc, ids, wrap));
+          }}
+        />
+        {direction === 'VERTICAL' ? 'Wrap into further columns' : direction === 'HORIZONTAL' ? 'Wrap into further rows' : 'Wrap'}
+      </label>
       <Row>
         <SpacingField
           label="Spacing between items"
@@ -333,7 +338,7 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
         // Stretch overrides what each item says about its own size across the layout, so that is said here.
         <p role="note" aria-label="What Stretch does" className="m-0 text-faint">
           {direction === 'VERTICAL'
-            ? 'Every item is as wide as the frame has room. An item’s own horizontal sizing, “Fill container” included, is not used while Stretch is on. Rotated items and text that sets its own width keep their width.'
+            ? 'Every item is as wide as the frame has room (in a wrapping column, as wide as its column). An item’s own horizontal sizing, “Fill container” included, is not used while Stretch is on. Rotated items and text that sets its own width keep their width.'
             : 'Every item is as tall as the frame has room (in a wrapping row, as tall as its line). An item’s own vertical sizing, “Fill container” included, is not used while Stretch is on. Rotated items, lines and text that sets its own height keep their height.'}
         </p>
       )}

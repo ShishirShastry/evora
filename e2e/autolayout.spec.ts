@@ -328,7 +328,8 @@ test('a row: spacing and padding, fill and hug, limits, and wrapping follow the 
 
   // Wrapping: at 150 wide the third square no longer fits and starts a second line; the frame hugs both lines.
   await layer(page, 'Frame 1').click();
-  await select(page, 'Layout direction').selectOption('WRAP');
+  await checkbox(page, 'Wrap').check();
+  await expect(select(page, 'Layout direction')).toHaveValue('HORIZONTAL');
   await set(page, 'Width', '150');
   await expect(field(page, 'Height')).toHaveValue('140');
   await set(page, 'Spacing between lines', '10');
@@ -363,7 +364,8 @@ test('a row: spacing and padding, fill and hug, limits, and wrapping follow the 
   await page.reload();
   await expect(canvas(page)).toBeVisible();
   await layer(page, 'Frame 1').click();
-  await expect(select(page, 'Layout direction')).toHaveValue('WRAP');
+  await expect(select(page, 'Layout direction')).toHaveValue('HORIZONTAL');
+  await expect(checkbox(page, 'Wrap')).toBeChecked();
   await expect(field(page, 'Width')).toHaveValue('150');
   await expect(field(page, 'Height')).toHaveValue('150');
   await expect(field(page, 'Spacing between lines')).toHaveValue('10');
@@ -682,7 +684,7 @@ test('automatic spacing: the gap field takes Auto, in step with “space between
 
   // The gap between the lines of a wrapping row takes Auto in the same way, in step with "Line distribution".
   await set(page, 'Right padding', '20');
-  await select(page, 'Layout direction').selectOption('WRAP');
+  await checkbox(page, 'Wrap').check();
   await set(page, 'Width', '150');
   const lineGap = field(page, 'Spacing between lines');
   const lineAuto = page.getByRole('button', { name: 'Automatic spacing between lines' });
@@ -719,5 +721,127 @@ test('automatic spacing: the gap field takes Auto, in step with “space between
   await expect(select(page, 'Alignment along the layout')).toHaveValue('SPACE_BETWEEN');
   await layer(page, 'Rectangle 3').click();
   await expect(field(page, 'Y position')).toHaveValue('120');
+  expect(errors).toEqual([]);
+});
+
+test('a column that wraps carries on in further columns, and breaks again when its height changes', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await newFile(page);
+  const inFrame = await drawFrame(page, [400, 360]);
+  const colourAt = (x: number, y: number): Promise<[number, number, number]> => pixel(page, ...inFrame(x, y));
+  // Three bars of 100 × 40, one under another, 20 apart, in a 300 × 260 frame: red, grey and blue.
+  await drawRect(page, inFrame, { x: 20, y: 20, w: 100, h: 40 });
+  await set(page, 'Fill 1 colour hex', 'FF0000');
+  await drawRect(page, inFrame, { x: 20, y: 80, w: 100, h: 40 });
+  await drawRect(page, inFrame, { x: 20, y: 140, w: 100, h: 40 });
+  await set(page, 'Fill 1 colour hex', '0000FF');
+  await layer(page, 'Frame 1').click();
+  await page.getByRole('button', { name: 'Add Auto Layout' }).click();
+  await expect(select(page, 'Layout direction')).toHaveValue('VERTICAL');
+  await expect(select(page, 'Layout direction').locator('option')).toHaveText(['Horizontal', 'Vertical']);
+  await expect(checkbox(page, 'Wrap')).not.toBeChecked();
+  expect(await boxOf(page)).toMatchObject({ w: 300, h: 260 });
+  /** The box of the blue bar, the last in the column, as the panel shows it; the frame is selected again afterwards. */
+  const blue = async (): Promise<{ x: number; y: number; w: number; h: number }> => {
+    await layer(page, 'Rectangle 3').click();
+    const box = await boxOf(page);
+    await layer(page, 'Frame 1').click();
+    return box;
+  };
+
+  // Wrap: a column needs a height of its own to wrap at, so it keeps the one it has and no longer hugs it.
+  await checkbox(page, 'Wrap').check();
+  await expect(select(page, 'Vertical sizing')).toHaveValue('FIXED');
+  await expect(select(page, 'Horizontal sizing')).toHaveValue('HUG');
+  await expect(field(page, 'Height')).toHaveValue('260');
+  expect(await blue()).toEqual({ x: 20, y: 140, w: 100, h: 40 });
+
+  // 200 tall leaves 100 between the padding of 20 and 80: two bars and their gap. The third starts a second column,
+  // and the frame, which hugs its width, grows by it.
+  await set(page, 'Height', '200');
+  expect(await blue()).toEqual({ x: 120, y: 20, w: 100, h: 40 });
+  await expect(field(page, 'Width')).toHaveValue('400');
+  expect(await colourAt(170, 40)).toEqual(BLUE);
+  expect(await colourAt(70, 160)).toEqual(WHITE);
+  expect(await colourAt(70, 40)).toEqual(RED);
+
+  // The gap between the columns.
+  await set(page, 'Spacing between lines', '30');
+  expect(await blue()).toMatchObject({ x: 150, y: 20 });
+  await expect(field(page, 'Width')).toHaveValue('430');
+  expect(await colourAt(135, 40)).toEqual(WHITE);
+  expect(await colourAt(200, 40)).toEqual(BLUE);
+
+  // Shorter still, each bar has a column to itself; taller, they are one column again.
+  await set(page, 'Height', '120');
+  expect(await blue()).toMatchObject({ x: 280, y: 20 });
+  await expect(field(page, 'Width')).toHaveValue('560');
+  await layer(page, 'Rectangle 2').click();
+  expect(await boxOf(page)).toMatchObject({ x: 150, y: 20 });
+  expect(await colourAt(200, 40)).toEqual(GREY);
+  expect(await colourAt(330, 40)).toEqual(BLUE);
+  await layer(page, 'Frame 1').click();
+  // The bottom edge dragged down by 180 on the canvas: the columns break again as it goes.
+  await drag(page, inFrame(280, 120), inFrame(280, 300));
+  await expect(field(page, 'Height')).toHaveValue('300');
+  expect(await blue()).toEqual({ x: 20, y: 140, w: 100, h: 40 });
+  await expect(field(page, 'Width')).toHaveValue('300');
+  expect(await colourAt(70, 160)).toEqual(BLUE);
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Height')).toHaveValue('120');
+  expect(await blue()).toMatchObject({ x: 280, y: 20 });
+
+  // Fill within a column: at 200 tall the grey bar shares the first column with the red one and takes what is left of it.
+  await set(page, 'Height', '200');
+  await layer(page, 'Rectangle 2').click();
+  await select(page, 'Vertical sizing').selectOption('FILL');
+  expect(await boxOf(page)).toEqual({ x: 20, y: 80, w: 100, h: 40 });
+  await layer(page, 'Frame 1').click();
+  await set(page, 'Height', '210');
+  await layer(page, 'Rectangle 2').click();
+  // 110 between the padding, less the red bar and the gap. (The blue bar still does not fit under it.)
+  expect(await boxOf(page)).toEqual({ x: 20, y: 80, w: 100, h: 50 });
+  expect(await colourAt(70, 125)).toEqual(GREY);
+  await layer(page, 'Frame 1').click();
+  expect(await blue()).toMatchObject({ x: 150, y: 20 });
+
+  // The columns spread from side to side: the frame is given a width of its own, and the gap between them is Auto.
+  await set(page, 'Width', '500');
+  await expect(select(page, 'Horizontal sizing')).toHaveValue('FIXED');
+  await select(page, 'Line distribution').selectOption('SPACE_BETWEEN');
+  await expect(field(page, 'Spacing between lines')).toHaveValue('Auto');
+  // The second column is at the right padding of 180: 500 less 180 and its own 100.
+  expect(await blue()).toMatchObject({ x: 220, y: 20 });
+  expect(await colourAt(270, 40)).toEqual(BLUE);
+  expect(await colourAt(200, 40)).toEqual(WHITE);
+
+  // Stretch reaches across a column that wraps too: every bar as wide as its column, the columns sharing the width.
+  await select(page, 'Line distribution').selectOption('AUTO');
+  await select(page, 'Alignment across the layout').selectOption('STRETCH');
+  await expect(page.getByRole('note', { name: 'What Stretch does' })).toContainText('as wide as its column');
+  // 300 between the padding, less the gap of 30, is 135 for each of the two columns.
+  expect(await blue()).toEqual({ x: 185, y: 20, w: 135, h: 40 });
+  await layer(page, 'Rectangle 1').click();
+  expect(await boxOf(page)).toEqual({ x: 20, y: 20, w: 135, h: 40 });
+  expect(await colourAt(150, 40)).toEqual(RED);
+  expect(await colourAt(170, 40)).toEqual(WHITE);
+  expect(await colourAt(310, 40)).toEqual(BLUE);
+
+  // Stored.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await layer(page, 'Frame 1').click();
+  await expect(select(page, 'Layout direction')).toHaveValue('VERTICAL');
+  await expect(checkbox(page, 'Wrap')).toBeChecked();
+  await expect(field(page, 'Spacing between lines')).toHaveValue('30');
+  expect(await blue()).toEqual({ x: 185, y: 20, w: 135, h: 40 });
+  expect(await colourAt(310, 40)).toEqual(BLUE);
+
+  // Switched off, it is one column again, however short the frame.
+  await checkbox(page, 'Wrap').uncheck();
+  expect(await blue()).toMatchObject({ x: 20 });
   expect(errors).toEqual([]);
 });

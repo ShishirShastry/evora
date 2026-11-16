@@ -1,6 +1,6 @@
 /**
- * OPEN DESIGN document schema, version 16 (adds stretching children across an Auto Layout frame; version 15
- * added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
+ * OPEN DESIGN document schema, version 17 (columns of an Auto Layout frame can wrap as rows can; version 16
+ * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
  * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
@@ -10,7 +10,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -232,7 +232,11 @@ export interface LayoutGrid {
 export type LayoutMode = 'NONE' | 'HORIZONTAL' | 'VERTICAL';
 export const LAYOUT_MODES: readonly LayoutMode[] = ['NONE', 'HORIZONTAL', 'VERTICAL'];
 
-/** Whether the children of a row carry on in a new line when they no longer fit. */
+/**
+ * Whether the children of a layout carry on in a new line when they no
+ * longer fit: a row in a further row beneath it, a column (from version 17)
+ * in a further column beside it.
+ */
 export type LayoutWrap = 'NO_WRAP' | 'WRAP';
 export const LAYOUT_WRAPS: readonly LayoutWrap[] = ['NO_WRAP', 'WRAP'];
 
@@ -360,14 +364,14 @@ export interface FrameNode extends LayerBase {
   guides: Guide[];
   /** Auto Layout: NONE leaves the children where they are; otherwise the frame places them in a row or a column. */
   layoutMode: LayoutMode;
-  /** Whether a row carries on in new lines. Columns do not wrap. */
+  /** Whether the layout carries on in new lines: further rows under a row, further columns beside a column. */
   layoutWrap: LayoutWrap;
   primaryAxisAlignItems: PrimaryAxisAlign;
   counterAxisAlignItems: CounterAxisAlign;
   counterAxisAlignContent: CounterAxisAlignContent;
   /** The space between neighbouring children along the direction of the layout. May be negative, which overlaps them. */
   itemSpacing: number;
-  /** The space between the lines of a wrapping row. */
+  /** The space between the lines of a layout that wraps: between its rows, or between its columns. */
   counterAxisSpacing: number;
   /** The space kept free between each edge of the frame and its children. */
   paddingLeft: number;

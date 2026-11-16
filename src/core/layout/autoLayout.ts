@@ -20,7 +20,8 @@ import { breakLines, clampSize, distribute, extent, lineSizes, placeAcross, plac
  * each child a fixed size, as big as what is in it ("hug") or taking the room
  * that is left ("fill"), and the frame itself fixed or hugging its children.
  * A frame can also stretch its children across its layout, whatever their own
- * sizing that way.
+ * sizing that way, and carry a row or a column on in further lines when it
+ * runs out of room.
  *
  * As with constraints and groups, nothing is worked out when the design is
  * painted: `applyAutoLayout` puts every Auto Layout frame of a document in
@@ -175,19 +176,40 @@ function footprint(node: LayerNode, width: number, height: number): { width: num
   return { width: width * cos + height * sin, height: width * sin + height * cos };
 }
 
-/** One frame's lines of children (a row that does not wrap, and a column, have one). */
+/** One frame's lines of children: the rows of a row that wraps, the columns of a column that wraps, otherwise one. */
 interface Lines {
   /** For each line, the positions of its children in the frame's flow. */
   rows: number[][];
-  /** The size of each line across the direction of the layout, once heights are known. */
+  /** The size of each line across the direction of the layout: the height of a row, the width of a column. */
   sizes: number[];
 }
+
+/** What one run over a frame and the frames nested in its flow works out. */
+interface Solved {
+  widths: Map<NodeId, number>;
+  heights: Map<NodeId, number>;
+  positions: Map<NodeId, { x: number; y: number }>;
+  /**
+   * The wrapping columns whose height is given to them by the frame they are
+   * in, with the height each was taken to have while its columns were made.
+   */
+  trusted: Map<NodeId, number>;
+}
+
+/** How often a pass is run again because a height taken on trust turned out different. */
+const MAX_RUNS = 4;
 
 /**
  * Lays out one Auto Layout frame and every Auto Layout frame nested in its
  * flow. Widths are settled first, from the outside in, because how tall a
  * wrapped text or a wrapping row is depends on how wide it is; then heights;
  * then positions.
+ *
+ * A column that wraps is the other way round: how wide it is, and its
+ * children with it, depends on its height, which says where a new column
+ * starts. Its height is known beforehand when it is fixed or hugs; when the
+ * frame it is in gives it (it fills, or is stretched), the height it has now
+ * is taken on trust and the run is repeated if the result disagrees.
  */
 function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Document {
   const root = doc.nodes[rootId];
@@ -204,13 +226,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
   };
   /** A child that this pass lays out itself, rather than taking as a box of a given size. */
   const nested = (node: LayerNode): node is FrameNode => isAutoLayout(node) && node.rotation === 0;
-
-  const widths = new Map<NodeId, number>();
-  const heights = new Map<NodeId, number>();
-  const positions = new Map<NodeId, { x: number; y: number }>();
-  const lines = new Map<NodeId, Lines>();
-  const hugWidths = new Map<NodeId, number>();
-  const hugHeights = new Map<NodeId, number>();
+  const wrapsColumn = (frame: FrameNode): boolean => frame.layoutMode === 'VERTICAL' && frame.layoutWrap === 'WRAP';
 
   const limits = (node: LayerNode, axis: Axis): { min: number; max: number } => {
     // A rotated layer is a box of a given size to the layout, whatever its limits say.
@@ -220,200 +236,328 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
     return { min: min ?? 0, max: max ?? Infinity };
   };
 
-  // ------------------------------------------------------------------ widths
+  const solve = (assumed: ReadonlyMap<NodeId, number>): Solved => {
+    const widths = new Map<NodeId, number>();
+    const heights = new Map<NodeId, number>();
+    const positions = new Map<NodeId, { x: number; y: number }>();
+    const trusted = new Map<NodeId, number>();
+    const lines = new Map<NodeId, Lines>();
+    const hugWidths = new Map<NodeId, number>();
+    const hugHeights = new Map<NodeId, number>();
+    const columns = new Map<NodeId, number[][]>();
 
-  /** The width of a frame that hugs its children: theirs, the spacing between them, and its padding. */
-  const hugWidth = (frame: FrameNode): number => {
-    const known = hugWidths.get(frame.id);
-    if (known !== undefined) return known;
-    // With nothing to hug, the frame keeps the width it has rather than shrinking to nothing.
-    if (flowOf(frame).length === 0) return frame.width;
-    const sizes = flowOf(frame).map((child) => {
-      const { min, max } = limits(child, 'x');
-      return footprint(child, clampSize(ownWidth(child), min, max), child.height).width;
-    });
-    const content = frame.layoutMode === 'HORIZONTAL' ? extent(sizes, frame.itemSpacing) : Math.max(0, ...sizes);
-    const { min, max } = limits(frame, 'x');
-    const width = clampSize(content + frame.paddingLeft + frame.paddingRight, min, max);
-    hugWidths.set(frame.id, width);
-    return width;
-  };
+    // ---------------------------------------------------------------- widths
 
-  /** The width a child has when it does not fill. */
-  const ownWidth = (node: LayerNode): number => (nested(node) && node.layoutSizingHorizontal === 'HUG' ? hugWidth(node) : node.width);
-
-  const widthItem = (frame: FrameNode, child: LayerNode): FlowItem => {
-    const fill = child.layoutSizingHorizontal === 'FILL' || stretches(frame, child, 'x');
-    const { min, max } = limits(child, 'x');
-    // Something that fills never shrinks to nothing: a layer without a width cannot be seen or picked up.
-    if (fill) return { size: 0, fill, min: Math.max(1, min), max: Math.max(1, max) };
-    return { size: footprint(child, clampSize(ownWidth(child), min, max), child.height).width, fill, min: 0, max: Infinity };
-  };
-
-  const setWidth = (frame: FrameNode, width: number): void => {
-    widths.set(frame.id, width);
-    const flow = flowOf(frame);
-    const inner = Math.max(0, width - frame.paddingLeft - frame.paddingRight);
-    const items = flow.map((child) => widthItem(frame, child));
-    let sizes: number[];
-    if (frame.layoutMode === 'HORIZONTAL') {
-      const all = flow.map((_, index) => index);
-      const rows =
-        frame.layoutWrap === 'WRAP'
-          ? breakLines(
-              items.map((item) => (item.fill ? item.min : item.size)),
-              inner,
-              frame.itemSpacing,
-            )
-          : flow.length > 0
-            ? [all]
-            : [];
-      sizes = new Array<number>(flow.length).fill(0);
-      for (const row of rows) {
-        const shared = distribute(
-          row.map((index) => items[index] as FlowItem),
-          inner,
-          frame.itemSpacing,
-        );
-        row.forEach((index, k) => {
-          sizes[index] = shared[k] as number;
+    /** The width of a frame that hugs its children: theirs, the spacing between them, and its padding. */
+    const hugWidth = (frame: FrameNode): number => {
+      const known = hugWidths.get(frame.id);
+      if (known !== undefined) return known;
+      // With nothing to hug, the frame keeps the width it has rather than shrinking to nothing.
+      if (flowOf(frame).length === 0) return frame.width;
+      let content: number;
+      if (wrapsColumn(frame)) {
+        // Its columns side by side: each as wide as its widest child.
+        const items = flowOf(frame).map((child) => widthItem(frame, child));
+        content = extent(lineSizes(columnsOf(frame, null), items, null, frame.counterAxisSpacing, true), frame.counterAxisSpacing);
+      } else {
+        const sizes = flowOf(frame).map((child) => {
+          const { min, max } = limits(child, 'x');
+          return footprint(child, clampSize(ownWidth(child), min, max), child.height).width;
         });
+        content = frame.layoutMode === 'HORIZONTAL' ? extent(sizes, frame.itemSpacing) : Math.max(0, ...sizes);
       }
-      lines.set(frame.id, { rows, sizes: [] });
-    } else {
-      sizes = items.map((item) => (item.fill ? clampSize(inner, item.min, item.max) : item.size));
-      lines.set(frame.id, { rows: flow.length > 0 ? [flow.map((_, index) => index)] : [], sizes: [] });
-    }
-    flow.forEach((child, index) => {
-      // A rotated child keeps its own width; what was worked out above is the room it takes.
-      const own = child.rotation === 0 ? (sizes[index] as number) : child.width;
-      if (nested(child)) setWidth(child, own);
-      else widths.set(child.id, own);
-    });
-  };
+      const { min, max } = limits(frame, 'x');
+      const width = clampSize(content + frame.paddingLeft + frame.paddingRight, min, max);
+      hugWidths.set(frame.id, width);
+      return width;
+    };
 
-  // ----------------------------------------------------------------- heights
+    /** The width a child has when it does not fill. */
+    const ownWidth = (node: LayerNode): number => (nested(node) && node.layoutSizingHorizontal === 'HUG' ? hugWidth(node) : node.width);
 
-  /** The height of a text that follows its content, at the width it has been given. */
-  const textHeight = (node: LayerNode): number => {
-    if (node.type !== 'TEXT' || node.rotation !== 0 || node.textAutoResize !== 'HEIGHT') return node.height;
-    const width = widths.get(node.id) ?? node.width;
-    if (Math.abs(width - node.width) < EPSILON) return node.height;
-    return Math.max(1, layoutText({ ...node, width: clean(width) }, measurer).height);
-  };
+    const widthItem = (frame: FrameNode, child: LayerNode): FlowItem => {
+      const fill = child.layoutSizingHorizontal === 'FILL' || stretches(frame, child, 'x');
+      const { min, max } = limits(child, 'x');
+      // Something that fills never shrinks to nothing: a layer without a width cannot be seen or picked up.
+      if (fill) return { size: 0, fill, min: Math.max(1, min), max: Math.max(1, max) };
+      return { size: footprint(child, clampSize(ownWidth(child), min, max), child.height).width, fill, min: 0, max: Infinity };
+    };
 
-  /** The height a child has when it does not fill. */
-  const ownHeight = (node: LayerNode): number => {
-    if (nested(node)) return node.layoutSizingVertical === 'HUG' ? hugHeight(node) : node.height;
-    return textHeight(node);
-  };
+    /**
+     * The height between its padding at which a wrapping column starts a new
+     * column, or null where it never does: a column that hugs its height and
+     * has no maximum is as tall as its children need.
+     */
+    const breakHeight = (frame: FrameNode): number | null => {
+      const { min, max } = limits(frame, 'y');
+      const padding = frame.paddingTop + frame.paddingBottom;
+      const parent = frame.id === rootId ? undefined : doc.nodes[frame.parentId];
+      if (isAutoLayout(parent) && (frame.layoutSizingVertical === 'FILL' || stretches(parent, frame, 'y'))) {
+        // Its height comes from the frame it is in, which is settled only after the widths.
+        const height = assumed.get(frame.id) ?? frame.height;
+        trusted.set(frame.id, height);
+        return Math.max(0, height - padding);
+      }
+      if (frame.layoutSizingVertical === 'HUG') return max === Infinity ? null : Math.max(0, max - padding);
+      return Math.max(0, clampSize(frame.height, min, max) - padding);
+    };
 
-  const heightItem = (frame: FrameNode, child: LayerNode): FlowItem => {
-    const fill = child.layoutSizingVertical === 'FILL' || stretches(frame, child, 'y');
-    const { min, max } = limits(child, 'y');
-    if (fill) return { size: 0, fill, min: Math.max(1, min), max: Math.max(1, max) };
-    const width = widths.get(child.id) ?? child.width;
-    return { size: footprint(child, width, clampSize(ownHeight(child), min, max)).height, fill, min: 0, max: Infinity };
-  };
+    /** Forgets what was measured inside a child at a width that was only provisional. */
+    const forget = (node: LayerNode): void => {
+      if (!nested(node)) return;
+      hugHeights.delete(node.id);
+      columns.delete(node.id);
+      for (const child of flowOf(node)) forget(child);
+    };
 
-  /** The height of a frame that hugs its children: a column's children one under another, or a row's lines. */
-  const hugHeight = (frame: FrameNode): number => {
-    const known = hugHeights.get(frame.id);
-    if (known !== undefined) return known;
-    if (flowOf(frame).length === 0) return frame.height;
-    const items = flowOf(frame).map((child) => heightItem(frame, child));
-    const rows = lines.get(frame.id)?.rows ?? [];
-    const content =
-      frame.layoutMode === 'VERTICAL'
-        ? extent(distribute(items, null, frame.itemSpacing), frame.itemSpacing)
-        : extent(lineSizes(rows, items, null, frame.counterAxisSpacing, frame.layoutWrap === 'WRAP'), frame.counterAxisSpacing);
-    const { min, max } = limits(frame, 'y');
-    const height = clampSize(content + frame.paddingTop + frame.paddingBottom, min, max);
-    hugHeights.set(frame.id, height);
-    return height;
-  };
-
-  const setHeight = (frame: FrameNode, height: number): void => {
-    heights.set(frame.id, height);
-    const flow = flowOf(frame);
-    const inner = Math.max(0, height - frame.paddingTop - frame.paddingBottom);
-    const items = flow.map((child) => heightItem(frame, child));
-    const own = lines.get(frame.id) as Lines;
-    let sizes: number[];
-    if (frame.layoutMode === 'VERTICAL') {
-      sizes = distribute(items, inner, frame.itemSpacing);
-      own.sizes = [];
-    } else {
-      own.sizes = lineSizes(own.rows, items, inner, frame.counterAxisSpacing, frame.layoutWrap === 'WRAP');
-      sizes = new Array<number>(flow.length).fill(0);
-      own.rows.forEach((row, line) => {
-        for (const index of row) {
-          const item = items[index] as FlowItem;
-          sizes[index] = item.fill ? clampSize(own.sizes[line] as number, item.min, item.max) : item.size;
-        }
+    /**
+     * Breaks the children of a wrapping column into its columns. Where a
+     * column ends depends on the children's heights, and a child's height
+     * can depend on its width (text that wraps, a row that wraps), so every
+     * child is given a width first: its own, or, where it fills across the
+     * layout, the whole width between the padding, since which column it will
+     * be in, and how wide that is, is not known yet. `inner` is that width,
+     * or null while the frame's own width is still being worked out (it hugs,
+     * and then nothing fills across it).
+     */
+    const columnsOf = (frame: FrameNode, inner: number | null): number[][] => {
+      const known = columns.get(frame.id);
+      if (known) return known;
+      const flow = flowOf(frame);
+      const items = flow.map((child) => widthItem(frame, child));
+      flow.forEach((child, index) => {
+        const item = items[index] as FlowItem;
+        const provisional = child.rotation !== 0 ? child.width : item.fill ? clampSize(inner ?? 0, item.min, item.max) : item.size;
+        if (nested(child)) setWidth(child, provisional);
+        else widths.set(child.id, provisional);
       });
-    }
-    flow.forEach((child, index) => {
-      const mine = child.rotation === 0 ? (sizes[index] as number) : child.height;
-      if (nested(child)) setHeight(child, mine);
-      else heights.set(child.id, mine);
-    });
-  };
+      const tall = flow.map((child) => heightItem(frame, child));
+      const rows = breakLines(
+        tall.map((item) => (item.fill ? item.min : item.size)),
+        breakHeight(frame),
+        frame.itemSpacing,
+      );
+      // What was measured at the full width is measured again once the child has its column's width.
+      flow.forEach((child, index) => {
+        if ((items[index] as FlowItem).fill) forget(child);
+      });
+      columns.set(frame.id, rows);
+      return rows;
+    };
 
-  // --------------------------------------------------------------- positions
-
-  const place = (frame: FrameNode): void => {
-    const flow = flowOf(frame);
-    const own = lines.get(frame.id) as Lines;
-    const innerWidth = Math.max(0, (widths.get(frame.id) as number) - frame.paddingLeft - frame.paddingRight);
-    const innerHeight = Math.max(0, (heights.get(frame.id) as number) - frame.paddingTop - frame.paddingBottom);
-    const rooms = flow.map((child) => footprint(child, widths.get(child.id) as number, heights.get(child.id) as number));
-    const put = (index: number, left: number, top: number): void => {
-      const child = flow[index] as LayerNode;
-      const room = rooms[index] as { width: number; height: number };
-      // A rotated layer turns about the middle of its box, which is the middle of the room it takes.
-      positions.set(child.id, {
-        x: frame.paddingLeft + left + (room.width - (widths.get(child.id) as number)) / 2,
-        y: frame.paddingTop + top + (room.height - (heights.get(child.id) as number)) / 2,
+    const setWidth = (frame: FrameNode, width: number): void => {
+      widths.set(frame.id, width);
+      const flow = flowOf(frame);
+      const inner = Math.max(0, width - frame.paddingLeft - frame.paddingRight);
+      const items = flow.map((child) => widthItem(frame, child));
+      const all = flow.length > 0 ? [flow.map((_, index) => index)] : [];
+      const sizes = new Array<number>(flow.length).fill(0);
+      if (frame.layoutMode === 'HORIZONTAL') {
+        const rows =
+          frame.layoutWrap === 'WRAP'
+            ? breakLines(
+                items.map((item) => (item.fill ? item.min : item.size)),
+                inner,
+                frame.itemSpacing,
+              )
+            : all;
+        for (const row of rows) {
+          const shared = distribute(
+            row.map((index) => items[index] as FlowItem),
+            inner,
+            frame.itemSpacing,
+          );
+          row.forEach((index, k) => {
+            sizes[index] = shared[k] as number;
+          });
+        }
+        // How tall each line is comes with the heights.
+        lines.set(frame.id, { rows, sizes: [] });
+      } else {
+        // A column, or the columns of one that wraps: each is as wide as its widest child (the one column of a
+        // column that does not wrap, as wide as the frame has room), and a child that fills is as wide as its column.
+        const wrap = wrapsColumn(frame);
+        const rows = wrap ? columnsOf(frame, inner) : all;
+        const across = lineSizes(rows, items, inner, frame.counterAxisSpacing, wrap);
+        rows.forEach((row, line) => {
+          for (const index of row) {
+            const item = items[index] as FlowItem;
+            sizes[index] = item.fill ? clampSize(across[line] as number, item.min, item.max) : item.size;
+          }
+        });
+        lines.set(frame.id, { rows, sizes: across });
+      }
+      flow.forEach((child, index) => {
+        // A rotated child keeps its own width; what was worked out above is the room it takes.
+        const own = child.rotation === 0 ? (sizes[index] as number) : child.width;
+        if (nested(child)) setWidth(child, own);
+        else widths.set(child.id, own);
       });
     };
-    // A child that a stretch does not reach sits at the start, across the layout.
-    const across = frame.counterAxisAlignItems === 'STRETCH' ? 'MIN' : frame.counterAxisAlignItems;
-    if (frame.layoutMode === 'HORIZONTAL') {
-      const spread = frame.layoutWrap === 'WRAP' && frame.counterAxisAlignContent === 'SPACE_BETWEEN';
-      const tops = placeAlong(own.sizes, innerHeight, frame.counterAxisSpacing, spread ? 'SPACE_BETWEEN' : across);
-      own.rows.forEach((row, line) => {
-        const lefts = placeAlong(
-          row.map((index) => (rooms[index] as { width: number }).width),
-          innerWidth,
-          frame.itemSpacing,
-          frame.primaryAxisAlignItems,
-        );
-        row.forEach((index, k) => {
-          const down = placeAcross((rooms[index] as { height: number }).height, own.sizes[line] as number, across);
-          put(index, lefts[k] as number, (tops[line] as number) + down);
+
+    // --------------------------------------------------------------- heights
+
+    /** The height of a text that follows its content, at the width it has been given. */
+    const textHeight = (node: LayerNode): number => {
+      if (node.type !== 'TEXT' || node.rotation !== 0 || node.textAutoResize !== 'HEIGHT') return node.height;
+      const width = widths.get(node.id) ?? node.width;
+      if (Math.abs(width - node.width) < EPSILON) return node.height;
+      return Math.max(1, layoutText({ ...node, width: clean(width) }, measurer).height);
+    };
+
+    /** The height a child has when it does not fill. */
+    const ownHeight = (node: LayerNode): number => {
+      if (nested(node)) return node.layoutSizingVertical === 'HUG' ? hugHeight(node) : node.height;
+      return textHeight(node);
+    };
+
+    const heightItem = (frame: FrameNode, child: LayerNode): FlowItem => {
+      const fill = child.layoutSizingVertical === 'FILL' || stretches(frame, child, 'y');
+      const { min, max } = limits(child, 'y');
+      if (fill) return { size: 0, fill, min: Math.max(1, min), max: Math.max(1, max) };
+      const width = widths.get(child.id) ?? child.width;
+      return { size: footprint(child, width, clampSize(ownHeight(child), min, max)).height, fill, min: 0, max: Infinity };
+    };
+
+    /** The height of a frame that hugs its children: the tallest column of a column, or a row's lines one under another. */
+    const hugHeight = (frame: FrameNode): number => {
+      const known = hugHeights.get(frame.id);
+      if (known !== undefined) return known;
+      if (flowOf(frame).length === 0) return frame.height;
+      const items = flowOf(frame).map((child) => heightItem(frame, child));
+      const rows = lines.get(frame.id)?.rows ?? [];
+      const content =
+        frame.layoutMode === 'VERTICAL'
+          ? Math.max(
+              0,
+              ...rows.map((row) =>
+                extent(
+                  distribute(
+                    row.map((index) => items[index] as FlowItem),
+                    null,
+                    frame.itemSpacing,
+                  ),
+                  frame.itemSpacing,
+                ),
+              ),
+            )
+          : extent(lineSizes(rows, items, null, frame.counterAxisSpacing, frame.layoutWrap === 'WRAP'), frame.counterAxisSpacing);
+      const { min, max } = limits(frame, 'y');
+      const height = clampSize(content + frame.paddingTop + frame.paddingBottom, min, max);
+      hugHeights.set(frame.id, height);
+      return height;
+    };
+
+    const setHeight = (frame: FrameNode, height: number): void => {
+      heights.set(frame.id, height);
+      const flow = flowOf(frame);
+      const inner = Math.max(0, height - frame.paddingTop - frame.paddingBottom);
+      const items = flow.map((child) => heightItem(frame, child));
+      const own = lines.get(frame.id) as Lines;
+      const sizes = new Array<number>(flow.length).fill(0);
+      if (frame.layoutMode === 'VERTICAL') {
+        // Each column shares out its own height.
+        for (const row of own.rows) {
+          const shared = distribute(
+            row.map((index) => items[index] as FlowItem),
+            inner,
+            frame.itemSpacing,
+          );
+          row.forEach((index, k) => {
+            sizes[index] = shared[k] as number;
+          });
+        }
+      } else {
+        own.sizes = lineSizes(own.rows, items, inner, frame.counterAxisSpacing, frame.layoutWrap === 'WRAP');
+        own.rows.forEach((row, line) => {
+          for (const index of row) {
+            const item = items[index] as FlowItem;
+            sizes[index] = item.fill ? clampSize(own.sizes[line] as number, item.min, item.max) : item.size;
+          }
         });
+      }
+      flow.forEach((child, index) => {
+        const mine = child.rotation === 0 ? (sizes[index] as number) : child.height;
+        if (nested(child)) setHeight(child, mine);
+        else heights.set(child.id, mine);
       });
-    } else {
-      const tops = placeAlong(
-        rooms.map((room) => room.height),
-        innerHeight,
-        frame.itemSpacing,
-        frame.primaryAxisAlignItems,
-      );
-      flow.forEach((_, index) => {
-        put(index, placeAcross((rooms[index] as { width: number }).width, innerWidth, across), tops[index] as number);
-      });
-    }
-    for (const child of flow) if (nested(child)) place(child);
+    };
+
+    // ------------------------------------------------------------- positions
+
+    const place = (frame: FrameNode): void => {
+      const flow = flowOf(frame);
+      const own = lines.get(frame.id) as Lines;
+      const innerWidth = Math.max(0, (widths.get(frame.id) as number) - frame.paddingLeft - frame.paddingRight);
+      const innerHeight = Math.max(0, (heights.get(frame.id) as number) - frame.paddingTop - frame.paddingBottom);
+      const rooms = flow.map((child) => footprint(child, widths.get(child.id) as number, heights.get(child.id) as number));
+      const put = (index: number, left: number, top: number): void => {
+        const child = flow[index] as LayerNode;
+        const room = rooms[index] as { width: number; height: number };
+        // A rotated layer turns about the middle of its box, which is the middle of the room it takes.
+        positions.set(child.id, {
+          x: frame.paddingLeft + left + (room.width - (widths.get(child.id) as number)) / 2,
+          y: frame.paddingTop + top + (room.height - (heights.get(child.id) as number)) / 2,
+        });
+      };
+      // A child that a stretch does not reach sits at the start, across the layout.
+      const across = frame.counterAxisAlignItems === 'STRETCH' ? 'MIN' : frame.counterAxisAlignItems;
+      const spread = frame.layoutWrap === 'WRAP' && frame.counterAxisAlignContent === 'SPACE_BETWEEN';
+      if (frame.layoutMode === 'HORIZONTAL') {
+        const tops = placeAlong(own.sizes, innerHeight, frame.counterAxisSpacing, spread ? 'SPACE_BETWEEN' : across);
+        own.rows.forEach((row, line) => {
+          const lefts = placeAlong(
+            row.map((index) => (rooms[index] as { width: number }).width),
+            innerWidth,
+            frame.itemSpacing,
+            frame.primaryAxisAlignItems,
+          );
+          row.forEach((index, k) => {
+            const down = placeAcross((rooms[index] as { height: number }).height, own.sizes[line] as number, across);
+            put(index, lefts[k] as number, (tops[line] as number) + down);
+          });
+        });
+      } else {
+        const lefts = placeAlong(own.sizes, innerWidth, frame.counterAxisSpacing, spread ? 'SPACE_BETWEEN' : across);
+        own.rows.forEach((row, line) => {
+          const tops = placeAlong(
+            row.map((index) => (rooms[index] as { height: number }).height),
+            innerHeight,
+            frame.itemSpacing,
+            frame.primaryAxisAlignItems,
+          );
+          row.forEach((index, k) => {
+            const over = placeAcross((rooms[index] as { width: number }).width, own.sizes[line] as number, across);
+            put(index, (lefts[line] as number) + over, tops[k] as number);
+          });
+        });
+      }
+      for (const child of flow) if (nested(child)) place(child);
+    };
+
+    const rootLimits = { x: limits(root, 'x'), y: limits(root, 'y') };
+    setWidth(root, root.layoutSizingHorizontal === 'HUG' ? hugWidth(root) : clampSize(root.width, rootLimits.x.min, rootLimits.x.max));
+    setHeight(root, root.layoutSizingVertical === 'HUG' ? hugHeight(root) : clampSize(root.height, rootLimits.y.min, rootLimits.y.max));
+    place(root);
+    return { widths, heights, positions, trusted };
   };
 
   // ---------------------------------------------------------------- the pass
 
-  const rootLimits = { x: limits(root, 'x'), y: limits(root, 'y') };
-  setWidth(root, root.layoutSizingHorizontal === 'HUG' ? hugWidth(root) : clampSize(root.width, rootLimits.x.min, rootLimits.x.max));
-  setHeight(root, root.layoutSizingVertical === 'HUG' ? hugHeight(root) : clampSize(root.height, rootLimits.y.min, rootLimits.y.max));
-  place(root);
+  let solved = solve(new Map());
+  for (let run = 1; run < MAX_RUNS; run++) {
+    // A wrapping column that was given a different height than the one its columns were made for is done again.
+    const given = new Map<NodeId, number>();
+    let settled = true;
+    for (const [id, taken] of solved.trusted) {
+      const height = solved.heights.get(id) ?? taken;
+      given.set(id, height);
+      if (Math.abs(height - taken) >= EPSILON) settled = false;
+    }
+    if (settled) break;
+    solved = solve(given);
+  }
+  const { widths, heights, positions } = solved;
 
   // Write the result, from the outside in. Sizes go through the operations that
   // keep what is inside a layer in step with its box.
@@ -448,7 +592,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
   const write = (frame: FrameNode): void => {
     for (const child of flowOf(frame)) {
       resize(child.id, widths.get(child.id) as number, heights.get(child.id) as number, positions.get(child.id) ?? null);
-      if (nested(child)) write(child);
+      if (isAutoLayout(child) && child.rotation === 0) write(child);
     }
   };
   resize(rootId, widths.get(rootId) as number, heights.get(rootId) as number, null);

@@ -236,6 +236,8 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   },
   // Version 16 adds STRETCH to the alignments across a layout. No older frame stretches its children.
   15: (file) => ({ ...file, schemaVersion: 16 }),
+  // Version 17 lets a column wrap. In older files only rows do, so only the version number changes.
+  16: (file) => ({ ...file, schemaVersion: 17 }),
 };
 
 /**

@@ -17,7 +17,6 @@ import {
   isAutoLayout,
   isInFlow,
   itemSpacingOf,
-  layoutDirection,
   lineSizes,
   lineSpacingOf,
   parseFile,
@@ -34,6 +33,7 @@ import {
   setItemSpacing,
   setLayoutDirection,
   setLayoutSizing,
+  setLayoutWrap,
   setLineSpacing,
   settleSizing,
   shiftInFlow,
@@ -587,43 +587,30 @@ describe('wrapping', () => {
     expect(at(laid, made.ids[2] as NodeId)).toEqual([10, 102.5]);
   });
 
-  it('is one of three directions a layout can be given; told to wrap, a frame that hugged its width keeps it', () => {
-    const { doc, frameId, pageId } = frame({ ...WRAP, layoutWrap: 'NO_WRAP', layoutSizingHorizontal: 'HUG' });
+  it('wraps a row that hugs its width only where a maximum width stops it', () => {
+    const { doc, frameId } = frame({ ...WRAP, layoutSizingHorizontal: 'HUG' });
+    const made = fill(doc, frameId, FIVE);
+    const laid = lay(made.doc);
+    // As wide as its children need, it is one line.
+    expect(size(laid, frameId)).toEqual([360, 40]);
+    const limited = lay(patchNode(laid, frameId, { maxWidth: 200 }));
+    // No wider than 200, it breaks as a row of that width does, and is as tall as its three lines.
+    expect(size(limited, frameId)).toEqual([200, 90]);
+    expect(at(limited, made.ids[2] as NodeId)).toEqual([10, 35]);
+  });
+
+  it('is switched on for a row that hugged its width, which then keeps the width it has', () => {
+    const { doc, frameId } = frame({ ...WRAP, layoutWrap: 'NO_WRAP', layoutSizingHorizontal: 'HUG' });
     const made = fill(doc, frameId, FIVE);
     const laid = lay(made.doc);
     // Hugging, the row is as wide as its five children: 300, four gaps of 10 and the padding.
     expect(size(laid, frameId)).toEqual([360, 40]);
-    expect(layoutDirection(frameOf(laid, frameId))).toBe('HORIZONTAL');
 
-    const wrapping = lay(setLayoutDirection(laid, [frameId], 'WRAP'));
-    expect(layoutDirection(frameOf(wrapping, frameId))).toBe('WRAP');
+    const wrapping = lay(setLayoutWrap(laid, [frameId], true));
     expect(frameOf(wrapping, frameId)).toMatchObject({ layoutMode: 'HORIZONTAL', layoutWrap: 'WRAP', layoutSizingHorizontal: 'FIXED', width: 360 });
     // Now it has a width of its own to wrap at.
     expect(size(lay(setLayerBox(wrapping, frameId, { width: 200 })), frameId)).toEqual([200, 90]);
-
-    const column = lay(setLayoutDirection(wrapping, [frameId], 'VERTICAL'));
-    expect(frameOf(column, frameId)).toMatchObject({ layoutMode: 'VERTICAL', layoutWrap: 'NO_WRAP' });
-    expect(layoutDirection(frameOf(column, frameId))).toBe('VERTICAL');
-    const row = lay(setLayoutDirection(column, [frameId], 'HORIZONTAL'));
-    expect(frameOf(row, frameId)).toMatchObject({ layoutMode: 'HORIZONTAL', layoutWrap: 'NO_WRAP' });
-
-    // A frame without a layout has no direction, and is not given one this way.
-    const plain = addLayer(row, 'FRAME', pageId, {});
-    expect(layoutDirection(frameOf(plain.doc, plain.id))).toBeNull();
-    expect(setLayoutDirection(plain.doc, [plain.id], 'WRAP')).toBe(plain.doc);
-  });
-
-  it('does not wrap a column', () => {
-    const { doc, frameId } = frame({ ...WRAP, layoutMode: 'VERTICAL', layoutSizingVertical: 'FIXED', height: 50 });
-    const made = fill(doc, frameId, FIVE);
-    const laid = lay(made.doc);
-    expect(made.ids.map((id) => at(laid, id))).toEqual([
-      [10, 10],
-      [10, 40],
-      [10, 70],
-      [10, 100],
-      [10, 130],
-    ]);
+    expect(frameOf(lay(setLayoutWrap(wrapping, [frameId], false)), frameId).layoutWrap).toBe('NO_WRAP');
   });
 });
 
@@ -1335,10 +1322,288 @@ describe('Auto Layout in the file format', () => {
       minHeight: null,
     });
     expect(getLayer(repaired.doc, made.ids[1] as NodeId)).toMatchObject({ layoutSizingHorizontal: 'HUG', layoutSizingVertical: 'HUG' });
-    // Only rows wrap.
+    // A column may wrap as a row may: that is kept.
     const column = JSON.parse(JSON.stringify(made.doc)) as { nodes: Record<string, Record<string, unknown>> };
     Object.assign(column.nodes[frameId] as Record<string, unknown>, { layoutWrap: 'WRAP' });
-    expect(frameOf(repairDocument(column).doc, frameId).layoutWrap).toBe('NO_WRAP');
+    const kept = repairDocument(column);
+    expect(kept.repairs).toEqual([]);
+    expect(frameOf(kept.doc, frameId)).toMatchObject({ layoutMode: 'VERTICAL', layoutWrap: 'WRAP' });
+  });
+});
+
+describe('columns that wrap', () => {
+  /** A column 100 tall (80 between the padding) that wraps and hugs its width, with gaps of 10 and 5 between its columns. */
+  const COLUMNS: LayerPatch = {
+    layoutMode: 'VERTICAL',
+    layoutWrap: 'WRAP',
+    height: 100,
+    paddingLeft: 10,
+    paddingRight: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
+    itemSpacing: 10,
+    counterAxisSpacing: 5,
+    layoutSizingHorizontal: 'HUG',
+  };
+  const FIVE: LayerPatch[] = [0, 1, 2, 3, 4].map(() => ({ width: 60, height: 20 }));
+
+  it('carries a column on in further columns, and the frame grows wider with them', () => {
+    const { doc, frameId } = frame(COLUMNS);
+    const made = fill(doc, frameId, FIVE);
+    const laid = lay(made.doc);
+    // 80 between the padding takes three children of 20 with gaps of 10, not four.
+    expect(made.ids.map((id) => at(laid, id))).toEqual([
+      [10, 10],
+      [10, 40],
+      [10, 70],
+      [75, 10],
+      [75, 40],
+    ]);
+    // Two columns of 60, a gap of 5, padding 10 and 10.
+    expect(size(laid, frameId)).toEqual([145, 100]);
+    expect(lay(laid)).toBe(laid);
+  });
+
+  it('breaks the columns again when the frame is made taller or shorter', () => {
+    const { doc, frameId } = frame(COLUMNS);
+    const made = fill(doc, frameId, FIVE);
+    const tall = lay(setLayerBox(lay(made.doc), frameId, { height: 200 }));
+    expect(made.ids.map((id) => at(tall, id))).toEqual([
+      [10, 10],
+      [10, 40],
+      [10, 70],
+      [10, 100],
+      [10, 130],
+    ]);
+    expect(size(tall, frameId)).toEqual([80, 200]);
+    const short = lay(setLayerBox(tall, frameId, { height: 45 }));
+    expect(made.ids.map((id) => at(short, id))).toEqual([
+      [10, 10],
+      [75, 10],
+      [140, 10],
+      [205, 10],
+      [270, 10],
+    ]);
+    expect(size(short, frameId)).toEqual([340, 45]);
+  });
+
+  it('makes each column as wide as its widest child and lines the others up in it', () => {
+    const { doc, frameId } = frame({ ...COLUMNS, height: 70, counterAxisAlignItems: 'MAX' });
+    const made = fill(doc, frameId, [
+      { width: 60, height: 20 },
+      { width: 100, height: 20 },
+      { width: 40, height: 20 },
+    ]);
+    const laid = lay(made.doc);
+    // Two to a column: the first column is 100 wide, and its narrower child keeps to the right of it.
+    expect(made.ids.map((id) => at(laid, id))).toEqual([
+      [50, 10],
+      [10, 40],
+      [115, 10],
+    ]);
+    expect(size(laid, frameId)).toEqual([165, 70]);
+  });
+
+  it('lets a child that fills take what is left of its own column', () => {
+    const { doc, frameId } = frame(COLUMNS);
+    const made = fill(doc, frameId, [
+      { width: 60, height: 20 },
+      { width: 60, height: 20, layoutSizingVertical: 'FILL' },
+      { width: 60, height: 20 },
+      { width: 60, height: 20 },
+    ]);
+    const laid = lay(made.doc);
+    // The second counts for a pixel when the columns are broken, so three fit; it then takes the 20 that are left.
+    expect(made.ids.map((id) => box(laid, id))).toEqual([
+      { x: 10, y: 10, width: 60, height: 20 },
+      { x: 10, y: 40, width: 60, height: 20 },
+      { x: 10, y: 70, width: 60, height: 20 },
+      { x: 75, y: 10, width: 60, height: 20 },
+    ]);
+    const taller = lay(setLayerBox(laid, frameId, { height: 130 }));
+    // 110 between the padding: all four in one column, and the one that fills has 20 left.
+    expect(made.ids.map((id) => box(taller, id))).toEqual([
+      { x: 10, y: 10, width: 60, height: 20 },
+      { x: 10, y: 40, width: 60, height: 20 },
+      { x: 10, y: 70, width: 60, height: 20 },
+      { x: 10, y: 100, width: 60, height: 20 },
+    ]);
+    expect(box(lay(setLayerBox(laid, frameId, { height: 160 })), made.ids[1] as NodeId).height).toBe(50);
+  });
+
+  it('spreads the columns from side to side, or packs them where the column is lined up', () => {
+    const xsOf = (props: LayerPatch): number[] => {
+      const { doc, frameId } = frame({ ...COLUMNS, layoutSizingHorizontal: 'FIXED', width: 400, ...props });
+      const made = fill(doc, frameId, FIVE);
+      const laid = lay(made.doc);
+      return [0, 3].map((index) => box(laid, made.ids[index] as NodeId).x);
+    };
+    // 380 between the padding; two columns of 60.
+    expect(xsOf({})).toEqual([10, 75]);
+    expect(xsOf({ counterAxisAlignContent: 'SPACE_BETWEEN' })).toEqual([10, 330]);
+    expect(xsOf({ counterAxisAlignItems: 'MAX' })).toEqual([265, 330]);
+    expect(xsOf({ counterAxisAlignItems: 'CENTER' })).toEqual([137.5, 202.5]);
+  });
+
+  it('shares spare width between the columns when a child fills its column, and stretches children to their column', () => {
+    const { doc, frameId } = frame({ ...COLUMNS, layoutSizingHorizontal: 'FIXED', width: 400, height: 70 });
+    const made = fill(doc, frameId, [{ width: 60, height: 20, layoutSizingHorizontal: 'FILL' }, { width: 60, height: 20 }, { width: 60, height: 20 }, { width: 60, height: 20 }]);
+    const laid = lay(made.doc);
+    // Two columns of 60 and a gap of 5 leave 255 of the 380: 127.5 more for each column.
+    expect(made.ids.map((id) => box(laid, id))).toEqual([
+      { x: 10, y: 10, width: 187.5, height: 20 },
+      { x: 10, y: 40, width: 60, height: 20 },
+      { x: 202.5, y: 10, width: 60, height: 20 },
+      { x: 202.5, y: 40, width: 60, height: 20 },
+    ]);
+    const stretched = lay(patchNode(laid, frameId, { counterAxisAlignItems: 'STRETCH' }));
+    // Stretched, every child is as wide as its column, and the two columns share the 375 beside the gap.
+    expect(made.ids.map((id) => box(stretched, id).width)).toEqual([187.5, 187.5, 187.5, 187.5]);
+    expect(made.ids.map((id) => box(stretched, id).x)).toEqual([10, 10, 202.5, 202.5]);
+  });
+
+  it('is one column while it hugs its height, unless a maximum height stops it', () => {
+    const { doc, frameId } = frame({ ...COLUMNS, layoutSizingVertical: 'HUG' });
+    const made = fill(doc, frameId, FIVE);
+    const laid = lay(made.doc);
+    expect(size(laid, frameId)).toEqual([80, 160]);
+    const limited = lay(patchNode(laid, frameId, { maxHeight: 100 }));
+    // No taller than 100, it breaks as a column of that height does, and is as tall as its tallest column.
+    expect(size(limited, frameId)).toEqual([145, 100]);
+    expect(at(limited, made.ids[3] as NodeId)).toEqual([75, 10]);
+    expect(size(lay(patchNode(limited, frameId, { maxHeight: 70 })), frameId)).toEqual([210, 70]);
+  });
+
+  it('breaks at the height the row it is in gives it, when it fills that row or is stretched by it', () => {
+    const built = frame({ height: 120, layoutSizingHorizontal: 'HUG' });
+    // Its own height, 300, is not the one it will have: the row is 120 tall.
+    const inner = addLayer(built.doc, 'FRAME', built.frameId, { ...COLUMNS, height: 300, layoutSizingVertical: 'FILL' });
+    const made = fill(inner.doc, inner.id, FIVE);
+    const laid = lay(made.doc);
+    // 120 tall, 100 between the padding: three and two.
+    expect(box(laid, inner.id)).toEqual({ x: 0, y: 0, width: 145, height: 120 });
+    expect(at(laid, made.ids[3] as NodeId)).toEqual([75, 10]);
+    expect(size(laid, built.frameId)).toEqual([145, 120]);
+    expect(lay(laid)).toBe(laid);
+
+    const tall = lay(setLayerBox(laid, built.frameId, { height: 200 }));
+    expect(box(tall, inner.id)).toEqual({ x: 0, y: 0, width: 80, height: 200 });
+    expect(size(tall, built.frameId)).toEqual([80, 200]);
+    const short = lay(setLayerBox(tall, built.frameId, { height: 55 }));
+    expect(box(short, inner.id)).toEqual({ x: 0, y: 0, width: 340, height: 55 });
+    expect(size(short, built.frameId)).toEqual([340, 55]);
+
+    // The same when the row stretches it instead.
+    const stretched = lay(patchNodes(short, { [built.frameId]: { counterAxisAlignItems: 'STRETCH' }, [inner.id]: { layoutSizingVertical: 'FIXED' } }));
+    expect(box(stretched, inner.id)).toEqual({ x: 0, y: 0, width: 340, height: 55 });
+    expect(box(lay(setLayerBox(stretched, built.frameId, { height: 120 })), inner.id)).toEqual({ x: 0, y: 0, width: 145, height: 120 });
+  });
+
+  it('puts text into columns by its lines, and a text that fills across by the height it has at the full width', () => {
+    const { doc, frameId } = frame({ ...COLUMNS, height: 68 });
+    const labels = fill(doc, frameId, [
+      { type: 'TEXT', characters: 'One' },
+      { type: 'TEXT', characters: 'Two\nlines' },
+      { type: 'TEXT', characters: 'Three' },
+    ]);
+    const laid = lay(labels.doc);
+    // 48 between the padding: a line of 19 and two lines of 38 do not fit together, so each starts a column.
+    expect(labels.ids.map((id) => at(laid, id))).toEqual([
+      [10, 10],
+      [39, 10],
+      [84, 10],
+    ]);
+    expect(size(laid, frameId)).toEqual([134, 68]);
+
+    const fixed = frame({ ...COLUMNS, layoutSizingHorizontal: 'FIXED', width: 200, height: 60 });
+    const made = fill(fixed.doc, fixed.frameId, [
+      { type: 'TEXT', characters: 'aaaa bbbb cccc dddd eeee', textAutoResize: 'HEIGHT', layoutSizingHorizontal: 'FILL', width: 30 },
+      { width: 60, height: 20 },
+    ]);
+    const wrapped = lay(made.doc);
+    // At the 180 between the padding the text is two lines, 38 tall: with the square it is more than the 40 there is,
+    // so the square starts a second column. The two columns then share the width, and the text wraps at its own.
+    expect(at(wrapped, made.ids[1] as NodeId)[1]).toBe(10);
+    expect(box(wrapped, made.ids[1] as NodeId).x).toBeGreaterThan(box(wrapped, made.ids[0] as NodeId).x);
+    const text = box(wrapped, made.ids[0] as NodeId);
+    expect(text.width).toBe(58);
+    // 58 wide takes one word of 32 to a line: five lines.
+    expect(text.height).toBe(95);
+    expect(lay(wrapped)).toBe(wrapped);
+  });
+
+  it('finds the place in a wrapping column that a point on the page is over', () => {
+    const { doc, frameId } = frame({ ...COLUMNS, x: 100, y: 100 });
+    const made = fill(doc, frameId, FIVE);
+    const laid = lay(made.doc);
+    const [a, b, c, d, e] = made.ids as [NodeId, NodeId, NodeId, NodeId, NodeId];
+    // Between the two children of the second column, which stand at 175 to 235 across the page.
+    const moved = lay(placeInFlow(laid, [a], { x: 200, y: 149 }));
+    expect(getChildIds(moved, frameId)).toEqual([b, c, d, a, e]);
+    expect(at(moved, a)).toEqual([75, 10]);
+    expect(at(moved, e)).toEqual([75, 40]);
+    // At the foot of the first column.
+    expect(getChildIds(placeInFlow(laid, [e], { x: 120, y: 195 }), frameId)).toEqual([a, b, c, e, d]);
+    // The arrow keys' operation runs down the columns.
+    expect(getChildIds(shiftInFlow(laid, [c], 1) as Document, frameId)).toEqual([a, b, d, c, e]);
+  });
+
+  it('is switched on and off, and keeps a size to wrap at', () => {
+    const { doc, frameId, pageId } = frame({ ...COLUMNS, layoutWrap: 'NO_WRAP', layoutSizingVertical: 'HUG' });
+    const made = fill(doc, frameId, FIVE);
+    const laid = lay(made.doc);
+    expect(size(laid, frameId)).toEqual([80, 160]);
+
+    // Told to wrap, a column that hugged its height keeps the height it has: it needs one of its own to wrap at.
+    const wrapping = lay(setLayoutWrap(laid, [frameId], true));
+    expect(frameOf(wrapping, frameId)).toMatchObject({ layoutMode: 'VERTICAL', layoutWrap: 'WRAP', layoutSizingVertical: 'FIXED', height: 160 });
+    const shorter = lay(setLayerBox(wrapping, frameId, { height: 100 }));
+    expect(size(shorter, frameId)).toEqual([145, 100]);
+
+    // Turned into a row, it still wraps, now at its width, which it may no longer hug either.
+    const row = lay(setLayoutDirection(shorter, [frameId], 'HORIZONTAL'));
+    expect(frameOf(row, frameId)).toMatchObject({ layoutMode: 'HORIZONTAL', layoutWrap: 'WRAP', layoutSizingHorizontal: 'FIXED', width: 145 });
+    // The 125 between the padding takes one child of 60 to a line: two with their gap need 130.
+    expect(made.ids.map((id) => at(row, id))).toEqual([
+      [10, 10],
+      [10, 35],
+      [10, 60],
+      [10, 85],
+      [10, 110],
+    ]);
+    const column = lay(setLayoutDirection(row, [frameId], 'VERTICAL'));
+    expect(frameOf(column, frameId)).toMatchObject({ layoutMode: 'VERTICAL', layoutWrap: 'WRAP' });
+
+    const single = lay(setLayoutWrap(column, [frameId], false));
+    expect(frameOf(single, frameId).layoutWrap).toBe('NO_WRAP');
+    expect(made.ids.map((id) => box(single, id).x)).toEqual([10, 10, 10, 10, 10]);
+    // A frame without a layout is not given a direction or wrapping this way.
+    const plain = addLayer(single, 'FRAME', pageId, {});
+    expect(setLayoutWrap(plain.doc, [plain.id], true)).toBe(plain.doc);
+    expect(setLayoutDirection(plain.doc, [plain.id], 'VERTICAL')).toBe(plain.doc);
+  });
+
+  it('opens a version 16 file, where only rows wrap, and keeps a wrapping column through saving and opening', () => {
+    const { doc, frameId } = frame({ ...COLUMNS, layoutMode: 'HORIZONTAL', layoutSizingHorizontal: 'FIXED', width: 200, counterAxisAlignItems: 'STRETCH' });
+    const current = lay(fill(doc, frameId, FIVE).doc);
+    const parsed = parseFile({
+      format: 'open-design',
+      schemaVersion: 16,
+      meta: { createdAt: '2026-11-16T13:00:00.000Z', updatedAt: '2026-11-16T13:00:00.000Z' },
+      document: JSON.parse(JSON.stringify(current)),
+    });
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(17);
+    expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(parsed.repairs).toEqual([]);
+    expect(parsed.file.document).toEqual(current);
+
+    const columns = frame(COLUMNS);
+    const laid = lay(fill(columns.doc, columns.frameId, FIVE).doc);
+    const reopened = repairDocument(JSON.parse(JSON.stringify(laid)));
+    expect(reopened.repairs).toEqual([]);
+    expect(reopened.doc).toEqual(laid);
+    expect(frameOf(reopened.doc, columns.frameId)).toMatchObject({ layoutMode: 'VERTICAL', layoutWrap: 'WRAP' });
+    expect(lay(reopened.doc)).toBe(reopened.doc);
   });
 });
 

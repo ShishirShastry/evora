@@ -190,29 +190,44 @@ export function addAutoLayout(doc: Document, ids: readonly NodeId[]): { doc: Doc
   return wrapInFrame(doc, selected);
 }
 
-/** The three ways a layout can run: a row, a column, or a row that carries on in new lines. */
-export type LayoutDirection = 'HORIZONTAL' | 'VERTICAL' | 'WRAP';
+/** The two ways a layout can run: in a row or in a column. */
+export type LayoutDirection = Exclude<LayoutMode, 'NONE'>;
 
-/** Which way a frame's layout runs, or null for a frame without one. */
-export function layoutDirection(frame: FrameNode): LayoutDirection | null {
-  if (frame.layoutMode === 'NONE') return null;
-  return frame.layoutMode === 'VERTICAL' ? 'VERTICAL' : frame.layoutWrap === 'WRAP' ? 'WRAP' : 'HORIZONTAL';
+/**
+ * What goes with a layout that wraps along a direction: it can only run out
+ * of room at a size of its own, so a frame that hugs along that direction
+ * keeps the size it has.
+ */
+function sizeToWrapAt(frame: FrameNode, direction: LayoutDirection): LayerPatch {
+  const key = direction === 'HORIZONTAL' ? 'layoutSizingHorizontal' : 'layoutSizingVertical';
+  return frame[key] === 'HUG' ? { [key]: 'FIXED' } : {};
 }
 
 /**
- * Sets which way the layouts of frames run. A row can only wrap at a width
- * of its own, so a frame that hugged its width keeps the width it has when
- * it is told to wrap.
+ * Sets which way the layouts of frames run: in a row or in a column.
+ * Whether they wrap is left as it is.
  */
 export function setLayoutDirection(doc: Document, ids: readonly NodeId[], direction: LayoutDirection): Document {
   const patches: Record<NodeId, LayerPatch> = {};
   for (const id of ids) {
     const frame = doc.nodes[id];
     if (!isAutoLayout(frame)) continue;
-    patches[id] =
-      direction === 'WRAP'
-        ? { layoutMode: 'HORIZONTAL', layoutWrap: 'WRAP', ...(frame.layoutSizingHorizontal === 'HUG' ? { layoutSizingHorizontal: 'FIXED' as const } : {}) }
-        : { layoutMode: direction, layoutWrap: 'NO_WRAP' };
+    patches[id] = { layoutMode: direction, ...(frame.layoutWrap === 'WRAP' ? sizeToWrapAt(frame, direction) : {}) };
+  }
+  return patchNodes(doc, patches);
+}
+
+/**
+ * Switches wrapping on or off for the layouts of frames. A row that wraps
+ * carries on in a further row beneath it when it runs out of width; a column
+ * in a further column beside it when it runs out of height.
+ */
+export function setLayoutWrap(doc: Document, ids: readonly NodeId[], wrap: boolean): Document {
+  const patches: Record<NodeId, LayerPatch> = {};
+  for (const id of ids) {
+    const frame = doc.nodes[id];
+    if (!isAutoLayout(frame)) continue;
+    patches[id] = wrap ? { layoutWrap: 'WRAP', ...sizeToWrapAt(frame, frame.layoutMode as LayoutDirection) } : { layoutWrap: 'NO_WRAP' };
   }
   return patchNodes(doc, patches);
 }
@@ -374,8 +389,9 @@ function moveInStack(doc: Document, frameId: NodeId, ids: readonly NodeId[], ind
 /**
  * Where in an Auto Layout frame's flow a layer dropped at a point on the
  * page belongs: before the first child whose middle lies beyond the point
- * along the direction of the layout, and in a wrapping row in the line the
- * point is over. Returns the place in the frame's stack to insert at.
+ * along the direction of the layout, and in a layout that wraps in the line
+ * (the row, or the column) the point is over. Returns the place in the
+ * frame's stack to insert at.
  */
 export function flowIndexAt(doc: Document, frameId: NodeId, world: Point, exclude: ReadonlySet<NodeId> = new Set()): number {
   const frame = doc.nodes[frameId];
@@ -383,23 +399,24 @@ export function flowIndexAt(doc: Document, frameId: NodeId, world: Point, exclud
   const point = applyToPoint(invert(getWorldMatrix(doc, frameId)), world);
   const flow = flowChildren(doc, frame).filter((child) => !exclude.has(child.id));
   const rects = flow.map((child) => transformedBounds(getLocalMatrix(child), child.width, child.height));
-  let position = 0;
-  if (frame.layoutMode === 'VERTICAL') {
-    position = rects.filter((rect) => rect.y + rect.height / 2 < point.y).length;
-  } else {
-    // The lines of the row: a new one starts wherever a child is further left than the one before it.
-    const rows: number[][] = [];
-    rects.forEach((rect, index) => {
-      const previous = rects[index - 1];
-      if (!previous || rect.x < previous.x) rows.push([index]);
-      else (rows[rows.length - 1] as number[]).push(index);
-    });
-    const bottoms = rows.map((row) => Math.max(...row.map((index) => (rects[index] as Rect).y + (rects[index] as Rect).height)));
-    let line = rows.findIndex((_, index) => point.y < (bottoms[index] as number) + frame.counterAxisSpacing / 2);
-    if (line === -1) line = rows.length - 1;
-    const row = rows[line] ?? [];
-    position = (row[0] ?? 0) + row.filter((index) => (rects[index] as Rect).x + (rects[index] as Rect).width / 2 < point.x).length;
-  }
+  // Seen along the layout and across it, a row and a column are the same thing.
+  const column = frame.layoutMode === 'VERTICAL';
+  const along = (rect: Rect): number => (column ? rect.y : rect.x);
+  const length = (rect: Rect): number => (column ? rect.height : rect.width);
+  const far = (rect: Rect): number => (column ? rect.x + rect.width : rect.y + rect.height);
+  const at = { along: column ? point.y : point.x, across: column ? point.x : point.y };
+  // The lines of the layout: a new one starts wherever a child is further back along it than the one before.
+  const rows: number[][] = [];
+  rects.forEach((rect, index) => {
+    const previous = rects[index - 1];
+    if (!previous || along(rect) < along(previous)) rows.push([index]);
+    else (rows[rows.length - 1] as number[]).push(index);
+  });
+  const ends = rows.map((row) => Math.max(...row.map((index) => far(rects[index] as Rect))));
+  let line = rows.findIndex((_, index) => at.across < (ends[index] as number) + frame.counterAxisSpacing / 2);
+  if (line === -1) line = rows.length - 1;
+  const row = rows[line] ?? [];
+  const position = (row[0] ?? 0) + row.filter((index) => along(rects[index] as Rect) + length(rects[index] as Rect) / 2 < at.along).length;
   return stackIndexFor(doc, frame, position, exclude);
 }
 

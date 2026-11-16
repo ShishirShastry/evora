@@ -356,8 +356,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.layoutGrids = layoutGrids(raw.layoutGrids);
     layer.guides = guides(raw.guides);
     layer.layoutMode = oneOf(raw.layoutMode, LAYOUT_MODES, 'NONE');
-    // Only rows wrap.
-    layer.layoutWrap = layer.layoutMode === 'VERTICAL' ? 'NO_WRAP' : oneOf(raw.layoutWrap, LAYOUT_WRAPS, 'NO_WRAP');
+    layer.layoutWrap = oneOf(raw.layoutWrap, LAYOUT_WRAPS, 'NO_WRAP');
     layer.primaryAxisAlignItems = oneOf(raw.primaryAxisAlignItems, PRIMARY_AXIS_ALIGNS, 'MIN');
     layer.counterAxisAlignItems = oneOf(raw.counterAxisAlignItems, COUNTER_AXIS_ALIGNS, 'MIN');
     layer.counterAxisAlignContent = oneOf(raw.counterAxisAlignContent, COUNTER_AXIS_ALIGN_CONTENTS, 'AUTO');
