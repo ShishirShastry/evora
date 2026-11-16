@@ -1,5 +1,6 @@
 import {
   applyToPoint,
+  frameGuides,
   getChildIds,
   getTangent,
   handlesOf,
@@ -27,7 +28,7 @@ import type { VectorOverlay } from '../input/vectorTool';
 import type { PaintEdit } from '../../state/editorStore';
 import { worldToScreen, type Size, type Viewport } from '../viewport';
 import { traceLayerPath } from './paint';
-import { drawGuides, drawRulers, type RulerTheme } from './rulers';
+import { drawFrameGuides, drawGuides, drawRulers, type RulerTheme } from './rulers';
 
 export const ACCENT = '#19c2b3';
 const ACCENT_FILL = 'rgba(25, 194, 179, 0.12)';
@@ -338,6 +339,7 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     const page = doc.nodes[pageId];
     const guides = isPage(page) ? page.guides : [];
     drawGuides(ctx, { viewport, size, guides });
+    drawFrameGuides(ctx, viewport, frameGuides(doc, pageId));
     drawRulers(ctx, { viewport, size, guides, selection: frame ? frame.bounds : null, theme: input.theme });
   }
 

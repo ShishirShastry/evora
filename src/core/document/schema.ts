@@ -1,5 +1,6 @@
 /**
- * OPEN DESIGN document schema, version 13 (adds justified text, lists and styles on parts of a text layer;
+ * OPEN DESIGN document schema, version 14 (adds mirrored text and image fills, and guides on frames;
+ * version 13 added justified text, lists and styles on parts of a text layer;
  * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
  * Version 2 added the GROUP layer type, version 3 TEXT, version 4 gradient
@@ -8,7 +9,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -90,6 +91,9 @@ export interface ImagePaint {
   exposure: number;
   contrast: number;
   saturation: number;
+  /** The picture is drawn mirrored, left to right or top to bottom, inside the layer's box. Flipping the layer sets these. */
+  flipX: boolean;
+  flipY: boolean;
   opacity: number;
   visible: boolean;
 }
@@ -236,7 +240,11 @@ interface NodeBase {
   order: string;
 }
 
-/** A ruler guide: a vertical line at an x position ('X') or a horizontal line at a y position ('Y'), in page space. */
+/**
+ * A ruler guide: a vertical line at an x position ('X') or a horizontal line
+ * at a y position ('Y'). A page's guides are in page space; a frame's are in
+ * the frame's own space, and are lines across the frame only.
+ */
 export interface Guide {
   axis: 'X' | 'Y';
   position: number;
@@ -292,6 +300,8 @@ export interface FrameNode extends LayerBase {
   /** One radius per corner; when null, `cornerRadius` applies to all four. */
   cornerRadii: CornerRadii | null;
   layoutGrids: LayoutGrid[];
+  /** Ruler guides of this frame, at positions in its own space. They move with it and are never exported. */
+  guides: Guide[];
 }
 
 /**
@@ -411,6 +421,9 @@ export interface TextNode extends LayerBase {
   textAutoResize: TextAutoResize;
   textDecoration: TextDecoration;
   textCase: TextCase;
+  /** The glyphs are drawn mirrored, left to right or top to bottom, inside the layer's box. Flipping the layer sets these. */
+  flipX: boolean;
+  flipY: boolean;
   /** A list makes every paragraph an item, with a bullet or its number in front and its lines set in. */
   listType: TextListType;
   /**
@@ -574,6 +587,7 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   cornerRadius?: number;
   cornerRadii?: CornerRadii | null;
   layoutGrids?: LayoutGrid[];
+  guides?: Guide[];
   pointCount?: number;
   innerRadius?: number;
   network?: VectorNetwork;

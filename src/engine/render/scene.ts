@@ -214,6 +214,18 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     }
   };
 
+  /**
+   * For a mirrored text layer, turns the layer's box over about its own middle, so that everything
+   * drawn into it afterwards comes out mirrored. Returns whether it did; if so the caller restores the context.
+   */
+  const mirrorText = (target: Ctx, node: TextNode): boolean => {
+    if (!node.flipX && !node.flipY) return false;
+    target.save();
+    target.translate(node.flipX ? node.width : 0, node.flipY ? node.height : 0);
+    target.scale(node.flipX ? -1 : 1, node.flipY ? -1 : 1);
+    return true;
+  };
+
   /** Fills the glyphs of one run, and its underline or strikethrough, with whatever the context is set to fill with. */
   const fillRun = (target: Ctx, run: TextRun, baseline: number): void => {
     target.fillText(run.text, run.x, baseline);
@@ -225,6 +237,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
   /** Paints a text layer: its fills colour the glyphs, except those with a colour of their own; its strokes outline them. */
   const drawText = (target: Ctx, node: TextNode): void => {
     const alpha = target.globalAlpha;
+    const mirrored = mirrorText(target, node);
     for (const paint of node.fills) {
       if (!paint.visible || paint.opacity <= 0) continue;
       target.globalAlpha = alpha * paint.opacity;
@@ -265,6 +278,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     }
     target.globalAlpha = alpha;
     applyTextStyle(target, { ...node, letterSpacing: 0 });
+    if (mirrored) target.restore();
   };
 
   const fill = (target: Ctx, node: LayerNode): void => {
@@ -338,12 +352,14 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.fillStyle = '#000';
     target.strokeStyle = '#000';
     if (node.type === 'TEXT') {
+      const mirrored = mirrorText(target, node);
       textRuns(
         target,
         node,
         () => true,
         (run, baseline) => target.fillText(run.text, run.x, baseline),
       );
+      if (mirrored) target.restore();
     } else {
       const filled = node.type !== 'LINE' && hasVisiblePaint(node.fills);
       const stroked = node.strokeWeight > 0 && hasVisiblePaint(node.strokes);

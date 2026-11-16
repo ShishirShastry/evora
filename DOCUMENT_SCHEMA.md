@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **13**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints and version 13 justified text, lists and styles on parts of a text layer (Phase 2 items finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **14**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -119,7 +119,7 @@ interface PageNode extends NodeBase {
 
 interface Guide {
   axis: 'X' | 'Y';           // 'X': a vertical line at x = position; 'Y': a horizontal line at y = position
-  position: number;          // page space
+  position: number;          // page space for a page's guide; the frame's own space for a frame's guide
 }
 ```
 
@@ -171,6 +171,7 @@ interface FrameNode extends LayerBase {
   cornerRadius: number;      // ≥ 0
   cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
   layoutGrids: LayoutGrid[]; // version 6
+  guides: Guide[];           // version 14: guides of this frame, in its own space
 }
 
 interface GroupNode extends LayerBase {
@@ -227,6 +228,8 @@ interface TextNode extends LayerBase {
   textAutoResize: 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'NONE';
   textDecoration: 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
   textCase: 'ORIGINAL' | 'UPPER' | 'LOWER' | 'TITLE';
+  flipX: boolean;            // version 14: the glyphs are drawn mirrored left to right inside the box
+  flipY: boolean;            // version 14: ... top to bottom
   listType: 'NONE' | 'BULLETED' | 'NUMBERED';   // version 13
   styleRanges: TextStyleRange[];                // version 13
 }
@@ -335,6 +338,8 @@ interface ImagePaint {
   exposure: number;          // version 12. -1..1, 0 = as it is: -1 is black, 1 twice as bright
   contrast: number;          // version 12. -1..1, 0 = as it is: -1 is flat grey, 1 twice the contrast
   saturation: number;        // version 12. -1..1, 0 = as it is: -1 is grey, 1 twice as colourful
+  flipX: boolean;            // version 14: the picture is drawn mirrored left to right inside the box
+  flipY: boolean;            // version 14: ... top to bottom
   opacity: number;
   visible: boolean;
 }
@@ -412,7 +417,9 @@ Opacity, blend mode, layer blur and drop shadows apply to a layer as a whole, ch
 
 This is the convention CSS uses (`left/top/width/height` plus `transform: rotate()` about the centre), which keeps Developer Mode output direct (ADR-005).
 
-Skew is not representable. There is no flip flag either: the basic shapes are symmetric about their own vertical axis, so "Flip horizontal / vertical" is implemented as an exact geometric operation (mirror the position, negate the rotation, add a half turn for a vertical flip of polygons and stars, and recurse into containers), and a vector's curves are mirrored themselves. What else of a layer's look is not the same on both sides is mirrored with it: the handles of gradient paints, per-corner radii, the slice of an ellipse (`arcStart`), the arrowheads of a line (which change ends on a horizontal flip) and the offsets of shadows. The glyphs of text and the picture of an image fill are not mirrored; they would need a `flipX` / `flipY` property.
+Skew is not representable. There is no flip flag either: the basic shapes are symmetric about their own vertical axis, so "Flip horizontal / vertical" is implemented as an exact geometric operation (mirror the position, negate the rotation, add a half turn for a vertical flip of polygons and stars, and recurse into containers), and a vector's curves are mirrored themselves. What else of a layer's look is not the same on both sides is mirrored with it: the handles of gradient paints, per-corner radii, the slice of an ellipse (`arcStart`), the arrowheads of a line (which change ends on a horizontal flip) and the offsets of shadows. The glyphs of text and the picture of an image fill cannot be mirrored by moving anything, so they carry flags (`flipX`, `flipY`, version 14) that a flip toggles: the renderer turns the layer's box over about its own middle before drawing the text, or the picture, into it. Mirrored text is turned over as a whole, so its paints are left alone by a flip. A flip also moves a frame's guides to the other side. The same mirroring, about the layer's own axis and without moving its box, is applied when a resize is dragged past the edge that stays fixed (`mirrorInPlace`).
+
+**Guides of a frame (version 14).** A frame's `guides` are positions in the frame's own space: they move with the frame, are drawn across the frame only, and are snapped to by the layers in it. A guide dragged out of a ruler belongs to the frame it is let go over when that frame is not turned (nor inside anything turned), and otherwise to the page. A guide outside its frame's box, and the guides of a turned or hidden frame, are kept but not shown.
 
 ---
 
@@ -470,6 +477,9 @@ const MIGRATIONS: Record<number, (file) => file> = {
   11: addImageAdjustments,
   // 12 -> 13: every text layer gets listType 'NONE' and styleRanges [].
   12: addTextListAndRanges,
+  // 13 -> 14: every text layer and every image paint gets flipX false and flipY false
+  // (in a paint, after saturation); every frame gets guides [].
+  13: addFlipsAndFrameGuides,
 };
 ```
 
@@ -487,6 +497,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 10 | 11 | `BOOLEAN_OPERATION` layer type added | `src/boolean.test.ts` ("opens a version 10 file") |
 | 11 | 12 | Image adjustments (`exposure`, `contrast`, `saturation` on image paints) | `src/imageedit.test.ts` ("are kept in range in a file, and are zero in a file from before they existed") |
 | 12 | 13 | Text: `JUSTIFIED` alignment, `listType`, `styleRanges` | `src/richtext.test.ts` ("opens a version 12 file") |
+| 13 | 14 | `flipX` / `flipY` on text layers and image paints; `guides` on frames | `src/mirror.test.ts` ("opens a version 13 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -515,7 +526,7 @@ These are reserved so that later versions extend the schema without restructurin
 
 | Phase | Addition |
 |---|---|
-| 2 | `flipX/flipY`. (Done: per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
+| 2 | (Done: mirrored text and image fills and guides on frames in version 14; per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |

@@ -1,4 +1,4 @@
-import type { Guide, Rect } from '../../core';
+import type { Guide, PlacedGuide, Rect } from '../../core';
 import type { Size, Viewport } from '../viewport';
 
 /** Thickness of the rulers along the top and left edges of the canvas, in screen pixels. */
@@ -87,6 +87,26 @@ export function drawGuides(ctx: CanvasRenderingContext2D, input: Pick<RulerInput
       const y = Math.round((guide.position - viewport.y) * viewport.zoom) + 0.5;
       ctx.moveTo(0, y);
       ctx.lineTo(size.width, y);
+    }
+  }
+  ctx.stroke();
+}
+
+/** Draws the guides of frames, each a line across its frame and no further. Expects a context scaled to CSS pixels. */
+export function drawFrameGuides(ctx: CanvasRenderingContext2D, viewport: Viewport, guides: readonly PlacedGuide[]): void {
+  if (guides.length === 0) return;
+  ctx.strokeStyle = GUIDE_COLOR;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const guide of guides) {
+    if (guide.axis === 'X') {
+      const x = Math.round((guide.position - viewport.x) * viewport.zoom) + 0.5;
+      ctx.moveTo(x, (guide.from - viewport.y) * viewport.zoom);
+      ctx.lineTo(x, (guide.to - viewport.y) * viewport.zoom);
+    } else {
+      const y = Math.round((guide.position - viewport.y) * viewport.zoom) + 0.5;
+      ctx.moveTo((guide.from - viewport.x) * viewport.zoom, y);
+      ctx.lineTo((guide.to - viewport.x) * viewport.zoom, y);
     }
   }
   ctx.stroke();

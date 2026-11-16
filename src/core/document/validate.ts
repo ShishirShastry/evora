@@ -155,6 +155,8 @@ function paints(value: unknown): Paint[] {
         exposure: finite(item.exposure, 0, -1, 1),
         contrast: finite(item.contrast, 0, -1, 1),
         saturation: finite(item.saturation, 0, -1, 1),
+        flipX: item.flipX === true,
+        flipY: item.flipY === true,
         opacity,
         visible,
       });
@@ -333,6 +335,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
     layer.layoutGrids = layoutGrids(raw.layoutGrids);
+    layer.guides = guides(raw.guides);
   } else if (layer.type === 'RECTANGLE') {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
@@ -361,6 +364,8 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.textAutoResize = oneOf(raw.textAutoResize, TEXT_AUTO_RESIZES, 'WIDTH_AND_HEIGHT');
     layer.textDecoration = oneOf(raw.textDecoration, TEXT_DECORATIONS, 'NONE');
     layer.textCase = oneOf(raw.textCase, TEXT_CASES, 'ORIGINAL');
+    layer.flipX = raw.flipX === true;
+    layer.flipY = raw.flipY === true;
     layer.listType = oneOf(raw.listType, TEXT_LIST_TYPES, 'NONE');
     layer.styleRanges = styleRanges(raw.styleRanges, layer.characters.length);
   } else if (layer.type === 'VECTOR') {

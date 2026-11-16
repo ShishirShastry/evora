@@ -11,7 +11,13 @@ import {
   enclosingFrameOrPage,
   getLayer,
   guideSnapTargets,
+  countGuides,
+  flipNodes,
+  frameGuides,
+  frameTakesGuides,
+  hitFrameGuide,
   hitGuide,
+  mirrorInPlace,
   isFrame,
   isPage,
   measureDistances,
@@ -34,6 +40,7 @@ import {
   rectFromPoints,
   reparentNodes,
   resizeBox,
+  resizeFlips,
   resizeNodesInBounds,
   rotateNodesAround,
   selectionTargetAt,
@@ -148,8 +155,8 @@ type Mode =
   | { kind: 'draw'; type: LayerType; id: NodeId; parentId: NodeId; base: Document; startScreen: Point; startWorld: Point }
   /** Text tool: a click places auto-width text, a drag sets the width of a text box. */
   | { kind: 'text'; startScreen: Point; startWorld: Point }
-  /** A ruler guide being pulled out of a ruler (`index` null) or moved (its index in the page's guides). */
-  | { kind: 'guide'; axis: Guide['axis']; index: number | null; base: Document }
+  /** A ruler guide being pulled out of a ruler (`owner` and `index` null) or moved (the page or frame it is in, and its index there). */
+  | { kind: 'guide'; axis: Guide['axis']; owner: NodeId | null; index: number | null; base: Document }
   /** The Pen tool or point editing has the pointer; see `VectorTool`. */
   | { kind: 'vector' }
   /** A cropped image is being dragged about inside its layer. */
@@ -259,11 +266,16 @@ export class InteractionController {
       targets.ys.push(...part.ys);
       rects.push(...collectSnapRects(doc, id, exclude));
     }
-    // The page's ruler guides, while the rulers are shown.
+    // The page's ruler guides, and those of the frames being worked in, while the rulers are shown.
     if (this.state.showRulers) {
       const guides = guideSnapTargets(this.pageGuides(doc));
       targets.xs.push(...guides.xs);
       targets.ys.push(...guides.ys);
+      const containers = new Set(containerIds);
+      for (const guide of frameGuides(doc, this.state.pageId)) {
+        if (!containers.has(guide.ownerId)) continue;
+        (guide.axis === 'X' ? targets.xs : targets.ys).push({ value: guide.position, from: guide.from, to: guide.to });
+      }
     }
     this.snapCache = { doc, key, targets, rects };
     return this.snapCache;
@@ -296,27 +308,50 @@ export class InteractionController {
     return top ? 'Y' : left ? 'X' : null;
   }
 
-  /** The index of the ruler guide under a page-space point, while guides are shown. */
-  private guideAt(world: Point): number | null {
+  /**
+   * The ruler guide under a page-space point, while guides are shown: which page or frame it belongs to and its
+   * index there. A frame's guides are drawn over the page's, so they are found first.
+   */
+  private guideAt(world: Point): { owner: NodeId; index: number; axis: Guide['axis'] } | null {
     if (!this.state.showRulers) return null;
-    return hitGuide(this.pageGuides(this.state.doc), world, GUIDE_HIT_PX / this.state.viewport.zoom);
+    const state = this.state;
+    const tolerance = GUIDE_HIT_PX / state.viewport.zoom;
+    const placed = hitFrameGuide(frameGuides(state.doc, state.pageId), world, tolerance);
+    if (placed) return { owner: placed.ownerId, index: placed.index, axis: placed.axis };
+    const index = hitGuide(this.pageGuides(state.doc), world, tolerance);
+    const guide = index === null ? undefined : this.pageGuides(state.doc)[index];
+    return guide && index !== null ? { owner: state.pageId, index, axis: guide.axis } : null;
   }
 
-  private beginGuide(axis: Guide['axis'], index: number | null): void {
+  private beginGuide(axis: Guide['axis'], owner: NodeId | null, index: number | null): void {
     const state = this.state;
     state.beginGesture();
     state.setHovered(null);
-    this.mode = { kind: 'guide', axis, index, base: state.doc };
+    this.mode = { kind: 'guide', axis, owner, index, base: state.doc };
     this.host.setCursor(axis === 'X' ? 'col-resize' : 'row-resize');
   }
 
-  /** Follows the pointer with the guide. Over its own ruler the guide is removed, so dragging it back there deletes it. */
+  /**
+   * Follows the pointer with the guide. Over a frame that can show guides it is that frame's guide, in the
+   * frame's own space; anywhere else it is the page's. Over its own ruler it is removed, so dragging it
+   * back there deletes it.
+   */
   private updateGuide(mode: Extract<Mode, { kind: 'guide' }>, e: PointerInput): void {
     const world = this.toWorld(e);
     const overRuler = mode.axis === 'X' ? e.x < RULER_SIZE : e.y < RULER_SIZE;
-    const position = Math.round(mode.axis === 'X' ? world.x : world.y);
     const pageId = this.state.pageId;
-    this.state.updateGesture(() => setGuide(mode.base, pageId, mode.index, overRuler ? null : { axis: mode.axis, position }));
+    this.state.updateGesture(() => {
+      const base = mode.base;
+      const without = mode.owner !== null && mode.index !== null ? setGuide(base, mode.owner, mode.index, null) : base;
+      if (overRuler) return without;
+      const under = containerAt(base, pageId, world, new Set());
+      const owner = under !== pageId && frameTakesGuides(base, under) ? under : pageId;
+      const origin = owner === pageId ? { x: 0, y: 0 } : getWorldBounds(base, owner);
+      const guide: Guide = { axis: mode.axis, position: Math.round(mode.axis === 'X' ? world.x - origin.x : world.y - origin.y) };
+      // Moved within the page or frame it is in, it keeps its place in the list; taken to another, it is added there.
+      if (mode.owner === owner && mode.index !== null) return setGuide(base, owner, mode.index, guide);
+      return setGuide(without, owner, null, guide);
+    });
   }
 
   private endSnapping(): void {
@@ -374,7 +409,7 @@ export class InteractionController {
     // The rulers are not canvas: pressing one with the move tool pulls out a guide, and does nothing otherwise.
     const ruler = this.rulerAt(e);
     if (ruler) {
-      if (tool === 'move' && ruler !== 'corner') this.beginGuide(ruler, null);
+      if (tool === 'move' && ruler !== 'corner') this.beginGuide(ruler, null, null);
       return;
     }
     if (this.vector.wantsPointer) {
@@ -492,7 +527,7 @@ export class InteractionController {
         this.finishDraw(mode, e);
         break;
       case 'guide': {
-        const removed = this.pageGuides(state.doc).length < this.pageGuides(mode.base).length;
+        const removed = countGuides(state.doc) < countGuides(mode.base);
         state.commitGesture(mode.index === null ? 'Add guide' : removed ? 'Remove guide' : 'Move guide');
         break;
       }
@@ -646,10 +681,10 @@ export class InteractionController {
       this.host.setCursor('default');
       return;
     }
-    const guideIndex = this.guideAt(world);
-    if (guideIndex !== null) {
+    const overGuide = this.guideAt(world);
+    if (overGuide) {
       state.setHovered(null);
-      this.host.setCursor(this.pageGuides(state.doc)[guideIndex]?.axis === 'X' ? 'col-resize' : 'row-resize');
+      this.host.setCursor(overGuide.axis === 'X' ? 'col-resize' : 'row-resize');
       return;
     }
     const target =
@@ -727,10 +762,9 @@ export class InteractionController {
     }
 
     // A ruler guide: dragging moves it, and dragging it onto its ruler removes it.
-    const guideIndex = this.guideAt(world);
-    const guide = guideIndex === null ? undefined : this.pageGuides(state.doc)[guideIndex];
-    if (guide && guideIndex !== null) {
-      this.beginGuide(guide.axis, guideIndex);
+    const guide = this.guideAt(world);
+    if (guide) {
+      this.beginGuide(guide.axis, guide.owner, guide.index);
       return;
     }
 
@@ -875,30 +909,39 @@ export class InteractionController {
     } else this.guides = [];
     if (single) {
       const pointer = this.toParent(base, single.parentId, world);
-      const box = resizeBox(single, handle, pointer, {
+      const options = {
         keepAspect: e.shiftKey,
         fromCenter: e.altKey,
         snap: this.state.pixelSnap && getWorldRotation(base, single.id) === 0,
-      });
+      };
+      const box = resizeBox(single, handle, pointer, options);
+      // Dragged past the edge that stays fixed, the box lies on the other side of it: what is in it is mirrored to match.
+      const crossed = resizeFlips(single, handle, pointer, options);
       // Dragging a text layer's handle stops its size following its content in that direction.
       const textMode =
         single.type === 'TEXT'
           ? { textAutoResize: handle.hy !== 0 || single.textAutoResize === 'NONE' ? ('NONE' as const) : ('HEIGHT' as const) }
           : null;
       this.state.updateGesture(() => {
-        const resized = setLayerBox(base, single.id, box);
+        let resized = setLayerBox(base, single.id, box);
+        if (crossed.x) resized = mirrorInPlace(resized, [single.id], 'horizontal');
+        if (crossed.y) resized = mirrorInPlace(resized, [single.id], 'vertical');
         return textMode ? patchNode(resized, single.id, textMode) : resized;
       });
       return;
     }
     const from = frame.bounds;
-    const to = resizeBox({ ...from, rotation: 0 }, handle, world, {
-      keepAspect: e.shiftKey,
-      fromCenter: e.altKey,
-      snap: this.state.pixelSnap,
-    });
+    const options = { keepAspect: e.shiftKey, fromCenter: e.altKey, snap: this.state.pixelSnap };
+    const to = resizeBox({ ...from, rotation: 0 }, handle, world, options);
+    const crossed = resizeFlips({ ...from, rotation: 0 }, handle, world, options);
     const pixelSnap = this.state.pixelSnap;
-    this.state.updateGesture(() => resizeNodesInBounds(base, mode.ids, from, to, pixelSnap));
+    this.state.updateGesture(() => {
+      // Several layers dragged past the fixed edge change sides among themselves as well as being mirrored.
+      let resized = resizeNodesInBounds(base, mode.ids, from, to, pixelSnap);
+      if (crossed.x) resized = flipNodes(resized, mode.ids, 'horizontal');
+      if (crossed.y) resized = flipNodes(resized, mode.ids, 'vertical');
+      return resized;
+    });
   }
 
   private updateLineEnd(mode: Extract<Mode, { kind: 'line-end' }>, world: Point, e: PointerInput): void {

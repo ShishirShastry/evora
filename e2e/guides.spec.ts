@@ -35,6 +35,71 @@ async function overlayPixel(page: Page, x: number, y: number): Promise<[number, 
   );
 }
 
+test('guides of a frame: across the frame only, moving with it, snapped to, handed to the page and back', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New design file' }).click();
+  await expect(canvas(page)).toBeVisible();
+  await canvas(page).focus();
+  const set = async (label: string, value: string): Promise<void> => {
+    await field(page, label).fill(value);
+    await field(page, label).press('Enter');
+  };
+
+  // A frame from (200, 200) to (500, 400), and the rulers.
+  await page.keyboard.press('f');
+  await drag(page, [200, 200], [500, 400]);
+  await page.keyboard.press('Shift+R');
+
+  // A guide pulled out of the left ruler and let go inside the frame is the frame's: a line from its top to its bottom.
+  await drag(page, [10, 300], [300, 300]);
+  expect(await overlayPixel(page, 300, 250)).toEqual(GUIDE);
+  expect(await overlayPixel(page, 300, 390)).toEqual(GUIDE);
+  expect((await overlayPixel(page, 300, 150))[3]).toBe(0);
+  expect((await overlayPixel(page, 300, 460))[3]).toBe(0);
+  await expect(page.getByText('1 guide in this frame')).toBeVisible();
+
+  // Moved 60 to the right, the frame takes its guide with it.
+  const x = Number(await field(page, 'X position').inputValue());
+  await set('X position', String(x + 60));
+  expect(await overlayPixel(page, 360, 250)).toEqual(GUIDE);
+  expect((await overlayPixel(page, 300, 250))[3]).toBe(0);
+
+  // A rectangle in the frame snaps to it: three pixels to the right of the guide, it lands on it, 100 from the frame's left edge.
+  await canvas(page).focus();
+  await page.keyboard.press('r');
+  await drag(page, [280, 220], [320, 260]);
+  await drag(page, [300, 240], [383, 300]);
+  await expect(field(page, 'X position')).toHaveValue('100');
+
+  // Dragged out of the frame, the guide is the page's and runs right across; dragged back in, it is the frame's again.
+  await page.keyboard.press('Escape');
+  await drag(page, [360, 380], [700, 380]);
+  expect(await overlayPixel(page, 700, 100)).toEqual(GUIDE);
+  expect((await overlayPixel(page, 360, 380))[3]).toBe(0);
+  await expect(page.getByText('1 ruler guide')).toBeVisible();
+  await drag(page, [700, 500], [420, 380]);
+  expect(await overlayPixel(page, 420, 380)).toEqual(GUIDE);
+  expect((await overlayPixel(page, 420, 100))[3]).toBe(0);
+  await expect(page.getByText(/ruler guide/)).toHaveCount(0);
+
+  // It is in the file, and is taken off from the frame's properties.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await expect.poll(() => overlayPixel(page, 420, 380)).toEqual(GUIDE);
+  await page.getByRole('tree', { name: 'Layers' }).locator('[role="treeitem"][aria-level="1"]').first().click();
+  await expect(page.getByText('1 guide in this frame')).toBeVisible();
+  await page.getByRole('button', { name: 'Remove all guides of this frame' }).click();
+  expect((await overlayPixel(page, 420, 380))[3]).toBe(0);
+  await expect(page.getByText(/in this frame/)).toHaveCount(0);
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  expect(await overlayPixel(page, 420, 380)).toEqual(GUIDE);
+  expect(errors).toEqual([]);
+});
+
 test('rulers and guides: show, pull out, snap, remove, remember', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

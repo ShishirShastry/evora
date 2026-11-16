@@ -33,6 +33,9 @@ export function dragCrop(doc: Document, edit: PaintEdit, from: Point, to: Point)
   if (!found) return doc;
   const { node, paint } = found;
   const moved = applyToVector(invert(getWorldMatrix(doc, node.id)), { x: to.x - from.x, y: to.y - from.y });
+  // A mirrored picture is drawn turned over, so it follows the pointer the other way round in its own terms.
+  if (paint.flipX) moved.x = 0 - moved.x;
+  if (paint.flipY) moved.y = 0 - moved.y;
   const clamp = (v: number, max: number): number => Math.min(max, Math.max(0, v));
   const tidy = (v: number): number => Math.round(v * 1e4) / 1e4 + 0;
   const crop = {

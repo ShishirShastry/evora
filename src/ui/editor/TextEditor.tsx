@@ -504,7 +504,12 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
         top: 0,
         zIndex: 5,
         transformOrigin: '0 0',
-        transform: `matrix(${m[0] * z}, ${m[1] * z}, ${m[2] * z}, ${m[3] * z}, ${(m[4] - viewport.x) * z}, ${(m[5] - viewport.y) * z})`,
+        // A mirrored text is edited as it is drawn: turned over about the middle of its box.
+        transform:
+          `matrix(${m[0] * z}, ${m[1] * z}, ${m[2] * z}, ${m[3] * z}, ${(m[4] - viewport.x) * z}, ${(m[5] - viewport.y) * z})` +
+          (node.flipX || node.flipY
+            ? ` translate(${node.flipX ? node.width : 0}px, ${node.flipY ? node.height : 0}px) scale(${node.flipX ? -1 : 1}, ${node.flipY ? -1 : 1})`
+            : ''),
         width,
       }}
       onPointerDown={(event) => event.stopPropagation()}

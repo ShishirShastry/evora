@@ -174,6 +174,25 @@ export function resizeBox(box: Box, handle: Handle, pointer: Point, options: Res
 }
 
 /**
+ * Whether a resize has been dragged past the edge or corner that stays fixed,
+ * on each of the box's own axes. `resizeBox` then puts the box on the other
+ * side of that edge; what is in the box should be mirrored to match. A resize
+ * from the centre has no fixed edge to cross.
+ */
+export function resizeFlips(box: Box, handle: Handle, pointer: Point, options: ResizeOptions = {}): { x: boolean; y: boolean } {
+  if (options.fromCenter) return { x: false, y: false };
+  const snap = options.snap === true && box.rotation === 0;
+  const c0 = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const p = rotatePoint(pointer, c0, -box.rotation);
+  const px = snap ? Math.round(p.x) : p.x;
+  const py = snap ? Math.round(p.y) : p.y;
+  return {
+    x: handle.hx === 1 ? px < box.x : handle.hx === -1 ? px > box.x + box.width : false,
+    y: handle.hy === 1 ? py < box.y : handle.hy === -1 ? py > box.y + box.height : false,
+  };
+}
+
+/**
  * Sets a box's size while keeping its top-left corner where it is on screen,
  * also when the box is rotated. This is what typing a width or height into
  * the properties panel does.

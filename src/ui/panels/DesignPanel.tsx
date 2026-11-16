@@ -687,6 +687,21 @@ export function DesignPanel() {
             Clip content
           </label>
         )}
+        {layers.length === 1 && first.type === 'FRAME' && first.guides.length > 0 && (
+          <Row>
+            <span className="min-w-0 flex-1 text-dim">
+              {first.guides.length} {first.guides.length === 1 ? 'guide' : 'guides'} in this frame
+            </span>
+            <button
+              type="button"
+              className="od-button !h-[26px] flex-none !px-2"
+              aria-label="Remove all guides of this frame"
+              onClick={() => store.getState().apply('Remove all guides', (d) => patchNodes(d, { [first.id]: { guides: [] } }))}
+            >
+              Remove all
+            </button>
+          </Row>
+        )}
       </Section>
 
       {insideFrames && <ConstraintsSection layers={layers} />}

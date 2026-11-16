@@ -83,8 +83,9 @@ export type FlipAxis = 'horizontal' | 'vertical';
  * things that are not the same on both sides. The handles of a gradient
  * change sides, the radii of the corners are swapped, the slice of an ellipse
  * is mirrored, the arrowheads of a line change ends, a shadow falls the
- * other way, and the curves of a vector are mirrored. The glyphs of text and
- * the picture of an image fill cannot be mirrored and stay as they are.
+ * other way, the curves of a vector are mirrored, the glyphs of text and the
+ * picture of an image fill are marked to be drawn mirrored, and the guides of
+ * a frame change sides.
  */
 function mirroredLook(node: LayerNode, axis: FlipAxis): LayerPatch {
   // A polygon or a star flipped top to bottom is given a half turn (it is the same left and right),
@@ -96,17 +97,25 @@ function mirroredLook(node: LayerNode, axis: FlipAxis): LayerPatch {
   const mirrorPaints = (paints: readonly Paint[]): Paint[] | null => {
     let changed = false;
     const next = paints.map((paint) => {
-      if (paint.type === 'SOLID' || paint.type === 'IMAGE') return paint;
+      if (paint.type === 'SOLID') return paint;
       changed = true;
+      if (paint.type === 'IMAGE') return across ? { ...paint, flipX: !paint.flipX } : { ...paint, flipY: !paint.flipY };
       const flip = (p: { x: number; y: number }): { x: number; y: number } => (across ? { x: clean(1 - p.x), y: p.y } : { x: p.x, y: clean(1 - p.y) });
       return { ...paint, from: flip(paint.from), to: flip(paint.to) };
     });
     return changed ? next : null;
   };
-  const fills = mirrorPaints(node.fills);
-  if (fills) patch.fills = fills;
-  const strokes = mirrorPaints(node.strokes);
-  if (strokes) patch.strokes = strokes;
+  if (node.type === 'TEXT') {
+    // Mirrored text is drawn turned over as a whole, glyphs and what they are painted with alike,
+    // so its paints are left as they are.
+    if (across) patch.flipX = !node.flipX;
+    else patch.flipY = !node.flipY;
+  } else {
+    const fills = mirrorPaints(node.fills);
+    if (fills) patch.fills = fills;
+    const strokes = mirrorPaints(node.strokes);
+    if (strokes) patch.strokes = strokes;
+  }
 
   if (node.effects.some(isShadow)) {
     patch.effects = node.effects.map((effect) =>
@@ -128,7 +137,30 @@ function mirroredLook(node: LayerNode, axis: FlipAxis): LayerPatch {
     patch.endArrow = node.startArrow;
   }
   if (node.type === 'VECTOR') patch.network = mirrorNetwork(node.network, node.width, node.height, axis);
+  if (node.type === 'FRAME' && node.guides.length > 0) {
+    const size = across ? node.width : node.height;
+    patch.guides = node.guides.map((guide) => ((guide.axis === 'X') === across ? { ...guide, position: clean(size - guide.position) } : guide));
+  }
   return patch;
+}
+
+/**
+ * Mirrors layers about their own axes without moving their boxes: 'horizontal'
+ * swaps a layer's own left and right, whichever way the layer is turned. This
+ * is what a resize does when it is dragged past the edge that stays fixed:
+ * the box has by then been put on the other side, and what is in it follows.
+ */
+export function mirrorInPlace(doc: Document, ids: readonly NodeId[], axis: FlipAxis): Document {
+  const patches: Record<NodeId, LayerPatch> = {};
+  for (const id of ids) {
+    const node = doc.nodes[id];
+    if (!isLayer(node)) continue;
+    // A polygon or a star turned over top to bottom: a half turn, and then left and right swapped (see mirroredLook).
+    const halfTurn = axis === 'vertical' && (node.type === 'POLYGON' || node.type === 'STAR');
+    patches[id] = { ...(halfTurn ? { rotation: clean(normalizeAngle(node.rotation + 180)) } : {}), ...mirroredLook(node, axis) };
+    if (isContainer(node)) flipInside(doc, id, axis, patches);
+  }
+  return patchNodes(doc, patches);
 }
 
 /**

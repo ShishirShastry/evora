@@ -278,6 +278,11 @@ function drawImagePaint(ctx: Ctx, paint: ImagePaint, width: number, height: numb
   }
   const filter = imageFilter(paint);
   if (filter && 'filter' in ctx) ctx.filter = filter;
+  if (paint.flipX || paint.flipY) {
+    // A mirrored picture: the box is turned over about its own middle before the picture is drawn into it.
+    ctx.translate(paint.flipX ? width : 0, paint.flipY ? height : 0);
+    ctx.scale(paint.flipX ? -1 : 1, paint.flipY ? -1 : 1);
+  }
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   if (paint.scaleMode === 'TILE') {

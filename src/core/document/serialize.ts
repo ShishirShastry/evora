@@ -153,6 +153,42 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 13, document: { ...body, nodes: upgraded } };
   },
+  // Version 14 adds mirrored text and image fills, and guides on frames.
+  // Nothing older is mirrored, and no older frame has guides.
+  13: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    // As in version 12: the new values go where a file written by this version has them (after the
+    // adjustments), so that an upgraded file reads exactly as a new one.
+    const unflipped = (paint: Raw): Raw => {
+      const flags = { flipX: false, flipY: false };
+      const next: Raw = {};
+      let placed = false;
+      for (const key in paint) {
+        next[key] = paint[key];
+        if (key === 'saturation') {
+          Object.assign(next, flags);
+          placed = true;
+        }
+      }
+      return placed ? next : { ...next, ...flags };
+    };
+    const unflip = (paints: unknown): unknown =>
+      Array.isArray(paints) ? paints.map((paint) => (isObject(paint) && paint.type === 'IMAGE' ? unflipped(paint) : paint)) : paints;
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node) || node.type === 'PAGE') {
+        upgraded[id] = node;
+        continue;
+      }
+      const next: Raw = { ...node, fills: unflip(node.fills), strokes: unflip(node.strokes) };
+      if (node.type === 'FRAME' && !('guides' in node)) next.guides = [];
+      if (node.type === 'TEXT') Object.assign(next, { flipX: node.flipX === true, flipY: node.flipY === true });
+      upgraded[id] = next;
+    }
+    return { ...file, schemaVersion: 14, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

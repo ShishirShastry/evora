@@ -94,6 +94,8 @@ export function imagePaint(imageHash: string): ImagePaint {
     exposure: 0,
     contrast: 0,
     saturation: 0,
+    flipX: false,
+    flipY: false,
     opacity: 1,
     visible: true,
   };
@@ -175,7 +177,7 @@ export function createLayer(
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [] };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [] };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };
@@ -222,6 +224,8 @@ export function createLayer(
         verticalAlign: 'TOP',
         textAutoResize: 'WIDTH_AND_HEIGHT',
         textDecoration: 'NONE',
+        flipX: false,
+        flipY: false,
         listType: 'NONE',
         styleRanges: [],
         textCase: 'ORIGINAL',
