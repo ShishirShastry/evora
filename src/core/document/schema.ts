@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 20 (adds styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * OPEN DESIGN document schema, version 21 (adds libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 20;
+export const CURRENT_SCHEMA_VERSION = 21;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -300,6 +300,12 @@ export interface PageNode extends NodeBase {
   guides: Guide[];
   /** The mode chosen for this page of each variable collection that has one chosen. */
   variableModes: Readonly<Record<string, string>>;
+  /**
+   * Set on a page that holds what was imported from a library: its
+   * components, which instances in this document show. Such a page is not
+   * among the document's pages: it is never shown, listed or exported.
+   */
+  library: LibraryRef | null;
 }
 
 interface LayerBase extends NodeBase {
@@ -402,6 +408,8 @@ export interface Style {
   text: TextStyleValues;
   effects: Effect[];
   grids: LayoutGrid[];
+  /** The library (a document ID) this style was imported from; null for a style of this document. */
+  remote: string | null;
 }
 
 /** Which style a layer uses for what. */
@@ -429,6 +437,8 @@ export interface Variable {
   /** The kinds of property it is offered for. Empty for all. */
   scopes: string[];
   valuesByMode: Readonly<Record<string, VariableValue>>;
+  /** The library this variable was imported from; null for a variable of this document. */
+  remote: string | null;
 }
 
 /** A group of variables that share modes: "Light" and "Dark", say. The first mode is the one that applies where none is chosen. */
@@ -436,6 +446,37 @@ export interface VariableCollection {
   id: string;
   name: string;
   modes: { id: string; name: string }[];
+  /** The library this collection was imported from; null for a collection of this document. */
+  remote: string | null;
+}
+
+/** Which library a page holds, and which published version of it. */
+export interface LibraryRef {
+  /** The ID of the library's document. */
+  id: string;
+  name: string;
+  version: number;
+}
+
+/**
+ * What a document offers other documents as a library: its components, with
+ * the components they use, and its styles and variables, as they were when
+ * it was last published. Changes made since then reach nobody until it is
+ * published again.
+ */
+export interface Publication {
+  /** Counts up with every publishing. */
+  version: number;
+  publishedAt: string;
+  /** The components and component sets, by ID. Their `parentId` is empty. */
+  roots: NodeId[];
+  /** Those and every layer in them, except the layers instances hold as mirrors. */
+  nodes: Readonly<Record<NodeId, LayerNode>>;
+  styles: Readonly<Record<string, Style>>;
+  variables: Readonly<Record<string, Variable>>;
+  variableCollections: Readonly<Record<string, VariableCollection>>;
+  /** The image assets those use. */
+  assets: Readonly<Record<string, AssetInfo>>;
 }
 
 /** What a component property can decide about a layer: whether it shows, what a text says, which component an instance shows. */
@@ -737,6 +778,8 @@ export interface Document {
   variables: Readonly<Record<string, Variable>>;
   /** The collections the variables are in, by ID. */
   variableCollections: Readonly<Record<string, VariableCollection>>;
+  /** What this document has published as a library, or null when it has not been published. */
+  publication: Publication | null;
 }
 
 export interface FileMeta {

@@ -156,7 +156,7 @@ export function parseClipboard(text: string): ClipboardData | null {
       format: FILE_FORMAT,
       schemaVersion: raw.schemaVersion,
       meta: { createdAt: now, updatedAt: now },
-      document: { id: shell.id, name: shell.name, nodes, assets: isRecord(raw.assets) ? raw.assets : {}, styles: {}, variables: {}, variableCollections: {} },
+      document: { id: shell.id, name: shell.name, nodes, assets: isRecord(raw.assets) ? raw.assets : {}, styles: {}, variables: {}, variableCollections: {}, publication: null },
     }).file.document;
   } catch {
     // Not a version this build can read.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, FileFormatError, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, FileFormatError, listLibraries, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -14,6 +14,8 @@ import { clipboardText, commandForKey, getCommand, pasteClipboardText, runComman
 import { imageTypeOf, importImageFiles, placeImages } from '../../state/images';
 import { createEditorStore, getSession, type EditorStore } from '../../state/editorStore';
 import { Dialog } from '../components/Dialog';
+import { LibrariesDialog } from './LibrariesDialog';
+import { loadLibrary } from '../../persistence/libraries';
 import { Logo } from '../components/Icon';
 import { PanelResizer } from '../components/PanelResizer';
 import { DesignPanel } from '../panels/DesignPanel';
@@ -110,9 +112,23 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   const controller = useRef<InteractionController | null>(null);
   const saver = useRef<Autosaver | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [librariesOpen, setLibrariesOpen] = useState(false);
   const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(
     repairs.length > 0 ? { title: 'This file had problems that were repaired when it was opened.', lines: repairs } : null,
   );
+  // When the file is opened: say so if a library it uses has been published again since.
+  useEffect(() => {
+    let current = true;
+    const used = listLibraries(store.getState().doc);
+    void Promise.all(used.map((library) => loadLibrary(storage, library.id).then((latest) => (latest && latest.publication.version > library.version ? library.name : null)))).then((names) => {
+      const newer = names.filter((name): name is string => name !== null);
+      if (!current || newer.length === 0) return;
+      setNotice((shown) => shown ?? { title: 'A library this file uses has a newer version.', lines: newer.map((name) => `“${name}” was published again. Open Libraries in the File menu to update.`) });
+    });
+    return () => {
+      current = false;
+    };
+  }, [store, storage]);
   const exit = useRef(onExit);
   exit.current = onExit;
   const images = useMemo(() => new ImageCache((hash) => storage.loadAsset(hash)), [storage]);
@@ -163,6 +179,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       },
       cancelInteraction: () => controller.current?.cancel() ?? false,
       openShortcuts: () => setShortcutsOpen(true),
+      openLibraries: () => setLibrariesOpen(true),
       saveNow: () => void saver.current?.flush(),
       saveAs: () => {
         const state = store.getState();
@@ -427,6 +444,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
         </div>
       </div>
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+      {librariesOpen && <LibrariesDialog onClose={() => setLibrariesOpen(false)} />}
     </EditorContext.Provider>
   );
 }

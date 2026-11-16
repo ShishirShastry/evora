@@ -11,6 +11,7 @@ import {
   deleteStyle,
   deleteVariable,
   listCollections,
+  listLibraries,
   listStyles,
   listVariables,
   modeFor,
@@ -92,6 +93,13 @@ function CommitInput({ label, value, onCommit, className, placeholder }: { label
   );
 }
 
+/** A name for something that may have come from a library: with the library's name after it. */
+function sourced(doc: Document, name: string, remote: string | null): string {
+  if (!remote) return name;
+  const library = listLibraries(doc).find((entry) => entry.id === remote);
+  return `${name} (${library?.name ?? 'library'})`;
+}
+
 /** The styles the selected layers use, one row for each kind of style that fits them all. */
 export function StylesSection({ layers }: { layers: LayerNode[] }) {
   const { store } = useEditorContext();
@@ -133,13 +141,13 @@ export function StylesSection({ layers }: { layers: LayerNode[] }) {
               <option value="">None</option>
               {styles.map((style) => (
                 <option key={style.id} value={style.id}>
-                  {style.name}
+                  {sourced(doc, style.name, style.remote)}
                 </option>
               ))}
               <option value="new">New style from this layer</option>
-              {styles.length > 0 && (
+              {styles.some((style) => !style.remote) && (
                 <optgroup label="Update a style to match this layer">
-                  {styles.map((style) => (
+                  {styles.filter((style) => !style.remote).map((style) => (
                     <option key={style.id} value={`set:${style.id}`}>
                       Update “{style.name}”
                     </option>
@@ -156,7 +164,7 @@ export function StylesSection({ layers }: { layers: LayerNode[] }) {
 
 function variableLabel(doc: Document, variable: Variable): string {
   const collection = doc.variableCollections[variable.collectionId];
-  return listCollections(doc).length > 1 && collection ? `${collection.name} / ${variable.name}` : variable.name;
+  return sourced(doc, listCollections(doc).length > 1 && collection ? `${collection.name} / ${variable.name}` : variable.name, variable.remote);
 }
 
 /** The mode of each collection chosen on a page or a frame. Collections with one mode have nothing to choose. */
@@ -319,12 +327,17 @@ export function LocalTokens() {
   const doc = useEditor((s) => s.doc);
   const pageId = useEditor((s) => s.pageId);
   const [open, setOpen] = useState(false);
-  const styles = listStyles(doc);
-  const count = Object.keys(doc.variables).length;
+  // What came from a library is edited in the library's file; here it is only counted.
+  const styles = listStyles(doc).filter((style) => !style.remote);
+  const remoteStyles = listStyles(doc).length - styles.length;
+  const count = Object.values(doc.variables).filter((variable) => !variable.remote).length;
+  const remoteVariables = Object.keys(doc.variables).length - count;
+  const localCollections = listCollections(doc).filter((collection) => !collection.remote).length;
   return (
     <>
       <Section title="Local styles">
         {styles.length === 0 && <p className="m-0 text-faint">No styles yet. Select a layer and choose “New style from this layer” under Styles.</p>}
+        {remoteStyles > 0 && <p className="m-0 text-dim">{remoteStyles} more from libraries, which are edited in the library’s file.</p>}
         {(['PAINT', 'TEXT', 'EFFECT', 'GRID'] as const).map((type) => {
           const group = styles.filter((style) => style.type === type);
           if (group.length === 0) return null;
@@ -342,7 +355,8 @@ export function LocalTokens() {
       </Section>
       <Section title="Local variables">
         <Row>
-          <span className="flex-1 text-dim">{count === 0 ? 'No variables yet.' : `${count} ${count === 1 ? 'variable' : 'variables'} in ${listCollections(doc).length} ${listCollections(doc).length === 1 ? 'collection' : 'collections'}`}</span>
+          <span className="flex-1 text-dim">{count === 0 ? 'No variables yet.' : `${count} ${count === 1 ? 'variable' : 'variables'} in ${localCollections} ${localCollections === 1 ? 'collection' : 'collections'}`}
+            {remoteVariables > 0 ? ` ${remoteVariables} more from libraries.` : ''}</span>
           <button type="button" className="od-button !h-[26px] flex-none !px-2" onClick={() => setOpen(true)}>
             Edit variables
           </button>
@@ -469,7 +483,8 @@ function VariableRow({ variable, collection }: { variable: Variable; collection:
 export function VariablesDialog({ onClose }: { onClose: () => void }) {
   const { store } = useEditorContext();
   const doc = useEditor((s) => s.doc);
-  const collections = listCollections(doc);
+  // Collections that came from a library are edited in the library's file.
+  const collections = listCollections(doc).filter((entry) => !entry.remote);
   const [chosen, setChosen] = useState('');
   const collection = collections.find((entry) => entry.id === chosen) ?? collections[0];
   const create = (): void => {

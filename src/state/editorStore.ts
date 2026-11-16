@@ -210,8 +210,13 @@ function sameIds(a: readonly NodeId[], b: readonly NodeId[]): boolean {
 }
 
 function resolvePage(doc: Document, preferred: NodeId | undefined, fallback?: NodeId): NodeId {
-  if (preferred !== undefined && doc.nodes[preferred]?.type === 'PAGE') return preferred;
-  if (fallback !== undefined && doc.nodes[fallback]?.type === 'PAGE') return fallback;
+  // A page that holds a library's components is not one to show.
+  const shown = (id: NodeId | undefined): id is NodeId => {
+    const node = id === undefined ? undefined : doc.nodes[id];
+    return node?.type === 'PAGE' && !node.library;
+  };
+  if (shown(preferred)) return preferred;
+  if (shown(fallback)) return fallback;
   const first = getPages(doc)[0];
   if (!first) throw new Error('The document has no pages');
   return first.id;
@@ -413,7 +418,8 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setPage(pageId) {
         const state = get();
-        if (pageId === state.pageId || state.doc.nodes[pageId]?.type !== 'PAGE') return;
+        const target = state.doc.nodes[pageId];
+        if (pageId === state.pageId || target?.type !== 'PAGE' || target.library) return;
         if (state.gesture) get().cancelGesture();
         set({ renamingId: null, ...withPage(get(), get().doc, pageId, []) });
       },

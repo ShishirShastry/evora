@@ -23,6 +23,8 @@ export interface DocumentPatch {
   nodes: Record<NodeId, NodeChange>;
   /** For each table that changed: the entries that differ, whole, before and after (null where there is none). */
   tables?: Partial<Record<TableName, Record<string, { before: unknown; after: unknown }>>>;
+  /** What the document has published, whole, before and after, when that changed. */
+  publication?: { before: unknown; after: unknown };
 }
 
 function diffTables(before: Document, after: Document): DocumentPatch['tables'] | null {
@@ -52,7 +54,10 @@ function sameValue(a: unknown, b: unknown): boolean {
  */
 export function diffDocuments(before: Document, after: Document): DocumentPatch | null {
   const tables = diffTables(before, after);
-  if (before.nodes === after.nodes) return tables ? { nodes: {}, tables } : null;
+  const publication = sameValue(before.publication, after.publication) ? null : { before: before.publication, after: after.publication };
+  const extra = { ...(tables ? { tables } : {}), ...(publication ? { publication } : {}) };
+  const more = tables !== null || publication !== null;
+  if (before.nodes === after.nodes) return more ? { nodes: {}, ...extra } : null;
   const nodes: Record<NodeId, NodeChange> = {};
   let any = false;
 
@@ -95,7 +100,7 @@ export function diffDocuments(before: Document, after: Document): DocumentPatch 
       any = true;
     }
   }
-  if (tables) return { nodes, tables };
+  if (more) return { nodes, ...extra };
   return any ? { nodes } : null;
 }
 
@@ -142,5 +147,6 @@ export function applyPatch(doc: Document, patch: DocumentPatch, direction: 'forw
     }
     next = { ...next, [table]: rows };
   }
+  if (patch.publication) next = { ...next, publication: (direction === 'forward' ? patch.publication.after : patch.publication.before) as Document['publication'] };
   return next;
 }

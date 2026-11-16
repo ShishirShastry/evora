@@ -151,13 +151,14 @@ export function createPage(name: string, order: string): PageNode {
     backgroundColor: { ...DEFAULT_PAGE_BACKGROUND },
     guides: [],
     variableModes: {},
+    library: null,
   };
 }
 
 /** A new document with one empty page. */
 export function createDocument(name = 'Untitled'): Document {
   const page = createPage('Page 1', freshKeys(1)[0] as string);
-  return { id: createId(), name, nodes: { [page.id]: page }, assets: {}, styles: {}, variables: {}, variableCollections: {} };
+  return { id: createId(), name, nodes: { [page.id]: page }, assets: {}, styles: {}, variables: {}, variableCollections: {}, publication: null };
 }
 
 /**

@@ -292,6 +292,26 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 20, document: { styles: {}, variables: {}, variableCollections: {}, ...body, nodes: upgraded } };
   },
+  // Version 21 adds libraries. Nothing older is published, holds a library or came from one.
+  20: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type === 'PAGE' ? { library: null, ...node } : node;
+    }
+    const local = (table: unknown): Raw => {
+      const out: Raw = {};
+      if (isObject(table)) for (const id in table) out[id] = isObject(table[id]) && !('remote' in (table[id] as Raw)) ? { ...(table[id] as Raw), remote: null } : table[id];
+      return out;
+    };
+    return {
+      ...file,
+      schemaVersion: 21,
+      document: { publication: null, ...body, nodes: upgraded, styles: local(body.styles), variables: local(body.variables), variableCollections: local(body.variableCollections) },
+    };
+  },
 };
 
 /**

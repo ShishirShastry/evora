@@ -7,6 +7,7 @@ import {
   detachInstances,
   getPageIdOf,
   instanceOf,
+  libraryOf,
   isComponent,
   isInstance,
   resetInstances,
@@ -560,7 +561,8 @@ export function goToMainComponent(store: EditorStore): void {
   const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
   const instance = isInstance(only) ? only : only ? instanceOf(state.doc, only.id) : null;
   const componentId = instance?.componentId;
-  if (!componentId) return;
+  // A component from a library is in the library's file, not on a page of this one.
+  if (!componentId || libraryOf(state.doc, componentId)) return;
   const pageId = getPageIdOf(state.doc, componentId);
   if (pageId) state.setPage(pageId);
   store.getState().setSelection([componentId]);
@@ -740,6 +742,8 @@ export interface AppActions {
   /** Cancels a drag in progress. Returns true if there was one. */
   cancelInteraction(): boolean;
   openShortcuts(): void;
+  /** Opens the dialog for publishing this file and for the libraries it uses. */
+  openLibraries?(): void;
   /** Writes the file to local storage immediately. */
   saveNow(): void;
   /** Saves a `.opendesign` copy to disk. */
@@ -874,6 +878,7 @@ export const COMMANDS: readonly Command[] = [
     run: ({ app }) => app.placeImage(),
   },
   { id: 'file.home', label: 'Back to files', group: 'File', run: ({ app }) => app.goHome() },
+  { id: 'file.libraries', label: 'Libraries…', group: 'File', run: ({ app }) => app.openLibraries?.() },
 
   {
     id: 'edit.undo',
@@ -1161,7 +1166,8 @@ export const COMMANDS: readonly Command[] = [
     group: 'Object',
     enabled: (state) => {
       const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
-      return isInstance(only) || (only !== undefined && instanceOf(state.doc, only.id) !== null);
+      const instance = isInstance(only) ? only : only !== undefined ? instanceOf(state.doc, only.id) : null;
+      return instance !== null && instance.componentId !== null && libraryOf(state.doc, instance.componentId) === null;
     },
     run: ({ store }) => goToMainComponent(store),
   },

@@ -13,6 +13,7 @@ import {
   isComponent,
   isInstance,
   isLayer,
+  libraryOf,
   listComponents,
   patchNodes,
   propertyOwner,
@@ -452,13 +453,16 @@ export function ComponentsPanel() {
   const wanted = query.trim().toLowerCase();
   const found = components.filter((component) => {
     const set = setOf(doc, component.id);
-    return wanted === '' || `${set?.name ?? ''}\n${component.name}\n${component.description}`.toLowerCase().includes(wanted);
+    return wanted === '' || `${libraryOf(doc, component.id)?.name ?? ''}\n${set?.name ?? ''}\n${component.name}\n${component.description}`.toLowerCase().includes(wanted);
   });
   const groups = new Map<string, FrameNode[]>();
   /** The name a component is listed and searched by: a variant's is its set's name and its own. */
   const full = (component: FrameNode): string => {
     const set = setOf(doc, component.id);
-    return set ? `${set.name}/${component.name}` : component.name;
+    const name = set ? `${set.name}/${component.name}` : component.name;
+    // A component from a library is listed under the library's name.
+    const library = libraryOf(doc, component.id);
+    return library ? `${library.name}/${name}` : name;
   };
   for (const component of found) {
     const name = full(component);
@@ -467,6 +471,8 @@ export function ComponentsPanel() {
     groups.set(group, [...(groups.get(group) ?? []), component]);
   }
   const goTo = (id: NodeId): void => {
+    // A component from a library is in the library's file.
+    if (libraryOf(doc, id)) return;
     const pageId = getPageIdOf(doc, id);
     if (pageId) store.getState().setPage(pageId);
     store.getState().setSelection([id]);
@@ -494,7 +500,11 @@ export function ComponentsPanel() {
             {group !== '' && <div className="px-3 pt-1 text-[11px] text-dim">{group}</div>}
             <ul aria-label={group === '' ? 'Ungrouped components' : group} className="m-0 list-none p-0">
               {members.map((component) => (
-                <li key={component.id} className="flex h-7 items-center gap-1 pl-3 pr-1.5 hover:bg-hover" title={component.description || undefined}>
+                <li
+                  key={component.id}
+                  className="flex h-7 items-center gap-1 pl-3 pr-1.5 hover:bg-hover"
+                  title={[component.description, libraryOf(doc, component.id) ? `From the library “${libraryOf(doc, component.id)?.name}”. It is edited in that file.` : ''].filter(Boolean).join('\n') || undefined}
+                >
                   <button
                     type="button"
                     className="min-w-0 flex-1 cursor-default truncate border-0 bg-transparent p-0 text-left text-ink"

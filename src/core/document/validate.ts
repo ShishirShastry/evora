@@ -22,6 +22,8 @@ import {
   STYLE_TYPES,
   VARIABLE_TYPES,
   type ComponentProp,
+  type LibraryRef,
+  type Publication,
   type Style,
   type StyleRefs,
   type Variable,
@@ -300,6 +302,33 @@ function propRefs(value: unknown): { visible?: string; characters?: string; comp
   return out;
 }
 
+/** The library a page holds: it needs the library's ID. */
+function libraryRef(value: unknown): LibraryRef | null {
+  if (!isObject(value) || typeof value.id !== 'string' || !value.id) return null;
+  return { id: value.id, name: typeof value.name === 'string' && value.name ? value.name : 'Library', version: Math.round(finite(value.version, 1, 1, 1e9)) };
+}
+
+const remoteOf = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
+
+/**
+ * What the document has published. Its parts are kept as they are: they are
+ * checked like a document's own when another document imports them.
+ */
+function publication(value: unknown): Publication | null {
+  if (!isObject(value) || typeof value.version !== 'number' || !Number.isFinite(value.version)) return null;
+  const record = (part: unknown): Record<string, never> => (isObject(part) ? (part as Record<string, never>) : {});
+  return {
+    version: value.version,
+    publishedAt: typeof value.publishedAt === 'string' ? value.publishedAt : '',
+    roots: Array.isArray(value.roots) ? value.roots.filter((id): id is string => typeof id === 'string') : [],
+    nodes: record(value.nodes),
+    styles: record(value.styles),
+    variables: record(value.variables),
+    variableCollections: record(value.variableCollections),
+    assets: record(value.assets),
+  };
+}
+
 /** Which styles a layer uses: IDs, as strings, for the kinds of style there are. */
 function styleRefs(value: unknown): StyleRefs {
   const out: StyleRefs = {};
@@ -337,6 +366,7 @@ function styles(value: unknown): Record<string, Style> {
       },
       effects: effects(item.effects),
       grids: layoutGrids(item.grids),
+      remote: remoteOf(item.remote),
     };
   }
   return out;
@@ -357,7 +387,7 @@ function variableCollections(value: unknown): Record<string, VariableCollection>
       modes.push({ id: mode.id, name: typeof mode.name === 'string' && mode.name ? mode.name : 'Mode' });
     }
     if (modes.length === 0) continue;
-    out[id] = { id, name: typeof item.name === 'string' && item.name ? item.name : 'Collection', modes };
+    out[id] = { id, name: typeof item.name === 'string' && item.name ? item.name : 'Collection', modes, remote: remoteOf(item.remote) };
   }
   return out;
 }
@@ -390,6 +420,7 @@ function variables(value: unknown, collections: Record<string, VariableCollectio
       type,
       scopes: Array.isArray(item.scopes) ? item.scopes.filter((scope): scope is string => typeof scope === 'string') : [],
       valuesByMode,
+      remote: remoteOf(item.remote),
     };
   }
   return out;
@@ -464,6 +495,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       backgroundColor: rgb(raw.backgroundColor, DEFAULT_PAGE_BACKGROUND),
       guides: guides(raw.guides),
       variableModes: stringMap(raw.variableModes),
+      library: libraryRef(raw.library),
     };
     return page;
   }
@@ -645,7 +677,8 @@ export function repairDocument(input: unknown): RepairResult {
   if (adjusted > 0) repairs.push(`${adjusted} layer(s) had missing or out-of-range values that were reset.`);
 
   // At least one page.
-  let pageIds = Object.keys(nodes).filter((key) => nodes[key]?.type === 'PAGE');
+  // A page that holds a library's components does not count: there is one to design on.
+  let pageIds = Object.keys(nodes).filter((key) => nodes[key]?.type === 'PAGE' && !(nodes[key] as PageNode).library);
   if (pageIds.length === 0) {
     const page = createPage('Page 1', freshKeys(1)[0] as string);
     nodes[page.id] = page;
@@ -721,7 +754,7 @@ export function repairDocument(input: unknown): RepairResult {
   }
   if (rekeyedGroups > 0) repairs.push(`Layer order was rebuilt in ${rekeyedGroups} place(s).`);
 
-  return { doc: { id, name, nodes, assets: assetTable, styles: styleTable, variables: variableTable, variableCollections: collectionTable }, repairs };
+  return { doc: { id, name, nodes, assets: assetTable, styles: styleTable, variables: variableTable, variableCollections: collectionTable, publication: publication(source.publication) }, repairs };
 }
 
 /** Lists what is wrong with a document. An empty list means it is valid. */

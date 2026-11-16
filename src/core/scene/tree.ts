@@ -88,7 +88,17 @@ export function getPages(doc: Document): PageNode[] {
   const pages: PageNode[] = [];
   for (const id of getChildIds(doc, null)) {
     const node = doc.nodes[id];
-    if (isPage(node)) pages.push(node);
+    if (isPage(node) && !node.library) pages.push(node);
+  }
+  return pages;
+}
+
+/** The pages that hold what was imported from libraries. They are not among the document's pages. */
+export function getLibraryPages(doc: Document): PageNode[] {
+  const pages: PageNode[] = [];
+  for (const id of getChildIds(doc, null)) {
+    const node = doc.nodes[id];
+    if (isPage(node) && node.library) pages.push(node);
   }
   return pages;
 }

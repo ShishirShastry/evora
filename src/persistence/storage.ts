@@ -39,7 +39,14 @@ export interface DocumentStorage {
 
 export function summarize(file: OpenDesignFile): FileSummary {
   let layerCount = 0;
-  for (const id in file.document.nodes) if (file.document.nodes[id]?.type !== 'PAGE') layerCount++;
+  // What a file holds of the libraries it uses is not counted: those are not its layers.
+  const nodes = file.document.nodes;
+  const imported = (id: string): boolean => {
+    let node = nodes[id];
+    for (let step = 0; node && node.parentId !== null && step < 1000; step++) node = nodes[node.parentId];
+    return node?.type === 'PAGE' && Boolean(node.library);
+  };
+  for (const id in nodes) if (nodes[id]?.type !== 'PAGE' && !imported(id)) layerCount++;
   return {
     id: file.document.id,
     name: file.document.name,

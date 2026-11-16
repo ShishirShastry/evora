@@ -83,6 +83,7 @@ export function createStyle(doc: Document, layerId: NodeId, ref: keyof StyleRefs
     text: { ...DEFAULT_TEXT },
     effects: [],
     grids: [],
+    remote: null,
     ...content,
   };
   const next = setTable(doc, 'styles', { [style.id]: style });
@@ -92,7 +93,8 @@ export function createStyle(doc: Document, layerId: NodeId, ref: keyof StyleRefs
 /** Changes a style: its name, its description, or what it holds. Every layer that uses it follows. */
 export function updateStyle(doc: Document, styleId: string, change: Partial<Omit<Style, 'id' | 'type'>>): Document {
   const style = doc.styles[styleId];
-  if (!style) return doc;
+  // A style that came from a library is changed in the library.
+  if (!style || style.remote) return doc;
   const name = change.name !== undefined ? change.name.trim() || style.name : style.name;
   return setTable(doc, 'styles', { [styleId]: { ...style, ...change, name, text: { ...style.text, ...(change.text ?? {}) } } });
 }
@@ -113,6 +115,7 @@ export function redefineStyle(doc: Document, styleId: string, layerId: NodeId, f
 
 /** Removes a style. The layers that used it keep the look it gave them, as their own. */
 export function deleteStyle(doc: Document, styleId: string): Document {
+  if (doc.styles[styleId]?.remote) return doc;
   return setTable(doc, 'styles', { [styleId]: null });
 }
 
@@ -151,18 +154,20 @@ export function createCollection(doc: Document, name?: string): { doc: Document;
     id: createId(),
     name: uniqueName(Object.values(doc.variableCollections).map((entry) => entry.name), name ?? 'Collection'),
     modes: [{ id: createId(), name: 'Mode 1' }],
+    remote: null,
   };
   return { doc: setTable(doc, 'variableCollections', { [collection.id]: collection }), id: collection.id };
 }
 
 export function renameCollection(doc: Document, collectionId: string, name: string): Document {
   const collection = doc.variableCollections[collectionId];
-  if (!collection || name.trim() === '') return doc;
+  if (!collection || collection.remote || name.trim() === '') return doc;
   return setTable(doc, 'variableCollections', { [collectionId]: { ...collection, name: name.trim() } });
 }
 
 /** Removes a collection with its variables. Whatever was bound to them keeps the value it had. */
 export function deleteCollection(doc: Document, collectionId: string): Document {
+  if (doc.variableCollections[collectionId]?.remote) return doc;
   const gone: Record<string, null> = {};
   for (const variable of listVariables(doc, collectionId)) gone[variable.id] = null;
   return setTable(setTable(doc, 'variables', gone), 'variableCollections', { [collectionId]: null });
@@ -176,7 +181,7 @@ function blank(type: VariableType): VariableValue {
 /** Adds a mode to a collection. Every variable in it starts the new mode with the value it has in the first. */
 export function addMode(doc: Document, collectionId: string, name?: string): { doc: Document; id: string } | null {
   const collection = doc.variableCollections[collectionId];
-  if (!collection) return null;
+  if (!collection || collection.remote) return null;
   const mode = { id: createId(), name: uniqueName(collection.modes.map((entry) => entry.name), name ?? `Mode ${collection.modes.length + 1}`) };
   const first = (collection.modes[0] as { id: string }).id;
   const changed: Record<string, Variable> = {};
@@ -189,7 +194,7 @@ export function addMode(doc: Document, collectionId: string, name?: string): { d
 
 export function renameMode(doc: Document, collectionId: string, modeId: string, name: string): Document {
   const collection = doc.variableCollections[collectionId];
-  if (!collection || name.trim() === '') return doc;
+  if (!collection || collection.remote || name.trim() === '') return doc;
   return setTable(doc, 'variableCollections', {
     [collectionId]: { ...collection, modes: collection.modes.map((mode) => (mode.id === modeId ? { ...mode, name: name.trim() } : mode)) },
   });
@@ -198,7 +203,7 @@ export function renameMode(doc: Document, collectionId: string, modeId: string, 
 /** Removes a mode. A collection keeps at least one; where the removed mode was chosen, the first applies again. */
 export function removeMode(doc: Document, collectionId: string, modeId: string): Document {
   const collection = doc.variableCollections[collectionId];
-  if (!collection || collection.modes.length <= 1 || !collection.modes.some((mode) => mode.id === modeId)) return doc;
+  if (!collection || collection.remote || collection.modes.length <= 1 || !collection.modes.some((mode) => mode.id === modeId)) return doc;
   const changed: Record<string, Variable> = {};
   for (const variable of listVariables(doc, collectionId)) {
     const valuesByMode = { ...variable.valuesByMode };
@@ -221,7 +226,7 @@ export function removeMode(doc: Document, collectionId: string, modeId: string):
 /** Makes a variable in a collection, with the same starting value in every mode. */
 export function createVariable(doc: Document, collectionId: string, type: VariableType, name?: string, value?: VariableValue): { doc: Document; id: string } | null {
   const collection = doc.variableCollections[collectionId];
-  if (!collection) return null;
+  if (!collection || collection.remote) return null;
   const labels: Record<VariableType, string> = { COLOR: 'Colour', FLOAT: 'Number', STRING: 'String', BOOLEAN: 'Boolean' };
   const valuesByMode: Record<string, VariableValue> = {};
   for (const mode of collection.modes) valuesByMode[mode.id] = value ?? blank(type);
@@ -233,6 +238,7 @@ export function createVariable(doc: Document, collectionId: string, type: Variab
     type,
     scopes: [],
     valuesByMode,
+    remote: null,
   };
   return { doc: setTable(doc, 'variables', { [variable.id]: variable }), id: variable.id };
 }
@@ -240,7 +246,7 @@ export function createVariable(doc: Document, collectionId: string, type: Variab
 /** Changes a variable's name, description or the kinds of property it is offered for. */
 export function updateVariable(doc: Document, variableId: string, change: Partial<Pick<Variable, 'name' | 'description' | 'scopes'>>): Document {
   const variable = doc.variables[variableId];
-  if (!variable) return doc;
+  if (!variable || variable.remote) return doc;
   const name = change.name !== undefined ? change.name.trim() || variable.name : variable.name;
   return setTable(doc, 'variables', { [variableId]: { ...variable, ...change, name } });
 }
@@ -267,7 +273,7 @@ function leadsTo(doc: Document, start: string, variableId: string): boolean {
 export function setVariableValue(doc: Document, variableId: string, modeId: string, value: VariableValue): Document {
   const variable = doc.variables[variableId];
   const collection = variable ? doc.variableCollections[variable.collectionId] : undefined;
-  if (!variable || !collection || !collection.modes.some((mode) => mode.id === modeId)) return doc;
+  if (!variable || variable.remote || !collection || !collection.modes.some((mode) => mode.id === modeId)) return doc;
   if (typeof value === 'object' && value !== null && 'alias' in value) {
     const target = doc.variables[value.alias];
     if (!target || target.type !== variable.type || leadsTo(doc, value.alias, variableId)) return doc;
@@ -288,6 +294,7 @@ export function setVariableValue(doc: Document, variableId: string, modeId: stri
 
 /** Removes a variable. Whatever was bound to it keeps the value it had; a variable that stood for it has none any more. */
 export function deleteVariable(doc: Document, variableId: string): Document {
+  if (doc.variables[variableId]?.remote) return doc;
   return setTable(doc, 'variables', { [variableId]: null });
 }
 
