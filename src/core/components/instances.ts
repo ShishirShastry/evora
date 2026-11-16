@@ -113,7 +113,7 @@ const ROOT_COPIED: readonly string[] = [
 const ROOT_OVERRIDABLE: readonly string[] = ROOT_COPIED.slice(0, 11);
 
 /** What a layer inside an instance does not take from the layer it mirrors: who it is, and where the layout has put it. */
-const NOT_COPIED = new Set(['id', 'parentId', 'order', 'sourceId']);
+const NOT_COPIED = new Set(['id', 'parentId', 'order', 'sourceId', 'exportSettings', 'devStatus', 'annotations', 'devResources', 'codeConnect']);
 const GEOMETRY: readonly string[] = ['x', 'y', 'width', 'height', 'rotation'];
 
 type Props = Record<string, unknown>;
@@ -400,6 +400,8 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
         if (key in (existing as unknown as Props)) next[key] = (existing as unknown as Props)[key];
       }
     }
+    // What it is exported as and what developers are told about it are the instance's own; a new one starts with none.
+    if (made) Object.assign(next, { exportSettings: [], devStatus: 'NONE', annotations: [], devResources: [], codeConnect: null });
     next.id = id;
     next.sourceId = source.id;
     next.parentId = source.parentId === component.id ? instanceId : mirrorId(instanceId, source.parentId);

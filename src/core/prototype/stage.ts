@@ -192,7 +192,7 @@ function scrollChildren(nodes: Record<NodeId, DesignNode>, doc: Document, frameI
  */
 export function buildStage(base: Document, parts: readonly StagePart[], viewport: Size, background: RGB): Document {
   const nodes: Record<NodeId, DesignNode> = { ...base.nodes };
-  const stage: PageNode = { id: STAGE_ID, type: 'PAGE', name: 'Prototype', parentId: null, order: 'a', backgroundColor: background, guides: [], variableModes: {}, library: null, flows: [], prototypeDevice: 'NONE' };
+  const stage: PageNode = { id: STAGE_ID, type: 'PAGE', name: 'Prototype', parentId: null, order: 'a', backgroundColor: background, guides: [], variableModes: {}, library: null, flows: [], prototypeDevice: 'NONE', exportSettings: [] };
   nodes[STAGE_ID] = stage;
   const key = (index: number, part: string): string => `p${String(index).padStart(4, '0')}${part}`;
   parts.forEach((part, index) => {

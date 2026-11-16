@@ -91,8 +91,12 @@ export interface EditorState {
   showLayoutGrids: boolean;
   /** Whether the rulers, and with them the page's guides, are shown. A user preference. */
   showRulers: boolean;
-  /** Which tab of the right sidebar is open. With Prototype open, the canvas shows the connections between layers. */
-  rightTab: 'design' | 'prototype';
+  /**
+   * Which tab of the right sidebar is open. With Prototype open, the canvas
+   * shows the connections between layers; with Inspect open (Developer
+   * Mode) it measures and shows notes, and does not move or resize layers.
+   */
+  rightTab: 'design' | 'prototype' | 'inspect';
   /** The colours of the application: dark or light. A user preference; a design's own colours do not change with it. */
   theme: Theme;
 
@@ -150,7 +154,7 @@ export interface EditorActions {
   setPixelSnap(pixelSnap: boolean): void;
   setShowLayoutGrids(show: boolean): void;
   setShowRulers(show: boolean): void;
-  setRightTab(tab: 'design' | 'prototype'): void;
+  setRightTab(tab: 'design' | 'prototype' | 'inspect'): void;
   setTheme(theme: Theme): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
@@ -471,7 +475,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       },
 
       setRightTab(tab) {
-        if (get().rightTab !== tab) set({ rightTab: tab });
+        if (get().rightTab === tab) return;
+        // Looking, not drawing: a drawing tool is put down on the way into Developer Mode.
+        if (tab === 'inspect' && get().tool !== 'move' && get().tool !== 'hand') get().setTool('move');
+        set({ rightTab: tab });
       },
 
       setTheme(theme) {

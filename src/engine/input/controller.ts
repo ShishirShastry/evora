@@ -49,6 +49,7 @@ import {
   resizeNodesInBounds,
   rotateNodesAround,
   selectionTargetAt,
+  hitTestDeepest,
   setLayerBox,
   snapAngle,
   snapPoint,
@@ -731,7 +732,8 @@ export class InteractionController {
     state.setHovered(target);
     this.host.setCursor('default');
     // With Alt held, the distances from the selection to what the pointer is over.
-    if (e.altKey) this.measureTo(target);
+    // And without it in Developer Mode, which is for measuring.
+    if (e.altKey || state.rightTab === 'inspect') this.measureTo(target);
   }
 
   private beginSelect(e: PointerInput): void {
@@ -739,6 +741,13 @@ export class InteractionController {
     const world = this.toWorld(e);
     const tolerance = HIT_TOLERANCE_PX / state.viewport.zoom;
     const frame = getSelectionFrame(state.doc, state.selection);
+
+    // In Developer Mode the canvas is for looking: a click selects the layer under it, however deep, and nothing is dragged.
+    if (state.rightTab === 'inspect') {
+      const target = hitFrameLabel(this.labels, e) ?? hitTestDeepest(state.doc, state.pageId, world, tolerance);
+      state.setSelection(target ? [target] : []);
+      return;
+    }
 
     // With the Prototype tab open: the handle a connection is dragged from.
     if (state.rightTab === 'prototype') {

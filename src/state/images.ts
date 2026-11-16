@@ -6,8 +6,10 @@ import {
   isImageMimeType,
   nameFromFile,
   placementInParent,
+  placeSvg,
   sha256Hex,
   type AssetInfo,
+  type ImportedSvg,
   type NodeId,
   type Point,
 } from '../core';
@@ -73,6 +75,26 @@ export async function importImageFiles(
     }
   }
   return { imported, failed };
+}
+
+/**
+ * Puts what was read from an SVG file on the current page as layers that
+ * can be edited, in a frame of the drawing's size centred on `at` (page
+ * space) or on the middle of the view. One undo step. Returns the frame.
+ */
+export function placeSvgLayers(store: EditorStore, imported: ImportedSvg, name: string, at?: Point): NodeId | null {
+  const state = store.getState();
+  const view = visibleRect(state.viewport, state.canvasSize);
+  const hasView = state.canvasSize.width > 0 && state.canvasSize.height > 0;
+  const center = at ?? (hasView ? { x: view.x + view.width / 2, y: view.y + view.height / 2 } : { x: 0, y: 0 });
+  let frameId: NodeId | null = null;
+  store.getState().apply('Import SVG', (doc) => {
+    const placed = placeSvg(doc, state.pageId, imported, name, { x: center.x - imported.width / 2, y: center.y - imported.height / 2 });
+    frameId = placed.id;
+    return placed.doc;
+  });
+  if (frameId !== null) store.getState().setSelection([frameId]);
+  return frameId;
 }
 
 /**

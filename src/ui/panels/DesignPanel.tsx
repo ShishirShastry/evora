@@ -52,6 +52,7 @@ import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorCont
 import { AutoLayoutSection, ResizingSection } from './AutoLayoutSection';
 import { ComponentSection } from './ComponentSections';
 import { LocalTokens, StylesSection, VariablesSection } from './TokenSections';
+import { ExportSection, PageExportSection } from './ExportSection';
 import { EffectsSection } from './EffectsSection';
 import { ConstraintsSection, LayoutGridSection } from './LayoutSections';
 import { PaintList } from './PaintList';
@@ -468,6 +469,7 @@ export function DesignPanel() {
       <aside aria-label="Design properties" className="h-full overflow-y-auto" data-text-tools>
         <PageProperties />
         <LocalTokens />
+        <PageExportSection />
       </aside>
     );
   }
@@ -867,6 +869,8 @@ export function DesignPanel() {
       <StylesSection layers={layers} />
 
       <VariablesSection layers={layers} />
+
+      <ExportSection ids={ids} name={layers.length === 1 ? first.name : `${layers.length} layers`} />
     </aside>
   );
 }

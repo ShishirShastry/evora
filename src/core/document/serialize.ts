@@ -326,6 +326,19 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 22, document: { ...body, nodes: upgraded } };
   },
+  // Version 23 adds export settings and what developers are handed. Nothing older has any.
+  22: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node)) upgraded[id] = node;
+      else if (node.type === 'PAGE') upgraded[id] = { exportSettings: [], ...node };
+      else upgraded[id] = { exportSettings: [], devStatus: 'NONE', annotations: [], devResources: [], codeConnect: null, ...node };
+    }
+    return { ...file, schemaVersion: 23, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

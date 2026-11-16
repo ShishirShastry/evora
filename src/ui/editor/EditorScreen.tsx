@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, FileFormatError, listLibraries, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -11,10 +11,13 @@ import { DEFAULT_PREFERENCES, loadPreferences, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN,
 import { loadSession, saveSession } from '../../persistence/session';
 import type { DocumentStorage } from '../../persistence/storage';
 import { clipboardText, commandForKey, getCommand, pasteClipboardText, runCommand, type AppActions } from '../../state/commands';
-import { imageTypeOf, importImageFiles, placeImages } from '../../state/images';
+import { imageTypeOf, importImageFiles, placeImages, placeSvgLayers } from '../../state/images';
 import { createEditorStore, getSession, type EditorStore } from '../../state/editorStore';
 import { Dialog } from '../components/Dialog';
 import { LibrariesDialog } from './LibrariesDialog';
+import { ExportDialog } from '../panels/ExportSection';
+import { exportEnvironment } from './exporting';
+import { exportOne, svgOf } from '../../engine/export/export';
 import { loadLibrary } from '../../persistence/libraries';
 import { Logo } from '../components/Icon';
 import { PanelResizer } from '../components/PanelResizer';
@@ -113,6 +116,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   const saver = useRef<Autosaver | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [librariesOpen, setLibrariesOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(
     repairs.length > 0 ? { title: 'This file had problems that were repaired when it was opened.', lines: repairs } : null,
   );
@@ -135,8 +139,26 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
 
   const placeFiles = useCallback(
     async (files: readonly File[], at?: Point): Promise<void> => {
-      const { imported, failed } = await importImageFiles(storage, images, files);
+      // An SVG file comes in as layers that can be edited; one that cannot be read that way is placed as a picture.
+      const pictures: File[] = [];
+      const notes: string[] = [];
+      for (const file of files) {
+        if (imageTypeOf(file) !== 'image/svg+xml') {
+          pictures.push(file);
+          continue;
+        }
+        try {
+          const drawing = readSvg(await file.text(), getBrowserMeasurer() ?? undefined);
+          placeSvgLayers(store, drawing, nameFromFile(file.name), at);
+          for (const warning of drawing.warnings) notes.push(`${file.name}: ${warning}`);
+        } catch (error) {
+          if (!(error instanceof SvgImportError)) throw error;
+          pictures.push(file);
+        }
+      }
+      const { imported, failed } = await importImageFiles(storage, images, pictures);
       placeImages(store, imported, at);
+      if (notes.length > 0) setNotice({ title: 'The SVG was imported as layers. Some of it could not be:', lines: notes });
       if (failed > 0) {
         setNotice({
           title: failed === 1 ? 'One file could not be placed.' : `${failed} files could not be placed.`,
@@ -180,6 +202,30 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       cancelInteraction: () => controller.current?.cancel() ?? false,
       openShortcuts: () => setShortcutsOpen(true),
       openLibraries: () => setLibrariesOpen(true),
+      openExport: () => setExportOpen(true),
+      copyAs: (kind) => {
+        const { doc, selection } = store.getState();
+        const ids = selection.filter((id) => isLayer(doc.nodes[id]));
+        const first = ids[0];
+        if (first === undefined || !navigator.clipboard) return;
+        const said = (title: string): void => setNotice({ title, lines: [] });
+        const refused = (): void => said('The browser did not allow copying to the clipboard.');
+        const environment = exportEnvironment(storage, images);
+        if (kind === 'CSS') {
+          // Each layer's own CSS, under its name when there are several.
+          const css = ids.map((id) => (ids.length > 1 ? `/* ${doc.nodes[id]?.name} */\n` : '') + cssFor(doc, id)).join('\n\n');
+          void navigator.clipboard.writeText(css).then(() => said('Copied as CSS.'), refused);
+        } else if (kind === 'SVG') {
+          void Promise.all(ids.map((id) => svgOf(doc, id, environment)))
+            .then((parts) => navigator.clipboard.writeText(parts.join('\n')))
+            .then(() => said('Copied as SVG.'), refused);
+        } else {
+          // A picture of one layer: the first of the selection.
+          void exportOne(doc, { nodeId: first, fileName: 'copy.png', setting: newExportSetting() }, environment)
+            .then(({ file }) => navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([file.bytes as unknown as BlobPart], { type: 'image/png' }) })]))
+            .then(() => said(`Copied “${doc.nodes[first]?.name}” as PNG.`), refused);
+        }
+      },
       present: (startId) => {
         const state = store.getState();
         // From the frame that is named or selected; otherwise from the first flow, or the first frame.
@@ -207,7 +253,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
         void pending.then(() => exit.current());
       },
     }),
-    [store, meta, storage, placeFiles],
+    [store, meta, storage, placeFiles, images],
   );
 
   const context = useMemo<EditorContextValue>(
@@ -453,6 +499,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       </div>
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {librariesOpen && <LibrariesDialog onClose={() => setLibrariesOpen(false)} />}
+      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
     </EditorContext.Provider>
   );
 }

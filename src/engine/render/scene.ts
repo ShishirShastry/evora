@@ -64,6 +64,12 @@ export interface RenderOptions {
   hiddenIds?: ReadonlySet<NodeId>;
   /** Decoded images for image fills. Without it, image fills are drawn as placeholders. */
   images?: ImageSource;
+  /**
+   * Paint only these layers, each with everything in it, where they are on
+   * the page, and nothing of what they are in: what an export of a layer
+   * shows. Without it the whole page is painted.
+   */
+  roots?: readonly NodeId[];
 }
 
 const CAPS: Record<StrokeCap, CanvasLineCap> = { NONE: 'butt', ROUND: 'round', SQUARE: 'square' };
@@ -605,7 +611,8 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     scratch.push(canvas);
   };
 
-  drawChildren(ctx, pageId);
+  if (options.roots) for (const id of options.roots) drawLayer(ctx, id);
+  else drawChildren(ctx, pageId);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   return stats;
 }

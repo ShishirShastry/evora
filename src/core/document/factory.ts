@@ -154,6 +154,7 @@ export function createPage(name: string, order: string): PageNode {
     library: null,
     flows: [],
     prototypeDevice: 'NONE',
+    exportSettings: [],
   };
 }
 
@@ -211,6 +212,11 @@ export function createLayer(
     variableModes: {},
     reactions: [] as LayerNode['reactions'],
     scrollBehavior: 'SCROLLS' as const,
+    exportSettings: [] as LayerNode['exportSettings'],
+    devStatus: 'NONE' as const,
+    annotations: [] as LayerNode['annotations'],
+    devResources: [] as LayerNode['devResources'],
+    codeConnect: null,
   };
   let node: LayerNode;
   switch (type) {

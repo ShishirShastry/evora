@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 22 (adds prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * OPEN DESIGN document schema, version 23 (adds export settings and what developers are handed; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 22;
+export const CURRENT_SCHEMA_VERSION = 23;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -310,6 +310,8 @@ export interface PageNode extends NodeBase {
   flows: Flow[];
   /** The screen the prototype of this page is shown on. */
   prototypeDevice: PrototypeDevice;
+  /** The ways this page is exported as a whole. */
+  exportSettings: ExportSetting[];
 }
 
 interface LayerBase extends NodeBase {
@@ -385,6 +387,72 @@ interface LayerBase extends NodeBase {
   reactions: Reaction[];
   /** What this layer does when the frame it is in scrolls in a prototype. */
   scrollBehavior: ScrollBehavior;
+  /** The ways this layer is exported. */
+  exportSettings: ExportSetting[];
+  /** Where it stands in being handed to developers. */
+  devStatus: DevStatus;
+  /** Notes on it for developers. */
+  annotations: Annotation[];
+  /** Links that go with it. */
+  devResources: DevResource[];
+  /** How it is known in code, when it is a component that is. */
+  codeConnect: CodeConnect | null;
+}
+
+// ------------------------------------------------------- export and handoff
+
+export type ExportFormat = 'PNG' | 'JPG' | 'SVG' | 'PDF';
+export const EXPORT_FORMATS: readonly ExportFormat[] = ['PNG', 'JPG', 'SVG', 'PDF'];
+
+/**
+ * One way a layer or a page is exported: a format, a size, and a suffix for
+ * the file's name. A layer may have several (the same picture at 1x, 2x and
+ * 3x, say). Every setting has every field; the format says which count.
+ */
+export interface ExportSetting {
+  format: ExportFormat;
+  /** How big: a scale of the design's size, or a width or height in pixels that the other side follows. */
+  constraint: { type: 'SCALE' | 'WIDTH' | 'HEIGHT'; value: number };
+  /** Added to the layer's name to make the file's name: "@2x". */
+  suffix: string;
+  /** Paint the page's background behind what is exported. Without it PNG, SVG and PDF are transparent; a JPG is on white. */
+  background: boolean;
+  /** JPG: how much is kept, from 0.1 to 1. */
+  quality: number;
+  /** SVG: give each layer's element an `id` made from its name. */
+  svgIds: boolean;
+  /** PDF: shapes as vectors, or the whole thing as one picture (which keeps shadows and blurs). */
+  pdfContent: 'VECTOR' | 'PICTURE';
+  /** Vector PDF: text as text in the nearest standard font (it can be selected), or as pictures of the text (it looks exactly as designed). */
+  pdfText: 'TEXT' | 'PICTURE';
+}
+
+/** Where a layer stands in being handed to developers. */
+export type DevStatus = 'NONE' | 'READY' | 'COMPLETED';
+export const DEV_STATUSES: readonly DevStatus[] = ['NONE', 'READY', 'COMPLETED'];
+
+/** A note on a layer for whoever builds it. */
+export interface Annotation {
+  id: string;
+  text: string;
+}
+
+/** A link that goes with a layer: its documentation, its ticket, its source file. */
+export interface DevResource {
+  id: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * How a component is known in code: its name there, where it is imported
+ * from, and a snippet that uses it, in which `{Name}` stands for the value
+ * an instance has for the variant or component property of that name.
+ */
+export interface CodeConnect {
+  component: string;
+  source: string;
+  snippet: string;
 }
 
 // ---------------------------------------------------------------- prototyping
@@ -982,6 +1050,6 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   endArrow?: ArrowType;
 } & Partial<Omit<TextNode, keyof LayerBase>>;
 
-export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides' | 'variableModes' | 'flows' | 'prototypeDevice'>>;
+export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides' | 'variableModes' | 'flows' | 'prototypeDevice' | 'exportSettings'>>;
 
 export type NodePatch = LayerPatch | PagePatch;

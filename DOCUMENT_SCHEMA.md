@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **22**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **23**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -126,6 +126,7 @@ interface PageNode extends NodeBase {
   // Version 22: the prototype of the page (§5.11)
   flows: { id: string; name: string; startId: NodeId }[];   // its named starting frames
   prototypeDevice: 'NONE' | 'PHONE' | 'TABLET' | 'DESKTOP';   // the screen it is shown on
+  exportSettings: ExportSetting[];   // version 23: the ways the page as a whole is exported (§5.12)
 }
 
 interface Guide {
@@ -192,6 +193,13 @@ interface LayerBase extends NodeBase {
   // Version 22: prototyping (see §5.11)
   reactions: Reaction[];                     // the interactions on this layer
   scrollBehavior: 'SCROLLS' | 'FIXED' | 'STICKY';   // what it does when the frame it is in scrolls
+
+  // Version 23: export and handoff (see §5.12)
+  exportSettings: ExportSetting[];           // the ways this layer is exported
+  devStatus: 'NONE' | 'READY' | 'COMPLETED'; // where it stands in being handed to developers
+  annotations: { id: string; text: string }[];              // notes on it for developers
+  devResources: { id: string; name: string; url: string }[];   // links that go with it
+  codeConnect: { component: string; source: string; snippet: string } | null;   // how it is known in code (components and sets)
 }
 ```
 
@@ -626,6 +634,27 @@ interface Transition {
 
 **Dangling references.** A destination or variable that no longer exists is kept as it is; the action then does nothing when played, and the editor shows it as missing. A flow whose frame is gone is not listed.
 
+### 5.12 Export settings and handoff (version 23)
+
+```ts
+interface ExportSetting {       // every setting has every field; the format says which count
+  format: 'PNG' | 'JPG' | 'SVG' | 'PDF';
+  constraint: { type: 'SCALE' | 'WIDTH' | 'HEIGHT'; value: number };   // a scale (0.01 to 64), or a side in pixels the other follows
+  suffix: string;               // added to the layer's name to make the file's name
+  background: boolean;          // on the page's colour; otherwise transparent (a JPG is on white)
+  quality: number;              // JPG: 0.1 to 1
+  svgIds: boolean;              // SVG: an id on each layer's element, from its name
+  pdfContent: 'VECTOR' | 'PICTURE';   // PDF: shapes as vectors, or one picture
+  pdfText: 'TEXT' | 'PICTURE';        // vector PDF: text in a standard font, or pictures of the text
+}
+```
+
+**What is exported.** A layer is exported as everything it paints (its box, and what reaches out of it: strokes, shadows, and for a frame that does not clip, what is in it), where it is on the page, without what it is in. A page is exported as everything on it; as a PDF it is one page for each frame laid out on it when it has any. The file name is the layer's name, the suffix, and the format's extension, with characters no file system takes replaced; names that would be the same get a number.
+
+**Not stored.** The files are not kept: an export is made from the document as it is when it is asked for, by `src/engine/export` (PNG and JPG with the editor's own renderer; SVG and PDF from one vector scene built by the renderer's rules, so the two agree with each other and with the canvas).
+
+**Handoff.** `devStatus`, `annotations`, `devResources` and `codeConnect` belong to the layer they are put on. They are not taken into the instances of a component (a note on a component is not a note on each of its instances). A link's address is `http`, `https` or `mailto` and nothing else. `codeConnect` is for a component or a component set; its `snippet` may name variant and component properties in braces (`{Type}`), which stand for the value an instance has. What the Inspect panel says about a layer, and the CSS, SwiftUI and Compose code it shows, are not stored: they are written from the layer when it is looked at (`src/core/dev`).
+
 ## 6. Coordinate system and transforms
 
 - The page is an unbounded plane. X grows to the right, Y grows downwards. Units are CSS pixels at 100% zoom.
@@ -666,6 +695,7 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 14a | A style has a known type; a collection has at least one mode; a variable is in a collection that exists and has a value of its own type (or an alias) for each of that collection's modes and no others. | Drop the entry; give a missing or wrong value the type's blank value. A reference from a layer to a style or variable that is gone is dropped by `applyTokens` at the next change. |
 | 14b | The document has at least one page that does not hold a library. A page's `library` has the library's ID. `publication` is null or has a numeric version. | Add an empty page; set `library` or `publication` to null. What a publication holds is checked like a document when it is imported, not when the publishing file is opened. |
 | 14c | An interaction has an ID (unique on its layer) and a known trigger; an action a known type; a transition a known kind, direction and easing, times that are not negative and four numbers for a curve; conditions nest at most four deep. A flow has an ID and a starting frame. | Drop the interaction, action or flow; reset the value. |
+| 14d | An export setting has a known format, a scale from 0.01 to 64 or a side from 1 to 32768 pixels, and a quality from 0.1 to 1. A note and a link have an ID, unique on their layer. | Drop the setting, note or link; clamp the number. |
 | 15 | Every instance is in step with its component (§5.8): it holds exactly one mirror of each of the component's layers, with the component's properties and its own overrides, and no layer has a `sourceId` outside an instance. | Not by `repairDocument`: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 | 13 | Layout sizing and positioning are ones that can apply where the layer is (§5.7), and every frame with a layout is laid out: the boxes of the layers in its flow, and its own where it hugs, are what the layout gives. | Not by `repairDocument`, which cannot measure text: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 
@@ -676,7 +706,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 22;
+const CURRENT_SCHEMA_VERSION = 23;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -731,6 +761,9 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // 21 -> 22: every layer gets reactions [] and scrollBehavior 'SCROLLS'; every frame overflow 'NONE', overlayPosition
   // 'CENTER', overlayCloseOutside true and overlayBackground null; every page flows [] and prototypeDevice 'NONE'.
   21: addPrototyping,
+  // 22 -> 23: every layer gets exportSettings [], devStatus 'NONE', annotations [], devResources [] and codeConnect null;
+  // every page exportSettings [].
+  22: addExportAndHandoff,
 };
 ```
 
@@ -757,6 +790,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 19 | 20 | Document tables `styles`, `variables`, `variableCollections`; `styleRefs`, `boundVariables` and `variableModes` on every layer; `variableModes` on pages | `src/tokens.test.ts` ("opens a version 19 file, which has none") |
 | 20 | 21 | `publication` on the document; `library` on pages; `remote` on styles, variables and collections | `src/libraries.test.ts` ("opens a version 20 file, where nothing is published or from a library") |
 | 21 | 22 | `reactions` and `scrollBehavior` on every layer; `overflow` and the three overlay settings on frames; `flows` and `prototypeDevice` on pages | `src/prototype.test.ts` ("opens a version 21 file, which has no prototype") |
+| 22 | 23 | `exportSettings`, `devStatus`, `annotations`, `devResources` and `codeConnect` on every layer; `exportSettings` on pages | `src/export.test.ts` ("opens a version 22 file, which has no export settings") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.

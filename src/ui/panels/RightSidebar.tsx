@@ -1,14 +1,16 @@
 import { useEditor, useEditorContext } from '../editor/EditorContext';
 import { DesignPanel } from './DesignPanel';
+import { InspectPanel } from './InspectPanel';
 import { PrototypePanel } from './PrototypePanel';
 
-/** The right sidebar: the Design and Prototype tabs and the panel of the one that is chosen. */
+/** The right sidebar: the Design, Prototype and Inspect (Developer Mode) tabs and the panel of the one that is chosen. */
 export function RightSidebar() {
   const { store } = useEditorContext();
   const tab = useEditor((s) => s.rightTab);
   const tabs = [
     ['design', 'Design'],
     ['prototype', 'Prototype'],
+    ['inspect', 'Inspect'],
   ] as const;
   return (
     <>
@@ -26,7 +28,7 @@ export function RightSidebar() {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1">{tab === 'design' ? <DesignPanel /> : <PrototypePanel />}</div>
+      <div className="min-h-0 flex-1">{tab === 'design' ? <DesignPanel /> : tab === 'prototype' ? <PrototypePanel /> : <InspectPanel />}</div>
     </>
   );
 }

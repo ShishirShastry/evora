@@ -23,7 +23,12 @@ import {
   VARIABLE_TYPES,
   type ComponentProp,
   ACTION_TYPES,
+  DEV_STATUSES,
   EASING_TYPES,
+  EXPORT_FORMATS,
+  type Annotation,
+  type DevResource,
+  type ExportSetting,
   OVERFLOWS,
   OVERLAY_POSITIONS,
   PROTOTYPE_DEVICES,
@@ -315,6 +320,54 @@ function propRefs(value: unknown): { visible?: string; characters?: string; comp
   return out;
 }
 
+/** The ways something is exported: each of a known format, with a size that is a positive number. */
+function exportSettings(value: unknown): ExportSetting[] {
+  const out: ExportSetting[] = [];
+  if (!Array.isArray(value)) return out;
+  for (const item of value) {
+    if (!isObject(item) || !(EXPORT_FORMATS as readonly unknown[]).includes(item.format)) continue;
+    const constraint = isObject(item.constraint) ? item.constraint : {};
+    const type = oneOf(constraint.type, ['SCALE', 'WIDTH', 'HEIGHT'] as const, 'SCALE');
+    out.push({
+      format: item.format as ExportSetting['format'],
+      constraint: { type, value: type === 'SCALE' ? finite(constraint.value, 1, 0.01, 64) : Math.round(finite(constraint.value, 100, 1, 32768)) },
+      suffix: typeof item.suffix === 'string' ? item.suffix : '',
+      background: item.background === true,
+      quality: finite(item.quality, 0.9, 0.1, 1),
+      svgIds: item.svgIds === true,
+      pdfContent: oneOf(item.pdfContent, ['VECTOR', 'PICTURE'] as const, 'VECTOR'),
+      pdfText: oneOf(item.pdfText, ['TEXT', 'PICTURE'] as const, 'TEXT'),
+    });
+  }
+  return out;
+}
+
+/** Notes for developers: each needs an ID. */
+function notes(value: unknown): Annotation[] {
+  const out: Annotation[] = [];
+  if (!Array.isArray(value)) return out;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isObject(item) || typeof item.id !== 'string' || !item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push({ id: item.id, text: typeof item.text === 'string' ? item.text : '' });
+  }
+  return out;
+}
+
+/** Links for developers: each needs an ID. */
+function devResources(value: unknown): DevResource[] {
+  const out: DevResource[] = [];
+  if (!Array.isArray(value)) return out;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isObject(item) || typeof item.id !== 'string' || !item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push({ id: item.id, name: typeof item.name === 'string' ? item.name : '', url: typeof item.url === 'string' ? item.url : '' });
+  }
+  return out;
+}
+
 /** A transition: a known kind, direction and easing, times that are not negative, and four numbers for a curve. */
 function transition(value: unknown): Transition {
   const raw = isObject(value) ? value : {};
@@ -576,6 +629,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       library: libraryRef(raw.library),
       flows: flows(raw.flows),
       prototypeDevice: oneOf(raw.prototypeDevice, PROTOTYPE_DEVICES, 'NONE'),
+      exportSettings: exportSettings(raw.exportSettings),
     };
     return page;
   }
@@ -624,6 +678,13 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     variableModes: stringMap(raw.variableModes),
     reactions: reactions(raw.reactions),
     scrollBehavior: oneOf(raw.scrollBehavior, SCROLL_BEHAVIORS, 'SCROLLS'),
+    exportSettings: exportSettings(raw.exportSettings),
+    devStatus: oneOf(raw.devStatus, DEV_STATUSES, 'NONE'),
+    annotations: notes(raw.annotations),
+    devResources: devResources(raw.devResources),
+    codeConnect: isObject(raw.codeConnect)
+      ? { component: typeof raw.codeConnect.component === 'string' ? raw.codeConnect.component : '', source: typeof raw.codeConnect.source === 'string' ? raw.codeConnect.source : '', snippet: typeof raw.codeConnect.snippet === 'string' ? raw.codeConnect.snippet : '' }
+      : null,
   } as LayerNode;
 
   if (layer.type === 'FRAME') {

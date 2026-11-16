@@ -22,6 +22,9 @@ export function layerMenu(env: CommandEnv, state: EditorState): MenuItem[] {
   const item = (id: string, label?: string): MenuItem => commandItem(id, env, state, label);
   return [
     item('edit.copy'),
+    item('edit.copyAsPng'),
+    item('edit.copyAsSvg'),
+    item('edit.copyAsCss'),
     item('edit.cut'),
     item('edit.paste'),
     item('edit.duplicate'),
@@ -81,13 +84,16 @@ export function canvasMenu(env: CommandEnv, state: EditorState): MenuItem[] {
 }
 
 const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
-  File: ['file.home', '-', 'file.placeImage', 'file.libraries', '-', 'file.save', 'file.saveAs'],
+  File: ['file.home', '-', 'file.placeImage', 'file.libraries', 'file.export', '-', 'file.save', 'file.saveAs'],
   Edit: [
     'edit.undo',
     'edit.redo',
     '-',
     'edit.cut',
     'edit.copy',
+    'edit.copyAsPng',
+    'edit.copyAsSvg',
+    'edit.copyAsCss',
     'edit.paste',
     'edit.duplicate',
     'edit.delete',
@@ -95,7 +101,7 @@ const MENU_ORDER: Record<Exclude<CommandGroup, 'Tools'>, string[]> = {
     'edit.selectAll',
     'edit.deselect',
   ],
-  View: ['view.present', 'view.prototypeTab', '-', 'view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100', '-', 'view.snapping', 'view.pixelSnap', 'view.rulers', 'view.layoutGrids', '-', 'view.lightTheme'],
+  View: ['view.present', 'view.prototypeTab', 'view.inspectTab', '-', 'view.zoomIn', 'view.zoomOut', '-', 'view.zoomFit', 'view.zoomSelection', 'view.zoom100', '-', 'view.snapping', 'view.pixelSnap', 'view.rulers', 'view.layoutGrids', '-', 'view.lightTheme'],
   Object: [
     'object.group',
     'object.ungroup',

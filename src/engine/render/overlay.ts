@@ -1,6 +1,8 @@
 import {
+  annotationsOn,
   applyToPoint,
   connectionsOn,
+  devStatusList,
   flowsOf,
   getWorldBounds,
   frameGuides,
@@ -87,6 +89,47 @@ export interface OverlayInput {
    * from; `connecting` is a connection being dragged, to a point of the page.
    */
   prototype?: { connecting: { fromId: NodeId; to: Point } | null } | null;
+  /** Set while the Inspect tab (Developer Mode) is open: notes on layers are shown as numbered pins, and what is marked for development says so. */
+  inspect?: boolean;
+}
+
+/** What Developer Mode shows on the canvas: a numbered pin for each note, at the top-right corner of its layer, and the status of what is marked. */
+function drawInspect(ctx: Ctx, input: OverlayInput): void {
+  const { doc, pageId, viewport } = input;
+  ctx.font = '600 11px Inter, system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (const { pageId: page, layer } of devStatusList(doc)) {
+    if (page !== pageId) continue;
+    const bounds = getWorldBounds(doc, layer.id);
+    const corner = worldToScreen(viewport, { x: bounds.x + bounds.width, y: bounds.y });
+    const text = layer.devStatus === 'READY' ? 'Ready for dev' : 'Completed';
+    const width = ctx.measureText(text).width + 12;
+    ctx.fillStyle = layer.devStatus === 'READY' ? '#1f9d55' : '#6b7280';
+    ctx.fillRect(corner.x - width, corner.y - 22, width, 18);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.fillText(text, corner.x - width + 6, corner.y - 13);
+  }
+  const perLayer = new Map<NodeId, number>();
+  ctx.textAlign = 'center';
+  for (const placed of annotationsOn(doc, pageId)) {
+    const bounds = getWorldBounds(doc, placed.layerId);
+    const corner = worldToScreen(viewport, { x: bounds.x + bounds.width, y: bounds.y });
+    // Several notes on one layer sit side by side.
+    const index = perLayer.get(placed.layerId) ?? 0;
+    perLayer.set(placed.layerId, index + 1);
+    const x = corner.x - index * 20;
+    ctx.beginPath();
+    ctx.arc(x, corner.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillText(String(placed.number), x, corner.y + 0.5);
+  }
+  ctx.textAlign = 'left';
 }
 
 /** A prototype connection: a curve with a dot where it starts and an arrowhead where it ends. */
@@ -415,6 +458,7 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
   }
 
   if (input.prototype) drawPrototype(ctx, input);
+  if (input.inspect) drawInspect(ctx, input);
 
   // Ruler guides run across everything; the rulers themselves sit on top of it all.
   if (input.showRulers) {

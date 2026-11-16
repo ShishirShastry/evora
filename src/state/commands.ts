@@ -744,6 +744,10 @@ export interface AppActions {
   openShortcuts(): void;
   /** Opens the dialog for publishing this file and for the libraries it uses. */
   openLibraries?(): void;
+  /** Opens the dialog that exports everything in the file that has export settings. */
+  openExport?(): void;
+  /** Copies the selection to the system clipboard as a picture, as SVG text or as CSS. */
+  copyAs?(kind: 'PNG' | 'SVG' | 'CSS'): void;
   /** Plays the prototype of the page, from a frame or from where it starts. */
   present?(startId?: NodeId): void;
   /** Writes the file to local storage immediately. */
@@ -881,6 +885,7 @@ export const COMMANDS: readonly Command[] = [
   },
   { id: 'file.home', label: 'Back to files', group: 'File', run: ({ app }) => app.goHome() },
   { id: 'file.libraries', label: 'Libraries…', group: 'File', run: ({ app }) => app.openLibraries?.() },
+  { id: 'file.export', label: 'Export…', group: 'File', shortcut: 'Ctrl+Shift+E', keys: [{ code: 'KeyE', ctrl: true, shift: true }], run: ({ app }) => app.openExport?.() },
 
   {
     id: 'edit.undo',
@@ -923,6 +928,9 @@ export const COMMANDS: readonly Command[] = [
       if (copySelection(store)) app.copyToSystemClipboard?.();
     },
   },
+  { id: 'edit.copyAsPng', label: 'Copy as PNG', group: 'Edit', shortcut: 'Ctrl+Shift+C', keys: [{ code: 'KeyC', ctrl: true, shift: true }], enabled: hasSelection, run: ({ app }) => app.copyAs?.('PNG') },
+  { id: 'edit.copyAsSvg', label: 'Copy as SVG', group: 'Edit', enabled: hasSelection, run: ({ app }) => app.copyAs?.('SVG') },
+  { id: 'edit.copyAsCss', label: 'Copy as CSS', group: 'Edit', enabled: hasSelection, run: ({ app }) => app.copyAs?.('CSS') },
   {
     id: 'edit.paste',
     label: 'Paste',
@@ -1075,6 +1083,15 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyE', shift: true }],
     checked: (state) => state.rightTab === 'prototype',
     run: ({ store }) => store.getState().setRightTab(store.getState().rightTab === 'prototype' ? 'design' : 'prototype'),
+  },
+  {
+    id: 'view.inspectTab',
+    label: 'Developer mode (Inspect)',
+    group: 'View',
+    shortcut: 'Shift+D',
+    keys: [{ code: 'KeyD', shift: true }],
+    checked: (state) => state.rightTab === 'inspect',
+    run: ({ store }) => store.getState().setRightTab(store.getState().rightTab === 'inspect' ? 'design' : 'inspect'),
   },
   {
     id: 'view.rulers',

@@ -124,6 +124,7 @@ export function CanvasView() {
         vector: controller.vectorOverlay(),
         paintEdit: state.paintEdit,
         prototype: state.rightTab === 'prototype' ? { connecting: controller.connecting } : null,
+        inspect: state.rightTab === 'inspect',
       });
       controller.labels = result.labels;
     };
