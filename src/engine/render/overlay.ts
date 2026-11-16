@@ -1,5 +1,8 @@
 import {
   applyToPoint,
+  connectionsOn,
+  flowsOf,
+  getWorldBounds,
   frameGuides,
   getChildIds,
   getTangent,
@@ -22,6 +25,7 @@ import {
   type SnapGuide,
 } from '../../core';
 import { ARC_HANDLE_RADIUS_PX, arcHandles } from '../input/arcHandles';
+import { CONNECTOR_RADIUS_PX, connectionCurve, connectorHandle, type ConnectionCurve } from '../input/connections';
 import { GRADIENT_HANDLE_RADIUS_PX, gradientHandles } from '../input/gradientHandles';
 import { getSelectionFrame } from '../input/selectionFrame';
 import type { VectorOverlay } from '../input/vectorTool';
@@ -77,6 +81,82 @@ export interface OverlayInput {
   vector?: VectorOverlay | null;
   /** The paint whose handles are shown on the canvas, if one is being edited there. */
   paintEdit?: PaintEdit | null;
+  /**
+   * Set while the Prototype tab is open: the connections between layers are
+   * drawn, with where flows start and the handle a connection is dragged
+   * from; `connecting` is a connection being dragged, to a point of the page.
+   */
+  prototype?: { connecting: { fromId: NodeId; to: Point } | null } | null;
+}
+
+/** A prototype connection: a curve with a dot where it starts and an arrowhead where it ends. */
+function drawConnection(ctx: Ctx, curve: ConnectionCurve, dashed: boolean): void {
+  ctx.strokeStyle = ACCENT;
+  ctx.fillStyle = ACCENT;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash(dashed ? [5, 4] : []);
+  ctx.beginPath();
+  ctx.moveTo(curve.from.x, curve.from.y);
+  ctx.bezierCurveTo(curve.c1.x, curve.c1.y, curve.c2.x, curve.c2.y, curve.to.x, curve.to.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(curve.from.x, curve.from.y, 3, 0, Math.PI * 2);
+  ctx.fill();
+  // The arrowhead points the way the curve arrives.
+  const angle = Math.atan2(curve.to.y - curve.c2.y, curve.to.x - curve.c2.x) || 0;
+  ctx.save();
+  ctx.translate(curve.to.x, curve.to.y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-9, -4.5);
+  ctx.lineTo(-9, 4.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Everything the Prototype tab shows on the canvas. */
+function drawPrototype(ctx: Ctx, input: OverlayInput): void {
+  const { doc, pageId, viewport } = input;
+  for (const connection of connectionsOn(doc, pageId)) {
+    drawConnection(ctx, connectionCurve(viewport, getWorldBounds(doc, connection.fromId), getWorldBounds(doc, connection.toId)), connection.type !== 'NAVIGATE');
+  }
+  // Where each flow starts: its name on a tab at the frame's top-left corner, outside it.
+  ctx.font = '600 11px Inter, system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (const flow of flowsOf(doc, pageId)) {
+    const bounds = getWorldBounds(doc, flow.startId);
+    const corner = worldToScreen(viewport, { x: bounds.x, y: bounds.y });
+    const text = `▶ ${flow.name}`;
+    const width = ctx.measureText(text).width + 12;
+    ctx.fillStyle = ACCENT;
+    ctx.fillRect(corner.x - width - 6, corner.y, width, 20);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, corner.x - width, corner.y + 10);
+  }
+  if (input.prototype?.connecting) {
+    const { fromId, to } = input.prototype.connecting;
+    if (isLayer(doc.nodes[fromId])) drawConnection(ctx, connectionCurve(viewport, getWorldBounds(doc, fromId), to), false);
+  } else if (input.showHandles) {
+    const handle = connectorHandle(doc, input.selection, viewport);
+    if (handle) {
+      ctx.beginPath();
+      ctx.arc(handle.screen.x, handle.screen.y, CONNECTOR_RADIUS_PX, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = ACCENT;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(handle.screen.x - 3, handle.screen.y);
+      ctx.lineTo(handle.screen.x + 3, handle.screen.y);
+      ctx.moveTo(handle.screen.x, handle.screen.y - 3);
+      ctx.lineTo(handle.screen.x, handle.screen.y + 3);
+      ctx.stroke();
+    }
+  }
 }
 
 const gridFrameCache = new WeakMap<NodeMap, Map<NodeId, NodeId[]>>();
@@ -333,6 +413,8 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
     ctx.lineWidth = 1;
     ctx.stroke();
   }
+
+  if (input.prototype) drawPrototype(ctx, input);
 
   // Ruler guides run across everything; the rulers themselves sit on top of it all.
   if (input.showRulers) {

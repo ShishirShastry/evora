@@ -22,8 +22,21 @@ import {
   STYLE_TYPES,
   VARIABLE_TYPES,
   type ComponentProp,
+  ACTION_TYPES,
+  EASING_TYPES,
+  OVERFLOWS,
+  OVERLAY_POSITIONS,
+  PROTOTYPE_DEVICES,
+  SCROLL_BEHAVIORS,
+  TRANSITION_DIRECTIONS,
+  TRANSITION_TYPES,
+  TRIGGER_TYPES,
+  type Action,
+  type Flow,
   type LibraryRef,
   type Publication,
+  type Reaction,
+  type Transition,
   type Style,
   type StyleRefs,
   type Variable,
@@ -302,6 +315,71 @@ function propRefs(value: unknown): { visible?: string; characters?: string; comp
   return out;
 }
 
+/** A transition: a known kind, direction and easing, times that are not negative, and four numbers for a curve. */
+function transition(value: unknown): Transition {
+  const raw = isObject(value) ? value : {};
+  const curve = Array.isArray(raw.bezier) && raw.bezier.length === 4 ? raw.bezier : [0.42, 0, 0.58, 1];
+  return {
+    type: oneOf(raw.type, TRANSITION_TYPES, 'INSTANT'),
+    direction: oneOf(raw.direction, TRANSITION_DIRECTIONS, 'LEFT'),
+    duration: finite(raw.duration, 300, 0, 10000),
+    delay: finite(raw.delay, 0, 0, 10000),
+    easing: oneOf(raw.easing, EASING_TYPES, 'EASE_OUT'),
+    bezier: [finite(curve[0], 0.42, 0, 1), finite(curve[1], 0, -2, 3), finite(curve[2], 0.58, 0, 1), finite(curve[3], 1, -2, 3)],
+  };
+}
+
+/** The actions of an interaction. One of an unknown type is left out; conditions nest only so deep. */
+function actions(value: unknown, depth = 0): Action[] {
+  const out: Action[] = [];
+  if (!Array.isArray(value) || depth > 4) return out;
+  for (const item of value) {
+    if (!isObject(item) || !(ACTION_TYPES as readonly unknown[]).includes(item.type)) continue;
+    out.push({
+      type: item.type as Action['type'],
+      destinationId: typeof item.destinationId === 'string' && item.destinationId ? item.destinationId : null,
+      transition: transition(item.transition),
+      variableId: typeof item.variableId === 'string' && item.variableId ? item.variableId : null,
+      expression: typeof item.expression === 'string' ? item.expression : '',
+      then: actions(item.then, depth + 1),
+      otherwise: actions(item.otherwise, depth + 1),
+    });
+  }
+  return out;
+}
+
+/** The interactions on a layer: each needs an ID and a known trigger. */
+function reactions(value: unknown): Reaction[] {
+  const out: Reaction[] = [];
+  if (!Array.isArray(value)) return out;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isObject(item) || typeof item.id !== 'string' || !item.id || seen.has(item.id)) continue;
+    const trigger = isObject(item.trigger) ? item.trigger : {};
+    if (!(TRIGGER_TYPES as readonly unknown[]).includes(trigger.type)) continue;
+    seen.add(item.id);
+    out.push({
+      id: item.id,
+      trigger: { type: trigger.type as Reaction['trigger']['type'], delay: finite(trigger.delay, 800, 0, 600000), key: typeof trigger.key === 'string' ? trigger.key : '' },
+      actions: actions(item.actions),
+    });
+  }
+  return out;
+}
+
+/** The flows of a page: each needs an ID and a frame to start on. */
+function flows(value: unknown): Flow[] {
+  const out: Flow[] = [];
+  if (!Array.isArray(value)) return out;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isObject(item) || typeof item.id !== 'string' || !item.id || seen.has(item.id) || typeof item.startId !== 'string' || !item.startId) continue;
+    seen.add(item.id);
+    out.push({ id: item.id, name: typeof item.name === 'string' && item.name ? item.name : 'Flow', startId: item.startId });
+  }
+  return out;
+}
+
 /** The library a page holds: it needs the library's ID. */
 function libraryRef(value: unknown): LibraryRef | null {
   if (!isObject(value) || typeof value.id !== 'string' || !value.id) return null;
@@ -496,6 +574,8 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       guides: guides(raw.guides),
       variableModes: stringMap(raw.variableModes),
       library: libraryRef(raw.library),
+      flows: flows(raw.flows),
+      prototypeDevice: oneOf(raw.prototypeDevice, PROTOTYPE_DEVICES, 'NONE'),
     };
     return page;
   }
@@ -542,10 +622,16 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     styleRefs: styleRefs(raw.styleRefs),
     boundVariables: stringMap(raw.boundVariables),
     variableModes: stringMap(raw.variableModes),
+    reactions: reactions(raw.reactions),
+    scrollBehavior: oneOf(raw.scrollBehavior, SCROLL_BEHAVIORS, 'SCROLLS'),
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
     layer.clipsContent = raw.clipsContent !== false;
+    layer.overflow = oneOf(raw.overflow, OVERFLOWS, 'NONE');
+    layer.overlayPosition = oneOf(raw.overlayPosition, OVERLAY_POSITIONS, 'CENTER');
+    layer.overlayCloseOutside = raw.overlayCloseOutside !== false;
+    layer.overlayBackground = isObject(raw.overlayBackground) ? { color: rgb(raw.overlayBackground.color, BLACK_RGB), opacity: finite(raw.overlayBackground.opacity, 0.5, 0, 1) } : null;
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
     layer.layoutGrids = layoutGrids(raw.layoutGrids);

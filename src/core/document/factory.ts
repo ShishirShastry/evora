@@ -152,6 +152,8 @@ export function createPage(name: string, order: string): PageNode {
     guides: [],
     variableModes: {},
     library: null,
+    flows: [],
+    prototypeDevice: 'NONE',
   };
 }
 
@@ -207,11 +209,13 @@ export function createLayer(
     styleRefs: {},
     boundVariables: {},
     variableModes: {},
+    reactions: [] as LayerNode['reactions'],
+    scrollBehavior: 'SCROLLS' as const,
   };
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], kind: 'FRAME', description: '', componentId: null, overrides: {}, componentProps: [], variantProps: {}, propValues: {}, ...NO_AUTO_LAYOUT };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, overflow: 'NONE', overlayPosition: 'CENTER', overlayCloseOutside: true, overlayBackground: null, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], kind: 'FRAME', description: '', componentId: null, overrides: {}, componentProps: [], variantProps: {}, propValues: {}, ...NO_AUTO_LAYOUT };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };

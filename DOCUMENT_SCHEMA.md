@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **21**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **22**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -123,6 +123,9 @@ interface PageNode extends NodeBase {
   guides: Guide[];           // version 7: ruler guides
   variableModes: Record<string, string>;   // version 20: the mode chosen for this page, by collection ID
   library: { id: string; name: string; version: number } | null;   // version 21: set on a page that holds a library's components (§5.10)
+  // Version 22: the prototype of the page (§5.11)
+  flows: { id: string; name: string; startId: NodeId }[];   // its named starting frames
+  prototypeDevice: 'NONE' | 'PHONE' | 'TABLET' | 'DESKTOP';   // the screen it is shown on
 }
 
 interface Guide {
@@ -185,6 +188,10 @@ interface LayerBase extends NodeBase {
   styleRefs: { fills?: string; strokes?: string; text?: string; effects?: string; grids?: string };   // the styles this layer uses, by style ID
   boundVariables: Record<string, string>;   // a property ("width", "fills.0") to the ID of the variable it is bound to
   variableModes: Record<string, string>;    // the mode chosen on this layer, for it and what is in it, by collection ID
+
+  // Version 22: prototyping (see §5.11)
+  reactions: Reaction[];                     // the interactions on this layer
+  scrollBehavior: 'SCROLLS' | 'FIXED' | 'STICKY';   // what it does when the frame it is in scrolls
 }
 ```
 
@@ -196,6 +203,11 @@ interface LayerBase extends NodeBase {
 interface FrameNode extends LayerBase {
   type: 'FRAME';
   clipsContent: boolean;     // children are clipped to the frame's box
+  // Version 22: in a prototype (§5.11)
+  overflow: 'NONE' | 'HORIZONTAL' | 'VERTICAL' | 'BOTH';   // which way its content scrolls
+  overlayPosition: 'CENTER' | 'TOP_LEFT' | 'TOP_CENTER' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM_CENTER' | 'BOTTOM_RIGHT';   // where it sits when opened as an overlay
+  overlayCloseOutside: boolean;              // whether a click outside it closes it
+  overlayBackground: { color: RGB; opacity: number } | null;   // what covers the screen behind it
   cornerRadius: number;      // ≥ 0
   cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
   layoutGrids: LayoutGrid[]; // version 6
@@ -571,6 +583,49 @@ Since version 21 a `Style`, a `Variable` and a `VariableCollection` each have `r
 
 **Where libraries come from.** The document says only which library it has and at which version. Finding libraries and their newer versions is the storage layer's job (`src/persistence/libraries.ts`): today the published files in the same local storage; a server can provide the same later.
 
+### 5.11 Prototyping (version 22)
+
+```ts
+interface Reaction {
+  id: string;
+  trigger: { type: 'ON_CLICK' | 'ON_DRAG' | 'MOUSE_ENTER' | 'ON_PRESS' | 'AFTER_DELAY' | 'ON_KEY'; delay: number /* ms */; key: string };
+  actions: Action[];           // run in order
+}
+
+interface Action {             // every action has every field; its type says which count
+  type: 'NAVIGATE' | 'OPEN_OVERLAY' | 'SWAP_OVERLAY' | 'CLOSE_OVERLAY' | 'SCROLL_TO' | 'BACK' | 'CHANGE_TO' | 'SET_VARIABLE' | 'CONDITIONAL' | 'INPUT';
+  destinationId: NodeId | null;   // a frame to go to or open, a layer to scroll to, a variant to change to
+  transition: Transition;
+  variableId: string | null;      // SET_VARIABLE: the variable set; INPUT: the string variable that typing goes into
+  expression: string;             // SET_VARIABLE: its new value; CONDITIONAL: the condition
+  then: Action[];                 // CONDITIONAL: when the condition holds
+  otherwise: Action[];            // CONDITIONAL: when it does not
+}
+
+interface Transition {
+  type: 'INSTANT' | 'DISSOLVE' | 'SMART_ANIMATE' | 'MOVE_IN' | 'MOVE_OUT' | 'PUSH' | 'SLIDE_IN' | 'SLIDE_OUT';
+  direction: 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM';   // the way things move
+  duration: number;               // ms
+  delay: number;                  // ms
+  easing: 'LINEAR' | 'EASE_IN' | 'EASE_OUT' | 'EASE_IN_OUT' | 'CUSTOM';
+  bezier: [number, number, number, number];   // CUSTOM: a cubic Bézier timing curve, as in CSS
+}
+```
+
+**What is stored and what is not.** The document holds the design of the prototype: interactions on layers, flows and the device on pages, how frames scroll and open as overlays. Nothing about a prototype being played is stored: the player (`src/core/prototype/player.ts`) works on a copy of the document, in which "Set variable" and "Change to" make their changes, and that copy is dropped when the prototype is closed or started again.
+
+**Triggers.** `MOUSE_ENTER` ("while hovering") and `ON_PRESS` ("while pressing") last only while the pointer is over the layer or held down on it: what they did is undone after, unless something else happened in between, which is then kept. `ON_KEY` names a key as the keyboard does (`Enter`, `ArrowRight`, `a`), compared without regard to case; a gamepad button is the key `Gamepad0`, `Gamepad1`… An event on a layer with no interaction for it goes to the layers it is in, innermost first.
+
+**Actions.** `NAVIGATE` shows a frame as the screen and closes any overlays. `OPEN_OVERLAY` shows a frame over the screen, placed by that frame's `overlayPosition`, with its `overlayBackground` behind it; `SWAP_OVERLAY` replaces the top overlay; `CLOSE_OVERLAY` closes it. `BACK` closes the top overlay or, without one, returns to the screen before, with the transition that led here run the other way. `SCROLL_TO` scrolls the nearest scrolling frame round a layer until the layer is at its top-left. `CHANGE_TO` makes the nearest instance round the layer (or the layer itself) that shows a variant of the destination's set show the destination instead: this is how interactive components work, and the interactions on a component apply to every instance of it. `SET_VARIABLE` gives a variable the value of an expression, in every mode. `CONDITIONAL` runs `then` or `otherwise`. `INPUT` makes what is typed go into a string variable until Enter.
+
+**Expressions** (`src/core/prototype/expression.ts`): numbers, strings in quotes, `true` / `false`, colours as `#RRGGBB`, variables by name in braces (`{count}`, or `{Collection/name}`), `+ - * / %`, comparisons, `and` / `or` / `not` (also `&& || !`), parentheses. `+` joins when either side is a string. An expression that cannot be worked out changes nothing.
+
+**Scrolling.** A frame with `overflow` scrolls its content that way as far as the content reaches. A frame shown as the screen on a device smaller than it scrolls under the device whatever its `overflow`. A child with `scrollBehavior: 'FIXED'` stays where it is on the screen; one with `'STICKY'` goes with the content until it reaches the top and stops there.
+
+**Smart Animate** matches layers of the two screens (or of the two states of a component) by name and type at the same place in the tree, and moves, sizes, turns and colours each between the two; a layer on one side only fades.
+
+**Dangling references.** A destination or variable that no longer exists is kept as it is; the action then does nothing when played, and the editor shows it as missing. A flow whose frame is gone is not listed.
+
 ## 6. Coordinate system and transforms
 
 - The page is an unbounded plane. X grows to the right, Y grows downwards. Units are CSS pixels at 100% zoom.
@@ -610,6 +665,7 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 14 | Only an instance has a `componentId`, `overrides` and `propValues`. Property definitions have an ID, a known type and a name; `propRefs` and `variantProps` hold strings. | Set to null and {}; drop what is malformed. |
 | 14a | A style has a known type; a collection has at least one mode; a variable is in a collection that exists and has a value of its own type (or an alias) for each of that collection's modes and no others. | Drop the entry; give a missing or wrong value the type's blank value. A reference from a layer to a style or variable that is gone is dropped by `applyTokens` at the next change. |
 | 14b | The document has at least one page that does not hold a library. A page's `library` has the library's ID. `publication` is null or has a numeric version. | Add an empty page; set `library` or `publication` to null. What a publication holds is checked like a document when it is imported, not when the publishing file is opened. |
+| 14c | An interaction has an ID (unique on its layer) and a known trigger; an action a known type; a transition a known kind, direction and easing, times that are not negative and four numbers for a curve; conditions nest at most four deep. A flow has an ID and a starting frame. | Drop the interaction, action or flow; reset the value. |
 | 15 | Every instance is in step with its component (§5.8): it holds exactly one mirror of each of the component's layers, with the component's properties and its own overrides, and no layer has a `sourceId` outside an instance. | Not by `repairDocument`: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 | 13 | Layout sizing and positioning are ones that can apply where the layer is (§5.7), and every frame with a layout is laid out: the boxes of the layers in its flow, and its own where it hugs, are what the layout gives. | Not by `repairDocument`, which cannot measure text: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 
@@ -620,7 +676,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 21;
+const CURRENT_SCHEMA_VERSION = 22;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -672,6 +728,9 @@ const MIGRATIONS: Record<number, (file) => file> = {
   19: addStylesAndVariables,
   // 20 -> 21: the document gets publication null; every page library null; every style, variable and collection remote null.
   20: addLibraries,
+  // 21 -> 22: every layer gets reactions [] and scrollBehavior 'SCROLLS'; every frame overflow 'NONE', overlayPosition
+  // 'CENTER', overlayCloseOutside true and overlayBackground null; every page flows [] and prototypeDevice 'NONE'.
+  21: addPrototyping,
 };
 ```
 
@@ -697,6 +756,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 18 | 19 | Component sets (`kind: 'COMPONENT_SET'`), `variantProps`, `componentProps`, `propValues` on frames; `propRefs` on every layer | `src/variants.test.ts` ("opens a version 18 file") |
 | 19 | 20 | Document tables `styles`, `variables`, `variableCollections`; `styleRefs`, `boundVariables` and `variableModes` on every layer; `variableModes` on pages | `src/tokens.test.ts` ("opens a version 19 file, which has none") |
 | 20 | 21 | `publication` on the document; `library` on pages; `remote` on styles, variables and collections | `src/libraries.test.ts` ("opens a version 20 file, where nothing is published or from a library") |
+| 21 | 22 | `reactions` and `scrollBehavior` on every layer; `overflow` and the three overlay settings on frames; `flows` and `prototypeDevice` on pages | `src/prototype.test.ts` ("opens a version 21 file, which has no prototype") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -729,6 +789,6 @@ These are reserved so that later versions extend the schema without restructurin
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | (Done in version 15: Auto Layout properties on frames and on every layer, §5.7; the stretch alignment in version 16; wrapping columns in version 17.) |
 | 5 | (Done in version 18: components and instances with overrides, as kinds of frame, §5.8.) Done in version 19: component sets, variants and component properties. Done in version 20: document-level `styles`, `variableCollections`, `variables`, property bindings and modes (§5.9). Done in version 21: libraries (§5.10). |
-| 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |
+| 6 | Done in version 22 (§5.11): `reactions[]` on layers, `flows[]` on pages, scroll behaviour, fixed and sticky children, overlays. |
 | 7 | `exportSettings[]`, annotations, development status. |
 | 8 | Comments are stored outside the document body, keyed by document and node ID. |

@@ -39,6 +39,7 @@ import {
   moveNodesBy,
   nodesInRect,
   patchNode,
+  connect,
   rectCenter,
   resolveLineHeight,
   rectFromPoints,
@@ -74,6 +75,7 @@ import type { EditorStore, PaintEdit, ToolId } from '../../state/editorStore';
 import { hitFrameLabel, type FrameLabel } from '../render/overlay';
 import { RULER_SIZE } from '../render/rulers';
 import { panBy, screenToWorld, zoomAt } from '../viewport';
+import { connectorHandleAt, connectTargetAt } from './connections';
 import { arcHandleAt, dragArcHandle, type ArcHandle } from './arcHandles';
 import { cropUnderPointer, dragCrop } from './cropDrag';
 import { dragGradientHandle, gradientHandleAt, type GradientHandle } from './gradientHandles';
@@ -168,7 +170,9 @@ type Mode =
   /** One of the two handles of a gradient is being dragged. */
   | { kind: 'gradient'; edit: PaintEdit; handle: GradientHandle; base: Document }
   /** One of the handles that shape an ellipse's arc is being dragged. */
-  | { kind: 'arc'; id: NodeId; handle: ArcHandle; base: Document };
+  | { kind: 'arc'; id: NodeId; handle: ArcHandle; base: Document }
+  /** A prototype connection is being dragged from a layer: where the pointer is on the page, and the frame it is over. */
+  | { kind: 'connect'; fromId: NodeId; to: Point; targetId: NodeId | null };
 
 export interface ControllerHost {
   /** Called when the overlay (marquee, handles) needs repainting without a store change. */
@@ -229,6 +233,11 @@ export class InteractionController {
     const kind = this.mode.kind;
     if (kind === 'vector') return this.vector.isTransforming;
     return kind === 'move' || kind === 'resize' || kind === 'rotate' || kind === 'line-end' || kind === 'draw';
+  }
+
+  /** The prototype connection being dragged, for the overlay to draw: the layer it starts on and where it has got to on the page. */
+  get connecting(): { fromId: NodeId; to: Point; targetId: NodeId | null } | null {
+    return this.mode.kind === 'connect' ? { fromId: this.mode.fromId, to: this.mode.to, targetId: this.mode.targetId } : null;
   }
 
   /** What the overlay draws for the vector being edited or drawn, if any. */
@@ -488,6 +497,12 @@ export class InteractionController {
         if (patch) this.state.updateGesture(() => patchNode(mode.base, mode.id, patch));
         return;
       }
+      case 'connect':
+        mode.to = world;
+        mode.targetId = connectTargetAt(this.state.doc, this.state.pageId, mode.fromId, world);
+        this.state.setHovered(mode.targetId);
+        this.host.requestRender();
+        return;
       case 'text':
         // Show the box being dragged out.
         this.marquee = distance(e, mode.startScreen) > DRAG_THRESHOLD_PX ? rectFromPoints(mode.startWorld, world) : null;
@@ -545,6 +560,12 @@ export class InteractionController {
       case 'arc':
         state.commitGesture('Change arc');
         break;
+      case 'connect': {
+        // Dropped on a frame: a click on the layer goes there. Dropped anywhere else: nothing.
+        const { fromId, targetId } = mode;
+        if (targetId !== null) state.apply('Connect', (doc) => connect(doc, fromId, targetId)?.doc ?? doc);
+        break;
+      }
       case 'gradient':
         state.commitGesture('Change gradient');
         break;
@@ -568,6 +589,11 @@ export class InteractionController {
     this.endSnapping();
     if (mode.kind === 'vector') {
       this.vector.cancel();
+      this.host.requestRender();
+      return true;
+    }
+    if (mode.kind === 'connect') {
+      this.state.setHovered(null);
       this.host.requestRender();
       return true;
     }
@@ -666,6 +692,11 @@ export class InteractionController {
       this.host.setCursor('pointer');
       return;
     }
+    if (state.rightTab === 'prototype' && connectorHandleAt(state.doc, state.selection, state.viewport, e) !== null) {
+      state.setHovered(null);
+      this.host.setCursor('crosshair');
+      return;
+    }
     const frame = getSelectionFrame(state.doc, state.selection);
     const handle = frame ? hitHandle(frame, state.viewport, e) : null;
     if (frame && handle) {
@@ -708,6 +739,16 @@ export class InteractionController {
     const world = this.toWorld(e);
     const tolerance = HIT_TOLERANCE_PX / state.viewport.zoom;
     const frame = getSelectionFrame(state.doc, state.selection);
+
+    // With the Prototype tab open: the handle a connection is dragged from.
+    if (state.rightTab === 'prototype') {
+      const fromId = connectorHandleAt(state.doc, state.selection, state.viewport, e);
+      if (fromId !== null) {
+        this.mode = { kind: 'connect', fromId, to: world, targetId: null };
+        this.host.setCursor('crosshair');
+        return;
+      }
+    }
 
     // The handles of a gradient that is being edited on the canvas.
     const gradient = gradientHandleAt(state.doc, state.paintEdit, state.viewport, e);

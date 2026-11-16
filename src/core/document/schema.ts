@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 21 (adds libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * OPEN DESIGN document schema, version 22 (adds prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 21;
+export const CURRENT_SCHEMA_VERSION = 22;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -306,6 +306,10 @@ export interface PageNode extends NodeBase {
    * among the document's pages: it is never shown, listed or exported.
    */
   library: LibraryRef | null;
+  /** The flows of the prototype on this page: its starting frames, by name. */
+  flows: Flow[];
+  /** The screen the prototype of this page is shown on. */
+  prototypeDevice: PrototypeDevice;
 }
 
 interface LayerBase extends NodeBase {
@@ -377,7 +381,93 @@ interface LayerBase extends NodeBase {
   boundVariables: Readonly<Record<string, string>>;
   /** The mode chosen here, for this layer and everything in it, of each variable collection that has one chosen. */
   variableModes: Readonly<Record<string, string>>;
+  /** The interactions on this layer in a prototype. */
+  reactions: Reaction[];
+  /** What this layer does when the frame it is in scrolls in a prototype. */
+  scrollBehavior: ScrollBehavior;
 }
+
+// ---------------------------------------------------------------- prototyping
+
+/** What sets an interaction off. */
+export type TriggerType = 'ON_CLICK' | 'ON_DRAG' | 'MOUSE_ENTER' | 'ON_PRESS' | 'AFTER_DELAY' | 'ON_KEY';
+export const TRIGGER_TYPES: readonly TriggerType[] = ['ON_CLICK', 'ON_DRAG', 'MOUSE_ENTER', 'ON_PRESS', 'AFTER_DELAY', 'ON_KEY'];
+
+export interface Trigger {
+  type: TriggerType;
+  /** AFTER_DELAY: how long after the screen is shown, in milliseconds. */
+  delay: number;
+  /** ON_KEY: the key, as the keyboard names it ("Enter", "ArrowRight", "a"). */
+  key: string;
+}
+
+export type TransitionType = 'INSTANT' | 'DISSOLVE' | 'SMART_ANIMATE' | 'MOVE_IN' | 'MOVE_OUT' | 'PUSH' | 'SLIDE_IN' | 'SLIDE_OUT';
+export const TRANSITION_TYPES: readonly TransitionType[] = ['INSTANT', 'DISSOLVE', 'SMART_ANIMATE', 'MOVE_IN', 'MOVE_OUT', 'PUSH', 'SLIDE_IN', 'SLIDE_OUT'];
+/** The way things move in a transition. */
+export type TransitionDirection = 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM';
+export const TRANSITION_DIRECTIONS: readonly TransitionDirection[] = ['LEFT', 'RIGHT', 'TOP', 'BOTTOM'];
+export type EasingType = 'LINEAR' | 'EASE_IN' | 'EASE_OUT' | 'EASE_IN_OUT' | 'CUSTOM';
+export const EASING_TYPES: readonly EasingType[] = ['LINEAR', 'EASE_IN', 'EASE_OUT', 'EASE_IN_OUT', 'CUSTOM'];
+
+export interface Transition {
+  type: TransitionType;
+  direction: TransitionDirection;
+  /** Milliseconds. */
+  duration: number;
+  /** Milliseconds before it starts. */
+  delay: number;
+  easing: EasingType;
+  /** CUSTOM: the two control points of a cubic Bézier curve, as in CSS. */
+  bezier: [number, number, number, number];
+}
+
+export type ActionType = 'NAVIGATE' | 'OPEN_OVERLAY' | 'SWAP_OVERLAY' | 'CLOSE_OVERLAY' | 'SCROLL_TO' | 'BACK' | 'CHANGE_TO' | 'SET_VARIABLE' | 'CONDITIONAL' | 'INPUT';
+export const ACTION_TYPES: readonly ActionType[] = ['NAVIGATE', 'OPEN_OVERLAY', 'SWAP_OVERLAY', 'CLOSE_OVERLAY', 'SCROLL_TO', 'BACK', 'CHANGE_TO', 'SET_VARIABLE', 'CONDITIONAL', 'INPUT'];
+
+/**
+ * One thing an interaction does. Every action has every field; which ones
+ * count depends on its type: a destination (a frame to go to or open, a
+ * layer to scroll to, a variant to change to), a transition, a variable
+ * with the expression for its new value (or, for INPUT, the variable that
+ * typing goes into), or a condition (`expression`) with the actions for
+ * when it holds (`then`) and when it does not (`otherwise`).
+ */
+export interface Action {
+  type: ActionType;
+  destinationId: NodeId | null;
+  transition: Transition;
+  variableId: string | null;
+  expression: string;
+  then: Action[];
+  otherwise: Action[];
+}
+
+/** An interaction on a layer: when the trigger happens, the actions run in order. */
+export interface Reaction {
+  id: string;
+  trigger: Trigger;
+  actions: Action[];
+}
+
+/** A named way through a prototype, from the frame it starts on. */
+export interface Flow {
+  id: string;
+  name: string;
+  startId: NodeId;
+}
+
+/** Which way the content of a frame scrolls in a prototype when there is more of it than fits. */
+export type Overflow = 'NONE' | 'HORIZONTAL' | 'VERTICAL' | 'BOTH';
+export const OVERFLOWS: readonly Overflow[] = ['NONE', 'HORIZONTAL', 'VERTICAL', 'BOTH'];
+/** What a layer does when the frame it is in scrolls: go with the content, stay where it is, or stop at the top. */
+export type ScrollBehavior = 'SCROLLS' | 'FIXED' | 'STICKY';
+export const SCROLL_BEHAVIORS: readonly ScrollBehavior[] = ['SCROLLS', 'FIXED', 'STICKY'];
+/** Where a frame sits when it is opened as an overlay. */
+export type OverlayPosition = 'CENTER' | 'TOP_LEFT' | 'TOP_CENTER' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM_CENTER' | 'BOTTOM_RIGHT';
+export const OVERLAY_POSITIONS: readonly OverlayPosition[] = ['CENTER', 'TOP_LEFT', 'TOP_CENTER', 'TOP_RIGHT', 'BOTTOM_LEFT', 'BOTTOM_CENTER', 'BOTTOM_RIGHT'];
+/** The screen a prototype is shown on. NONE: as big as the frame. */
+export type PrototypeDevice = 'NONE' | 'PHONE' | 'TABLET' | 'DESKTOP';
+export const PROTOTYPE_DEVICES: readonly PrototypeDevice[] = ['NONE', 'PHONE', 'TABLET', 'DESKTOP'];
 
 export type StyleType = 'PAINT' | 'TEXT' | 'EFFECT' | 'GRID';
 export const STYLE_TYPES: readonly StyleType[] = ['PAINT', 'TEXT', 'EFFECT', 'GRID'];
@@ -531,6 +621,14 @@ export interface FrameNode extends LayerBase {
   /** An instance's values for its component's properties, by property ID. A property not named here is as the component has it. */
   propValues: Readonly<Record<string, boolean | string>>;
   clipsContent: boolean;
+  /** Which way the frame's content scrolls in a prototype. */
+  overflow: Overflow;
+  /** When the frame is opened as an overlay: where it sits, */
+  overlayPosition: OverlayPosition;
+  /** whether a click outside it closes it, */
+  overlayCloseOutside: boolean;
+  /** and what covers the screen behind it, if anything. */
+  overlayBackground: { color: RGB; opacity: number } | null;
   cornerRadius: number;
   /** One radius per corner; when null, `cornerRadius` applies to all four. */
   cornerRadii: CornerRadii | null;
@@ -845,6 +943,10 @@ export function hasCornerRadius(node: DesignNode | undefined): node is FrameNode
 /** A partial update for a layer. Type-specific keys only make sense on the matching node types. */
 export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   clipsContent?: boolean;
+  overflow?: Overflow;
+  overlayPosition?: OverlayPosition;
+  overlayCloseOutside?: boolean;
+  overlayBackground?: { color: RGB; opacity: number } | null;
   cornerRadius?: number;
   cornerRadii?: CornerRadii | null;
   layoutGrids?: LayoutGrid[];
@@ -880,6 +982,6 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   endArrow?: ArrowType;
 } & Partial<Omit<TextNode, keyof LayerBase>>;
 
-export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides' | 'variableModes'>>;
+export type PagePatch = Partial<Pick<PageNode, 'name' | 'order' | 'backgroundColor' | 'guides' | 'variableModes' | 'flows' | 'prototypeDevice'>>;
 
 export type NodePatch = LayerPatch | PagePatch;

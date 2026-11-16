@@ -744,6 +744,8 @@ export interface AppActions {
   openShortcuts(): void;
   /** Opens the dialog for publishing this file and for the libraries it uses. */
   openLibraries?(): void;
+  /** Plays the prototype of the page, from a frame or from where it starts. */
+  present?(startId?: NodeId): void;
   /** Writes the file to local storage immediately. */
   saveNow(): void;
   /** Saves a `.opendesign` copy to disk. */
@@ -1057,6 +1059,23 @@ export const COMMANDS: readonly Command[] = [
     run: ({ store }) => store.getState().setPixelSnap(!store.getState().pixelSnap),
   },
 
+  {
+    id: 'view.present',
+    label: 'Present prototype',
+    group: 'View',
+    shortcut: 'Ctrl+Alt+Enter',
+    keys: [{ code: 'Enter', ctrl: true, alt: true }],
+    run: ({ app }) => app.present?.(),
+  },
+  {
+    id: 'view.prototypeTab',
+    label: 'Prototype panel',
+    group: 'View',
+    shortcut: 'Shift+E',
+    keys: [{ code: 'KeyE', shift: true }],
+    checked: (state) => state.rightTab === 'prototype',
+    run: ({ store }) => store.getState().setRightTab(store.getState().rightTab === 'prototype' ? 'design' : 'prototype'),
+  },
   {
     id: 'view.rulers',
     label: 'Rulers and guides',

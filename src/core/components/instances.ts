@@ -56,6 +56,8 @@ export const OVERRIDABLE: readonly string[] = [
   'styleRefs',
   'boundVariables',
   'variableModes',
+  // What it does in a prototype.
+  'reactions',
 ];
 
 /** What a component property can decide about a layer, and the type of property that decides it. */
@@ -104,6 +106,7 @@ const ROOT_COPIED: readonly string[] = [
   'paddingTop',
   'paddingBottom',
   'itemsReversed',
+  'overflow',
 ];
 
 /** Of those, the ones an instance may have its own way: its look. Its layout is always the component's. */

@@ -123,6 +123,7 @@ export function CanvasView() {
         showHandles: !controller.isTransforming && state.editingTextId === null && state.vectorEdit === null,
         vector: controller.vectorOverlay(),
         paintEdit: state.paintEdit,
+        prototype: state.rightTab === 'prototype' ? { connecting: controller.connecting } : null,
       });
       controller.labels = result.labels;
     };

@@ -69,7 +69,7 @@ const SCOPE_LABELS: Record<string, string> = {
 };
 
 /** A text input that changes the document when its value is committed (Enter or leaving it), so an edit is one undo step. */
-function CommitInput({ label, value, onCommit, className, placeholder }: { label: string; value: string; onCommit: (value: string) => void; className?: string; placeholder?: string }) {
+export function CommitInput({ label, value, onCommit, className, placeholder }: { label: string; value: string; onCommit: (value: string) => void; className?: string; placeholder?: string }) {
   return (
     <input
       key={value}

@@ -312,6 +312,20 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
       document: { publication: null, ...body, nodes: upgraded, styles: local(body.styles), variables: local(body.variables), variableCollections: local(body.variableCollections) },
     };
   },
+  // Version 22 adds prototyping. Nothing older has an interaction, a flow, or anything that scrolls or opens as an overlay.
+  21: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node)) upgraded[id] = node;
+      else if (node.type === 'PAGE') upgraded[id] = { flows: [], prototypeDevice: 'NONE', ...node };
+      else if (node.type === 'FRAME') upgraded[id] = { reactions: [], scrollBehavior: 'SCROLLS', overflow: 'NONE', overlayPosition: 'CENTER', overlayCloseOutside: true, overlayBackground: null, ...node };
+      else upgraded[id] = { reactions: [], scrollBehavior: 'SCROLLS', ...node };
+    }
+    return { ...file, schemaVersion: 22, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

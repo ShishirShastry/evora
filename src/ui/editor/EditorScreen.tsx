@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, FileFormatError, listLibraries, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, FileFormatError, listLibraries, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -18,7 +18,7 @@ import { LibrariesDialog } from './LibrariesDialog';
 import { loadLibrary } from '../../persistence/libraries';
 import { Logo } from '../components/Icon';
 import { PanelResizer } from '../components/PanelResizer';
-import { DesignPanel } from '../panels/DesignPanel';
+import { RightSidebar } from '../panels/RightSidebar';
 import { ComponentsPanel } from '../panels/ComponentSections';
 import { LayersPanel } from '../panels/LayersPanel';
 import { PagesPanel } from '../panels/PagesPanel';
@@ -180,6 +180,19 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       cancelInteraction: () => controller.current?.cancel() ?? false,
       openShortcuts: () => setShortcutsOpen(true),
       openLibraries: () => setLibrariesOpen(true),
+      present: (startId) => {
+        const state = store.getState();
+        // From the frame that is named or selected; otherwise from the first flow, or the first frame.
+        const selected = state.selection.length === 1 ? state.selection[0] : undefined;
+        const frames = prototypeFrames(state.doc, state.pageId);
+        const start = startId ?? (selected !== undefined && frames.some((frame) => frame.id === selected) ? selected : startFrame(state.doc, state.pageId));
+        if (state.editingTextId !== null) state.commitGesture('Edit text');
+        // The viewer reads the file from storage, so it is written first.
+        const pending = saver.current?.flush() ?? Promise.resolve();
+        void pending.then(() => {
+          window.location.hash = `#/proto/${state.doc.id}${start ? `/${start}` : ''}`;
+        });
+      },
       saveNow: () => void saver.current?.flush(),
       saveAs: () => {
         const state = store.getState();
@@ -434,12 +447,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
               onChange={(right) => setPanels((current) => ({ ...current, right }))}
               onCommit={(right) => savePreferences({ rightPanelWidth: right })}
             />
-            <div className="flex h-9 flex-none items-center border-b border-line px-3 text-[11px] font-semibold uppercase tracking-wide text-accent">
-              Design
-            </div>
-            <div className="min-h-0 flex-1">
-              <DesignPanel />
-            </div>
+            <RightSidebar />
           </div>
         </div>
       </div>

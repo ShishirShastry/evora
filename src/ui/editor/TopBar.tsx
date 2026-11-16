@@ -143,6 +143,12 @@ export function TopBar() {
 
       <div className="mx-1 h-5 w-px bg-line" />
 
+      <button type="button" className="od-button !h-[28px] flex-none !px-2" aria-label="Present prototype" title={tip(getCommand('view.present') as Command)} onClick={() => run(getCommand('view.present') as Command)}>
+        Present
+      </button>
+
+      <div className="mx-1 h-5 w-px bg-line" />
+
       <button
         ref={zoomButton}
         type="button"

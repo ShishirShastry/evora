@@ -91,6 +91,8 @@ export interface EditorState {
   showLayoutGrids: boolean;
   /** Whether the rulers, and with them the page's guides, are shown. A user preference. */
   showRulers: boolean;
+  /** Which tab of the right sidebar is open. With Prototype open, the canvas shows the connections between layers. */
+  rightTab: 'design' | 'prototype';
   /** The colours of the application: dark or light. A user preference; a design's own colours do not change with it. */
   theme: Theme;
 
@@ -148,6 +150,7 @@ export interface EditorActions {
   setPixelSnap(pixelSnap: boolean): void;
   setShowLayoutGrids(show: boolean): void;
   setShowRulers(show: boolean): void;
+  setRightTab(tab: 'design' | 'prototype'): void;
   setTheme(theme: Theme): void;
   /** Renames the file. Not an undo step, like renaming a file anywhere else. */
   renameDocument(name: string): void;
@@ -292,6 +295,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       pixelSnap: options.pixelSnap ?? true,
       showLayoutGrids: options.showLayoutGrids ?? true,
       showRulers: options.showRulers ?? false,
+      rightTab: 'design',
       theme: options.theme === 'light' ? 'light' : 'dark',
       undoStack: [],
       redoStack: [],
@@ -464,6 +468,10 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       setShowRulers(show) {
         if (get().showRulers !== show) set({ showRulers: show });
+      },
+
+      setRightTab(tab) {
+        if (get().rightTab !== tab) set({ rightTab: tab });
       },
 
       setTheme(theme) {
