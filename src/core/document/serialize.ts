@@ -234,6 +234,8 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 15, document: { ...body, nodes: upgraded } };
   },
+  // Version 16 adds STRETCH to the alignments across a layout. No older frame stretches its children.
+  15: (file) => ({ ...file, schemaVersion: 16 }),
 };
 
 /**

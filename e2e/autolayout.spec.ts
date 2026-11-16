@@ -515,3 +515,84 @@ test('a column: reordering, children outside the flow, and a layout nested in a 
   await expect(checkbox(page, 'Ignore auto layout')).toBeChecked();
   expect(errors).toEqual([]);
 });
+
+test('stretch: every item is as tall as the row, whatever its own sizing', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await newFile(page);
+  const inFrame = await drawFrame(page, [500, 300]);
+  const colourAt = (x: number, y: number): Promise<[number, number, number]> => pixel(page, ...inFrame(x, y));
+  // A square of 50 and a bar 80 tall, side by side at the top of a 400 × 200 frame.
+  await drawRect(page, inFrame, { x: 20, y: 20, w: 50, h: 50 });
+  await drawRect(page, inFrame, { x: 110, y: 20, w: 50, h: 80 });
+  await layer(page, 'Frame 1').click();
+  await page.getByRole('button', { name: 'Add Auto Layout' }).click();
+  await expect(field(page, 'Height')).toHaveValue('200');
+  await expect(select(page, 'Vertical sizing')).toHaveValue('HUG');
+  await expect(select(page, 'Alignment across the layout').locator('option')).toHaveText(['Top', 'Center', 'Bottom', 'Stretch']);
+  // Under the square, which ends 70 down, the frame shows.
+  expect(await colourAt(45, 85)).toEqual(WHITE);
+
+  // Stretch: the frame keeps its height but no longer hugs it, and says what Stretch does to its items.
+  await select(page, 'Alignment across the layout').selectOption('STRETCH');
+  await expect(field(page, 'Height')).toHaveValue('200');
+  await expect(select(page, 'Vertical sizing')).toHaveValue('FIXED');
+  await expect(select(page, 'Vertical sizing').locator('option')).toHaveText(['Fixed height']);
+  await expect(select(page, 'Horizontal sizing')).toHaveValue('HUG');
+  await expect(page.getByRole('note', { name: 'What Stretch does' })).toContainText('is not used while Stretch is on');
+
+  // Both items are the 80 that is left between the padding of 20 and of 100.
+  await layer(page, 'Rectangle 1').click();
+  expect(await boxOf(page)).toEqual({ x: 20, y: 20, w: 50, h: 80 });
+  expect(await colourAt(45, 85)).toEqual(GREY);
+  // The square's own vertical sizing is shown, cannot be changed, and is said not to be in use.
+  await expect(select(page, 'Vertical sizing')).toHaveValue('FIXED');
+  await expect(select(page, 'Vertical sizing')).toBeDisabled();
+  await expect(select(page, 'Horizontal sizing')).toBeEnabled();
+  await expect(page.getByRole('note', { name: 'Stretched by the frame' })).toContainText('Height: stretched');
+
+  // A taller frame, and both follow it.
+  await layer(page, 'Frame 1').click();
+  await set(page, 'Height', '300');
+  await layer(page, 'Rectangle 2').click();
+  await expect(field(page, 'Height')).toHaveValue('180');
+  await layer(page, 'Rectangle 1').click();
+  await expect(field(page, 'Height')).toHaveValue('180');
+  expect(await colourAt(45, 190)).toEqual(GREY);
+  expect(await colourAt(45, 210)).toEqual(WHITE);
+
+  // An item's own limits still hold.
+  await set(page, 'Maximum height', '100');
+  await expect(field(page, 'Height')).toHaveValue('100');
+  expect(await colourAt(45, 130)).toEqual(WHITE);
+  await set(page, 'Maximum height', '');
+  await expect(field(page, 'Height')).toHaveValue('180');
+  // One undo step takes the limit back off... and the one before puts it on again.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Height')).toHaveValue('100');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(field(page, 'Height')).toHaveValue('180');
+
+  // Stored.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await layer(page, 'Frame 1').click();
+  await expect(select(page, 'Alignment across the layout')).toHaveValue('STRETCH');
+  await layer(page, 'Rectangle 1').click();
+  await expect(field(page, 'Height')).toHaveValue('180');
+  await expect(select(page, 'Vertical sizing')).toBeDisabled();
+  expect(await colourAt(45, 190)).toEqual(GREY);
+
+  // Back to the top: the items keep the height the stretch gave them, and their own sizing is theirs again.
+  await layer(page, 'Frame 1').click();
+  await select(page, 'Alignment across the layout').selectOption('MIN');
+  await expect(page.getByRole('note', { name: 'What Stretch does' })).toHaveCount(0);
+  await expect(select(page, 'Vertical sizing').locator('option')).toHaveText(['Fixed height', 'Hug contents']);
+  await layer(page, 'Rectangle 1').click();
+  await expect(select(page, 'Vertical sizing')).toBeEnabled();
+  await expect(page.getByRole('note', { name: 'Stretched by the frame' })).toHaveCount(0);
+  await expect(field(page, 'Height')).toHaveValue('180');
+  expect(errors).toEqual([]);
+});

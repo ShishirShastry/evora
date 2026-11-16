@@ -14,7 +14,7 @@ import {
 } from '../document/schema';
 import { transformedBounds, unionRects, type Point, type Rect } from '../math/geometry';
 import { applyToPoint, invert, multiply } from '../math/matrix';
-import { belongsToFlow, flowChildren, isAutoLayout, isInFlow } from '../layout/autoLayout';
+import { belongsToFlow, canHug, flowChildren, isAutoLayout, isInFlow } from '../layout/autoLayout';
 import { freshKeys } from '../order';
 import { getChildIds, getLocalMatrix, getWorldMatrix, sortByPaintOrder, topLevelIds } from '../scene/tree';
 import { reparentNodes } from './arrange';
@@ -237,7 +237,8 @@ export function sizingChoices(doc: Document, id: NodeId, axis: Axis): LayoutSizi
   const node = doc.nodes[id];
   if (!isLayer(node)) return [];
   const choices: LayoutSizing[] = ['FIXED'];
-  if (isAutoLayout(node) || node.type === 'TEXT') choices.push('HUG');
+  // A frame that stretches its children across its layout has nothing to hug that way.
+  if (node.type === 'TEXT' || (isAutoLayout(node) && canHug(node, axis === 'horizontal' ? 'x' : 'y'))) choices.push('HUG');
   if (belongsToFlow(doc, node) && canStretch(node, axis)) choices.push('FILL');
   return choices;
 }

@@ -34,6 +34,7 @@ import {
   settleSizing,
   shiftInFlow,
   sizingChoices,
+  stretchedAcross,
   validateDocument,
   type Document,
   type FrameNode,
@@ -1334,6 +1335,191 @@ describe('Auto Layout in the file format', () => {
     const column = JSON.parse(JSON.stringify(made.doc)) as { nodes: Record<string, Record<string, unknown>> };
     Object.assign(column.nodes[frameId] as Record<string, unknown>, { layoutWrap: 'WRAP' });
     expect(frameOf(repairDocument(column).doc, frameId).layoutWrap).toBe('NO_WRAP');
+  });
+});
+
+describe('stretch', () => {
+  const STRETCH: LayerPatch = { ...PADDED, counterAxisAlignItems: 'STRETCH' };
+  const heights = (doc: Document, ids: readonly NodeId[]): number[] => ids.map((id) => box(doc, id).height);
+  const widthsOf = (doc: Document, ids: readonly NodeId[]): number[] => ids.map((id) => box(doc, id).width);
+
+  it('makes every child of a row as tall as the frame has room, whatever its own sizing', () => {
+    const { doc, frameId } = frame(STRETCH);
+    const made = fill(doc, frameId, [THREE[0] as LayerPatch, { ...THREE[1], layoutSizingVertical: 'FILL' }, { ...THREE[2], minHeight: 10 }]);
+    const laid = lay(made.doc);
+    // 130 between the top and bottom padding.
+    expect(heights(laid, made.ids)).toEqual([130, 130, 130]);
+    expect(made.ids.map((id) => at(laid, id))).toEqual([
+      [10, 30],
+      [68, 30],
+      [136, 30],
+    ]);
+    // Widths are their own, and what each child says about its height is kept, unused.
+    expect(widthsOf(laid, made.ids)).toEqual([50, 60, 70]);
+    expect(made.ids.map((id) => (getLayer(laid, id) as LayerNode).layoutSizingVertical)).toEqual(['FIXED', 'FILL', 'FIXED']);
+    expect(made.ids.map((id) => stretchedAcross(laid, getLayer(laid, id)))).toEqual(['vertical', 'vertical', 'vertical']);
+  });
+
+  it('makes every child of a column as wide as the frame has room', () => {
+    const { doc, frameId } = frame({ ...STRETCH, layoutMode: 'VERTICAL' });
+    const made = fill(doc, frameId, THREE);
+    const laid = lay(made.doc);
+    expect(widthsOf(laid, made.ids)).toEqual([370, 370, 370]);
+    expect(heights(laid, made.ids)).toEqual([20, 40, 30]);
+    expect(made.ids.map((id) => box(laid, id).x)).toEqual([10, 10, 10]);
+    expect(stretchedAcross(laid, getLayer(laid, made.ids[0] as NodeId))).toBe('horizontal');
+  });
+
+  it('follows the frame, within each child’s own limits', () => {
+    const { doc, frameId } = frame(STRETCH);
+    const made = fill(doc, frameId, [THREE[0] as LayerPatch, { ...THREE[1], maxHeight: 100 }, { ...THREE[2], minHeight: 150 }]);
+    const laid = lay(made.doc);
+    expect(heights(laid, made.ids)).toEqual([130, 100, 150]);
+    const taller = lay(setLayerBox(laid, frameId, { height: 300 }));
+    expect(heights(taller, made.ids)).toEqual([230, 100, 230]);
+    const shorter = lay(setLayerBox(laid, frameId, { height: 100 }));
+    expect(heights(shorter, made.ids)).toEqual([30, 30, 150]);
+  });
+
+  it('leaves alone what cannot be stretched: a rotated child, a line, and text that fits itself to its content', () => {
+    const { doc, frameId } = frame(STRETCH);
+    const made = fill(doc, frameId, [
+      { width: 60, height: 20, rotation: 90 },
+      { type: 'LINE', width: 40 },
+      { type: 'TEXT', characters: 'Label' },
+      { type: 'TEXT', characters: 'Boxed', textAutoResize: 'NONE', width: 50, height: 25 },
+    ]);
+    const laid = lay(made.doc);
+    const [turned, line, label, boxed] = made.ids as [NodeId, NodeId, NodeId, NodeId];
+    expect(size(laid, turned)).toEqual([60, 20]);
+    expect(box(laid, line).height).toBe(0);
+    expect(box(laid, label).height).toBe(19);
+    // A text with a box of its own is stretched like any other layer.
+    expect(box(laid, boxed).height).toBe(130);
+    // What is not stretched sits at the top.
+    expect(box(laid, label).y).toBe(30);
+    expect(box(laid, line).y).toBe(30);
+    expect([turned, line, label, boxed].map((id) => stretchedAcross(laid, getLayer(laid, id)))).toEqual([null, null, null, 'vertical']);
+  });
+
+  it('stretches text that wraps to the width of a column, and its height follows', () => {
+    const { doc, frameId } = frame({ counterAxisAlignItems: 'STRETCH', layoutMode: 'VERTICAL', width: 150 });
+    const made = fill(doc, frameId, [
+      { type: 'TEXT', characters: 'aaaa bbbb cccc dddd eeee', textAutoResize: 'HEIGHT', width: 40 },
+      { type: 'TEXT', characters: 'Label' },
+    ]);
+    const laid = lay(made.doc);
+    // 150 wide: three words and their spaces fit, the other two go to a second line.
+    expect(box(laid, made.ids[0] as NodeId)).toEqual({ x: 0, y: 0, width: 150, height: 38 });
+    // Text that sets its own width keeps it.
+    expect(box(laid, made.ids[1] as NodeId)).toEqual({ x: 0, y: 38, width: 40, height: 19 });
+  });
+
+  it('stretches a frame nested in the row, and that frame lays its own children out in the room it gets', () => {
+    const { doc, frameId } = frame(STRETCH);
+    const inner = addLayer(doc, 'FRAME', frameId, {
+      width: 10,
+      height: 10,
+      layoutMode: 'VERTICAL',
+      primaryAxisAlignItems: 'MAX',
+      layoutSizingHorizontal: 'HUG',
+      layoutSizingVertical: 'HUG',
+    });
+    const kids = fill(inner.doc, inner.id, [{ width: 40, height: 15 }]);
+    const laid = lay(kids.doc);
+    // It hugs its width, but its height is the row's: its child sits at the bottom of that.
+    expect(box(laid, inner.id)).toEqual({ x: 10, y: 30, width: 40, height: 130 });
+    expect(at(laid, kids.ids[0] as NodeId)).toEqual([0, 115]);
+    expect(frameOf(laid, inner.id).layoutSizingVertical).toBe('HUG');
+  });
+
+  it('keeps a frame from hugging across its layout: one that hugged keeps the size it has', () => {
+    const { doc, frameId } = frame({ ...PADDED, layoutSizingHorizontal: 'HUG', layoutSizingVertical: 'HUG' });
+    const made = fill(doc, frameId, THREE);
+    const hugging = lay(made.doc);
+    expect(size(hugging, frameId)).toEqual([226, 110]);
+    const stretched = lay(patchNode(hugging, frameId, { counterAxisAlignItems: 'STRETCH' }));
+    // Along the row it still hugs; across it, it is now fixed at the height it had, and the children take that.
+    expect(frameOf(stretched, frameId)).toMatchObject({ layoutSizingHorizontal: 'HUG', layoutSizingVertical: 'FIXED', width: 226, height: 110 });
+    expect(heights(stretched, made.ids)).toEqual([40, 40, 40]);
+    expect(sizingChoices(stretched, frameId, 'vertical')).toEqual(['FIXED']);
+    expect(sizingChoices(stretched, frameId, 'horizontal')).toEqual(['FIXED', 'HUG']);
+    expect(setLayoutSizing(stretched, [frameId], 'vertical', 'HUG')).toBe(stretched);
+    // Turned into a column, it is the width that can no longer be hugged.
+    const column = lay(patchNode(stretched, frameId, { layoutMode: 'VERTICAL', layoutSizingVertical: 'HUG' }));
+    expect(frameOf(column, frameId)).toMatchObject({ layoutSizingHorizontal: 'FIXED', layoutSizingVertical: 'HUG', width: 226 });
+    expect(widthsOf(column, made.ids)).toEqual([196, 196, 196]);
+  });
+
+  it('gives the children their own sizing back when the alignment is no longer Stretch', () => {
+    const { doc, frameId } = frame(STRETCH);
+    const inner = addLayer(doc, 'FRAME', frameId, { width: 10, height: 10, layoutMode: 'VERTICAL', layoutSizingHorizontal: 'HUG', layoutSizingVertical: 'HUG' });
+    const kid = addLayer(inner.doc, 'RECTANGLE', inner.id, { width: 40, height: 15 });
+    const made = fill(kid.doc, frameId, [THREE[0] as LayerPatch, { ...THREE[1], layoutSizingVertical: 'FILL' }]);
+    const stretched = lay(made.doc);
+    const [plain, filling] = made.ids as [NodeId, NodeId];
+    expect(heights(stretched, [inner.id, plain, filling])).toEqual([130, 130, 130]);
+    const top = lay(patchNode(stretched, frameId, { counterAxisAlignItems: 'MIN' }));
+    // The frame hugs again, the one that fills still fills, and a fixed size stays what the stretch made it.
+    expect(heights(top, [inner.id, plain, filling])).toEqual([15, 130, 130]);
+    expect(stretchedAcross(top, getLayer(top, plain))).toBeNull();
+  });
+
+  it('stretches each child of a wrapping row to its line, and shares the frame’s height between the lines', () => {
+    const { doc, frameId } = frame({
+      width: 200,
+      height: 200,
+      layoutWrap: 'WRAP',
+      counterAxisAlignItems: 'STRETCH',
+      paddingLeft: 10,
+      paddingRight: 10,
+      paddingTop: 10,
+      paddingBottom: 10,
+      itemSpacing: 10,
+      counterAxisSpacing: 20,
+    });
+    const made = fill(doc, frameId, [0, 1, 2].map(() => ({ width: 60, height: 20 })));
+    const laid = lay(made.doc);
+    // Two lines share the 180 between the padding, less the gap of 20: 80 each.
+    expect(made.ids.map((id) => box(laid, id))).toEqual([
+      { x: 10, y: 10, width: 60, height: 80 },
+      { x: 80, y: 10, width: 60, height: 80 },
+      { x: 10, y: 110, width: 60, height: 80 },
+    ]);
+  });
+
+  it('does not reach a child that is hidden or taken out of the flow', () => {
+    const { doc, frameId } = frame(STRETCH);
+    const made = fill(doc, frameId, [
+      { ...THREE[0], x: 300, y: 5, layoutPositioning: 'ABSOLUTE' },
+      { ...THREE[1], visible: false },
+    ]);
+    const laid = lay(made.doc);
+    expect(box(laid, made.ids[0] as NodeId)).toEqual({ x: 300, y: 5, width: 50, height: 20 });
+    expect(box(laid, made.ids[1] as NodeId).height).toBe(40);
+    expect(stretchedAcross(laid, getLayer(laid, made.ids[0] as NodeId))).toBeNull();
+  });
+
+  it('opens a version 15 file, where no frame stretches, and keeps a stretch through saving and opening', () => {
+    const { doc, frameId } = frame({ ...PADDED, counterAxisAlignItems: 'CENTER' });
+    const current = lay(fill(doc, frameId, THREE).doc);
+    const parsed = parseFile({
+      format: 'open-design',
+      schemaVersion: 15,
+      meta: { createdAt: '2026-11-16T12:00:00.000Z', updatedAt: '2026-11-16T12:00:00.000Z' },
+      document: JSON.parse(JSON.stringify(current)),
+    });
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(16);
+    expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(parsed.repairs).toEqual([]);
+    expect(parsed.file.document).toEqual(current);
+    expect(frameOf(parsed.file.document, frameId).counterAxisAlignItems).toBe('CENTER');
+
+    const stretched = lay(patchNode(current, frameId, { counterAxisAlignItems: 'STRETCH' }));
+    const reopened = repairDocument(JSON.parse(JSON.stringify(stretched)));
+    expect(reopened.repairs).toEqual([]);
+    expect(reopened.doc).toEqual(stretched);
+    expect(lay(reopened.doc)).toBe(reopened.doc);
   });
 });
 

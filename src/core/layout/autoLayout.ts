@@ -19,6 +19,8 @@ import { breakLines, clampSize, distribute, extent, lineSizes, placeAcross, plac
  * in a row or a column, with padding round them and spacing between them,
  * each child a fixed size, as big as what is in it ("hug") or taking the room
  * that is left ("fill"), and the frame itself fixed or hugging its children.
+ * A frame can also stretch its children across its layout, whatever their own
+ * sizing that way.
  *
  * As with constraints and groups, nothing is worked out when the design is
  * painted: `applyAutoLayout` puts every Auto Layout frame of a document in
@@ -63,12 +65,58 @@ export function flowChildren(doc: Document, frame: FrameNode): LayerNode[] {
   return frame.itemsReversed ? children.reverse() : children;
 }
 
+type Axis = 'x' | 'y';
+
+/** The axis a frame's layout runs along. */
+function mainAxis(frame: FrameNode): Axis {
+  return frame.layoutMode === 'VERTICAL' ? 'y' : 'x';
+}
+
 /** Whether a layer can be stretched along an axis at all. A line has no height, and a flat vector cannot gain one. */
-function canStretch(node: LayerNode, axis: 'x' | 'y'): boolean {
+function canStretch(node: LayerNode, axis: Axis): boolean {
   if (node.rotation !== 0) return false;
   if (node.type === 'LINE') return axis === 'x';
   if (node.type === 'VECTOR') return axis === 'x' ? node.width > 0 : node.height > 0;
   return true;
+}
+
+/** Whether a text fits itself to its content along an axis, by its own sizing mode. */
+function textHugs(node: LayerNode, axis: Axis): boolean {
+  return node.type === 'TEXT' && (axis === 'x' ? node.textAutoResize === 'WIDTH_AND_HEIGHT' : node.textAutoResize !== 'NONE');
+}
+
+/**
+ * Whether a frame's STRETCH alignment reaches a child along an axis: the
+ * axis is the one across the frame's layout, and the child is one that can be
+ * given a size there. A rotated child, a line's height and a text that fits
+ * itself to its content are left as they are.
+ */
+function stretches(frame: FrameNode, child: LayerNode, axis: Axis): boolean {
+  return frame.counterAxisAlignItems === 'STRETCH' && mainAxis(frame) !== axis && canStretch(child, axis) && !textHugs(child, axis);
+}
+
+/**
+ * The direction in which a layer is stretched by the frame that lays it out,
+ * or null when it is not: the frame's alignment across is STRETCH and the
+ * layer is in its flow and can be stretched. Along that direction the layer's
+ * own sizing is not used.
+ */
+export function stretchedAcross(doc: Document, node: LayerNode | undefined): 'horizontal' | 'vertical' | null {
+  if (!node || !belongsToFlow(doc, node)) return null;
+  const frame = doc.nodes[node.parentId] as FrameNode;
+  const axis: Axis = mainAxis(frame) === 'x' ? 'y' : 'x';
+  if (!stretches(frame, node, axis)) return null;
+  return axis === 'x' ? 'horizontal' : 'vertical';
+}
+
+/**
+ * Whether a frame with a layout can be as big as its children along an axis.
+ * Across its layout it cannot while it stretches them: they would be as big
+ * as the frame, and the frame as big as they are.
+ */
+export function canHug(frame: FrameNode, axis: Axis): boolean {
+  if (mainAxis(frame) === axis) return true;
+  return frame.counterAxisAlignItems !== 'STRETCH';
 }
 
 /**
@@ -78,17 +126,16 @@ function canStretch(node: LayerNode, axis: 'x' | 'y'): boolean {
  * for a layer placed by an Auto Layout frame that has a size of its own along
  * that axis: a frame that hugs its children cannot also be filled by them.
  */
-function allowedSizing(doc: Document, node: LayerNode, axis: 'x' | 'y'): LayoutSizing {
+function allowedSizing(doc: Document, node: LayerNode, axis: Axis): LayoutSizing {
   const stored = axis === 'x' ? node.layoutSizingHorizontal : node.layoutSizingVertical;
   const parent = doc.nodes[node.parentId];
   const parentHugs = isAutoLayout(parent) && (axis === 'x' ? parent.layoutSizingHorizontal : parent.layoutSizingVertical) === 'HUG';
   const mayFill = belongsToFlow(doc, node) && !parentHugs && canStretch(node, axis);
   if (node.type === 'TEXT') {
-    const hugs = axis === 'x' ? node.textAutoResize === 'WIDTH_AND_HEIGHT' : node.textAutoResize !== 'NONE';
-    if (hugs) return 'HUG';
+    if (textHugs(node, axis)) return 'HUG';
     return stored === 'FILL' && mayFill ? 'FILL' : 'FIXED';
   }
-  if (stored === 'HUG') return isAutoLayout(node) ? 'HUG' : 'FIXED';
+  if (stored === 'HUG') return isAutoLayout(node) && canHug(node, axis) ? 'HUG' : 'FIXED';
   if (stored === 'FILL') return mayFill ? 'FILL' : 'FIXED';
   return 'FIXED';
 }
@@ -161,7 +208,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
   const hugWidths = new Map<NodeId, number>();
   const hugHeights = new Map<NodeId, number>();
 
-  const limits = (node: LayerNode, axis: 'x' | 'y'): { min: number; max: number } => {
+  const limits = (node: LayerNode, axis: Axis): { min: number; max: number } => {
     // A rotated layer is a box of a given size to the layout, whatever its limits say.
     if (node.rotation !== 0) return { min: 0, max: Infinity };
     const min = axis === 'x' ? node.minWidth : node.minHeight;
@@ -191,8 +238,8 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
   /** The width a child has when it does not fill. */
   const ownWidth = (node: LayerNode): number => (nested(node) && node.layoutSizingHorizontal === 'HUG' ? hugWidth(node) : node.width);
 
-  const widthItem = (child: LayerNode): FlowItem => {
-    const fill = child.layoutSizingHorizontal === 'FILL';
+  const widthItem = (frame: FrameNode, child: LayerNode): FlowItem => {
+    const fill = child.layoutSizingHorizontal === 'FILL' || stretches(frame, child, 'x');
     const { min, max } = limits(child, 'x');
     // Something that fills never shrinks to nothing: a layer without a width cannot be seen or picked up.
     if (fill) return { size: 0, fill, min: Math.max(1, min), max: Math.max(1, max) };
@@ -203,7 +250,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
     widths.set(frame.id, width);
     const flow = flowOf(frame);
     const inner = Math.max(0, width - frame.paddingLeft - frame.paddingRight);
-    const items = flow.map(widthItem);
+    const items = flow.map((child) => widthItem(frame, child));
     let sizes: number[];
     if (frame.layoutMode === 'HORIZONTAL') {
       const all = flow.map((_, index) => index);
@@ -257,8 +304,8 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
     return textHeight(node);
   };
 
-  const heightItem = (child: LayerNode): FlowItem => {
-    const fill = child.layoutSizingVertical === 'FILL';
+  const heightItem = (frame: FrameNode, child: LayerNode): FlowItem => {
+    const fill = child.layoutSizingVertical === 'FILL' || stretches(frame, child, 'y');
     const { min, max } = limits(child, 'y');
     if (fill) return { size: 0, fill, min: Math.max(1, min), max: Math.max(1, max) };
     const width = widths.get(child.id) ?? child.width;
@@ -270,7 +317,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
     const known = hugHeights.get(frame.id);
     if (known !== undefined) return known;
     if (flowOf(frame).length === 0) return frame.height;
-    const items = flowOf(frame).map(heightItem);
+    const items = flowOf(frame).map((child) => heightItem(frame, child));
     const rows = lines.get(frame.id)?.rows ?? [];
     const content =
       frame.layoutMode === 'VERTICAL'
@@ -286,7 +333,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
     heights.set(frame.id, height);
     const flow = flowOf(frame);
     const inner = Math.max(0, height - frame.paddingTop - frame.paddingBottom);
-    const items = flow.map(heightItem);
+    const items = flow.map((child) => heightItem(frame, child));
     const own = lines.get(frame.id) as Lines;
     let sizes: number[];
     if (frame.layoutMode === 'VERTICAL') {
@@ -326,9 +373,11 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
         y: frame.paddingTop + top + (room.height - (heights.get(child.id) as number)) / 2,
       });
     };
+    // A child that a stretch does not reach sits at the start, across the layout.
+    const across = frame.counterAxisAlignItems === 'STRETCH' ? 'MIN' : frame.counterAxisAlignItems;
     if (frame.layoutMode === 'HORIZONTAL') {
       const spread = frame.layoutWrap === 'WRAP' && frame.counterAxisAlignContent === 'SPACE_BETWEEN';
-      const tops = placeAlong(own.sizes, innerHeight, frame.counterAxisSpacing, spread ? 'SPACE_BETWEEN' : frame.counterAxisAlignItems);
+      const tops = placeAlong(own.sizes, innerHeight, frame.counterAxisSpacing, spread ? 'SPACE_BETWEEN' : across);
       own.rows.forEach((row, line) => {
         const lefts = placeAlong(
           row.map((index) => (rooms[index] as { width: number }).width),
@@ -337,8 +386,8 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
           frame.primaryAxisAlignItems,
         );
         row.forEach((index, k) => {
-          const across = placeAcross((rooms[index] as { height: number }).height, own.sizes[line] as number, frame.counterAxisAlignItems);
-          put(index, lefts[k] as number, (tops[line] as number) + across);
+          const down = placeAcross((rooms[index] as { height: number }).height, own.sizes[line] as number, across);
+          put(index, lefts[k] as number, (tops[line] as number) + down);
         });
       });
     } else {
@@ -349,7 +398,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
         frame.primaryAxisAlignItems,
       );
       flow.forEach((_, index) => {
-        put(index, placeAcross((rooms[index] as { width: number }).width, innerWidth, frame.counterAxisAlignItems), tops[index] as number);
+        put(index, placeAcross((rooms[index] as { width: number }).width, innerWidth, across), tops[index] as number);
       });
     }
     for (const child of flow) if (nested(child)) place(child);

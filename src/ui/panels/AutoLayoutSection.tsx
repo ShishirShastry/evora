@@ -7,6 +7,7 @@ import {
   setLayoutDirection,
   setLayoutSizing,
   sizingChoices,
+  stretchedAcross,
   type CounterAxisAlign,
   type CounterAxisAlignContent,
   type FrameNode,
@@ -52,6 +53,7 @@ function alignmentNames(direction: Direction | Mixed): {
       ['MIN', top as string],
       ['CENTER', 'Center'],
       ['MAX', bottom as string],
+      ['STRETCH', 'Stretch'],
     ],
   };
 }
@@ -225,6 +227,14 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
           onChange={(counterAxisAlignItems) => set('Change alignment', { counterAxisAlignItems })}
         />
       </Row>
+      {value('counterAxisAlignItems') === 'STRETCH' && (
+        // Stretch overrides what each item says about its own size across the layout, so that is said here.
+        <p role="note" aria-label="What Stretch does" className="m-0 text-faint">
+          {direction === 'VERTICAL'
+            ? 'Every item is as wide as the frame has room. An item’s own horizontal sizing, “Fill container” included, is not used while Stretch is on. Rotated items and text that sets its own width keep their width.'
+            : 'Every item is as tall as the frame has room (in a wrapping row, as tall as its line). An item’s own vertical sizing, “Fill container” included, is not used while Stretch is on. Rotated items, lines and text that sets its own height keep their height.'}
+        </p>
+      )}
       {wraps && (
         <Row>
           <span className="w-20 flex-none text-dim">Lines</span>
@@ -341,6 +351,8 @@ export function ResizingSection({ layers }: { layers: LayerNode[] }) {
   const horizontal = choices('horizontal');
   const vertical = choices('vertical');
   if (!inLayout && !limited && horizontal.length < 2 && vertical.length < 2) return null;
+  // The direction in which the frame's Stretch alignment sizes these layers, if it sizes them all the same way.
+  const stretched = shared(layers, (layer) => stretchedAcross(doc, layer));
 
   const size = (axis: 'horizontal' | 'vertical', sizing: LayoutSizing): void =>
     store.getState().apply('Change sizing', (d) => setLayoutSizing(d, ids, axis, sizing));
@@ -356,6 +368,7 @@ export function ResizingSection({ layers }: { layers: LayerNode[] }) {
         <span className="w-20 flex-none text-dim">Horizontal</span>
         <SelectField<LayoutSizing>
           label="Horizontal sizing"
+          disabled={stretched === 'horizontal'}
           value={shared(layers, (layer) => layer.layoutSizingHorizontal)}
           options={horizontal.map((sizing) => [sizing, SIZING_NAMES[sizing][0]] as const)}
           onChange={(sizing) => size('horizontal', sizing)}
@@ -365,11 +378,18 @@ export function ResizingSection({ layers }: { layers: LayerNode[] }) {
         <span className="w-20 flex-none text-dim">Vertical</span>
         <SelectField<LayoutSizing>
           label="Vertical sizing"
+          disabled={stretched === 'vertical'}
           value={shared(layers, (layer) => layer.layoutSizingVertical)}
           options={vertical.map((sizing) => [sizing, SIZING_NAMES[sizing][1]] as const)}
           onChange={(sizing) => size('vertical', sizing)}
         />
       </Row>
+      {(stretched === 'horizontal' || stretched === 'vertical') && (
+        <p role="note" aria-label="Stretched by the frame" className="m-0 text-faint">
+          {stretched === 'horizontal' ? 'Width' : 'Height'}: stretched by the frame’s alignment across its layout. The {stretched} sizing above is not used while
+          that alignment is Stretch.
+        </p>
+      )}
       {limited && (
         <div className="grid grid-cols-2 gap-1.5">
           <LimitField label="Minimum width" prefix="Min W" value={shared(layers, (layer) => layer.minWidth)} onCommit={(minWidth) => set('Change size limit', { minWidth })} />

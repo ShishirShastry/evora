@@ -1,6 +1,6 @@
 /**
- * OPEN DESIGN document schema, version 15 (adds Auto Layout: frames that lay out their children, and how each
- * layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
+ * OPEN DESIGN document schema, version 16 (adds stretching children across an Auto Layout frame; version 15
+ * added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
  * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
@@ -10,7 +10,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -240,9 +240,13 @@ export const LAYOUT_WRAPS: readonly LayoutWrap[] = ['NO_WRAP', 'WRAP'];
 export type PrimaryAxisAlign = 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
 export const PRIMARY_AXIS_ALIGNS: readonly PrimaryAxisAlign[] = ['MIN', 'CENTER', 'MAX', 'SPACE_BETWEEN'];
 
-/** Where children sit across the direction of the layout. */
-export type CounterAxisAlign = 'MIN' | 'CENTER' | 'MAX';
-export const COUNTER_AXIS_ALIGNS: readonly CounterAxisAlign[] = ['MIN', 'CENTER', 'MAX'];
+/**
+ * Where children sit across the direction of the layout: at its start, middle
+ * or end, or (STRETCH, from version 16) made as big across it as the frame
+ * has room, whatever their own sizing across says.
+ */
+export type CounterAxisAlign = 'MIN' | 'CENTER' | 'MAX' | 'STRETCH';
+export const COUNTER_AXIS_ALIGNS: readonly CounterAxisAlign[] = ['MIN', 'CENTER', 'MAX', 'STRETCH'];
 
 /** How the lines of a wrapping row are spaced: by the frame's line spacing, or spread out from top to bottom. */
 export type CounterAxisAlignContent = 'AUTO' | 'SPACE_BETWEEN';

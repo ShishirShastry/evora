@@ -59,14 +59,16 @@ interface SelectFieldProps<T extends string> {
   options: readonly (readonly [T, string])[];
   onChange: (value: T) => void;
   className?: string;
+  disabled?: boolean;
 }
 
 /** A dropdown for an enumerated property, showing "Mixed" when the selected layers differ. */
-export function SelectField<T extends string>({ label, value, options, onChange, className }: SelectFieldProps<T>) {
+export function SelectField<T extends string>({ label, value, options, onChange, className, disabled }: SelectFieldProps<T>) {
   return (
     <select
       aria-label={label}
       className={`od-field ${className ?? 'flex-1'}`}
+      disabled={disabled}
       value={value}
       onChange={(event) => onChange(event.currentTarget.value as T)}
     >
