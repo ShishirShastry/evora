@@ -10,6 +10,9 @@ import type {
   LayoutGridPattern,
   LayerPatch,
   LayerType,
+  LayoutSizing,
+  FrameNode,
+  TextNode,
   NodeId,
   PageNode,
   Paint,
@@ -35,6 +38,22 @@ export const TYPE_LABELS: Record<LayerType, string> = {
   VECTOR: 'Vector',
   BOOLEAN_OPERATION: 'Boolean',
 };
+
+/** What a frame has for Auto Layout while it has none: the settings one starts from when it is switched on. */
+export const NO_AUTO_LAYOUT = {
+  layoutMode: 'NONE',
+  layoutWrap: 'NO_WRAP',
+  primaryAxisAlignItems: 'MIN',
+  counterAxisAlignItems: 'MIN',
+  counterAxisAlignContent: 'AUTO',
+  itemSpacing: 0,
+  counterAxisSpacing: 0,
+  paddingLeft: 0,
+  paddingRight: 0,
+  paddingTop: 0,
+  paddingBottom: 0,
+  itemsReversed: false,
+} as const satisfies Partial<FrameNode>;
 
 /** The family new text is set in: the font that ships with the application, so that it looks the same on every machine. */
 export const DEFAULT_FONT_FAMILY = 'Inter';
@@ -174,11 +193,18 @@ export function createLayer(
     blendMode: 'NORMAL' as const,
     constraints: { horizontal: 'MIN' as const, vertical: 'MIN' as const },
     isMask: false,
+    layoutSizingHorizontal: 'FIXED' as LayoutSizing,
+    layoutSizingVertical: 'FIXED' as LayoutSizing,
+    layoutPositioning: 'AUTO' as const,
+    minWidth: null,
+    maxWidth: null,
+    minHeight: null,
+    maxHeight: null,
   };
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [] };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], ...NO_AUTO_LAYOUT };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };
@@ -252,7 +278,24 @@ export function createLayer(
       node = { ...base, type, operation: 'UNION', network: { vertices: [], segments: [] } };
       break;
   }
-  return { ...node, ...props } as LayerNode;
+  const made = { ...node, ...props } as LayerNode;
+  // Text says how it is sized in its own setting; its layout sizing follows that.
+  return made.type === 'TEXT' ? { ...made, ...textLayoutSizing(made) } : made;
+}
+
+/**
+ * The layout sizing a text layer has: it hugs in the directions its own
+ * sizing mode fits to the text, and in the others keeps what it was given
+ * (fixed, or filling the Auto Layout frame it is in).
+ */
+export function textLayoutSizing(
+  node: Pick<TextNode, 'textAutoResize' | 'layoutSizingHorizontal' | 'layoutSizingVertical'>,
+): { layoutSizingHorizontal: LayoutSizing; layoutSizingVertical: LayoutSizing } {
+  const given = (sizing: LayoutSizing): LayoutSizing => (sizing === 'FILL' ? 'FILL' : 'FIXED');
+  return {
+    layoutSizingHorizontal: node.textAutoResize === 'WIDTH_AND_HEIGHT' ? 'HUG' : given(node.layoutSizingHorizontal),
+    layoutSizingVertical: node.textAutoResize === 'NONE' ? given(node.layoutSizingVertical) : 'HUG',
+  };
 }
 
 /** "Rectangle 3": the type label followed by the next unused number in the document. */

@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **14**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **15**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -157,6 +157,15 @@ interface LayerBase extends NodeBase {
 
   // Version 10
   isMask: boolean;           // the layer masks the layers above it in its parent instead of being painted
+
+  // Version 15: Auto Layout (see §5.7)
+  layoutSizingHorizontal: 'FIXED' | 'HUG' | 'FILL';   // what decides the width
+  layoutSizingVertical: 'FIXED' | 'HUG' | 'FILL';     // what decides the height
+  layoutPositioning: 'AUTO' | 'ABSOLUTE';             // ABSOLUTE: not placed by the Auto Layout frame it is in
+  minWidth: number | null;   // limits on the size Auto Layout gives the layer; null = none
+  maxWidth: number | null;
+  minHeight: number | null;
+  maxHeight: number | null;
 }
 ```
 
@@ -172,6 +181,20 @@ interface FrameNode extends LayerBase {
   cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
   layoutGrids: LayoutGrid[]; // version 6
   guides: Guide[];           // version 14: guides of this frame, in its own space
+
+  // Version 15: Auto Layout (see §5.7)
+  layoutMode: 'NONE' | 'HORIZONTAL' | 'VERTICAL';     // NONE: children stay where they are put
+  layoutWrap: 'NO_WRAP' | 'WRAP';                      // a row carries on in new lines; columns do not wrap
+  primaryAxisAlignItems: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';   // along the direction
+  counterAxisAlignItems: 'MIN' | 'CENTER' | 'MAX';                     // across it
+  counterAxisAlignContent: 'AUTO' | 'SPACE_BETWEEN';   // the lines of a wrapping row
+  itemSpacing: number;       // between neighbouring children; may be negative
+  counterAxisSpacing: number;// between the lines of a wrapping row
+  paddingLeft: number;       // ≥ 0, like the other three
+  paddingRight: number;
+  paddingTop: number;
+  paddingBottom: number;
+  itemsReversed: boolean;    // lay out from the top of the stack down instead of from the bottom up
 }
 
 interface GroupNode extends LayerBase {
@@ -404,6 +427,28 @@ interface LayoutGrid {
 
 Opacity, blend mode, layer blur and drop shadows apply to a layer as a whole, children included. Spread is honoured on rectangles, ellipses and frames; other shapes cast a shadow of their exact outline. Inner shadows apply to shapes and frames, not to text or groups.
 
+### 5.7 Auto Layout (version 15)
+
+A frame whose `layoutMode` is `HORIZONTAL` or `VERTICAL` places its children itself, in a row or in a column. Like constraints and group boxes, the result is **stored**: the `x`, `y`, `width` and `height` of the layers are what the layout gave them, so a file can be drawn, hit-tested and exported without doing any layout. The editor works the layout out again after every change (`applyAutoLayout`, run by `restoreLayout` together with the fitting of text, vectors and groups, repeated until nothing changes), in the same undo step as the change.
+
+**The flow.** The children a frame places are those that are visible and have `layoutPositioning: 'AUTO'`, taken in stack order from the bottom up (from the top down when `itemsReversed`). The place of a layer in the layout is therefore its place in the stack; there is no separate order. A hidden child, and one with `ABSOLUTE`, is left where it is and takes up no room; an `ABSOLUTE` child follows its constraints (§5.6) when the frame changes size, and the children in the flow never do.
+
+**Placing.** Inside the padding, the children follow one another along the direction with `itemSpacing` between them. `primaryAxisAlignItems` packs them at the start, in the middle or at the end, or with `SPACE_BETWEEN` puts the first at the start and the last at the end with equal gaps between (this is "automatic" spacing; it needs two children and room to spare, and otherwise they follow one another from the start). Across the direction each child sits at the start, middle or end of the room, by `counterAxisAlignItems`. A rotated child takes the room of the box round it and turns about the middle of that room.
+
+**Sizing.** Each layer has a sizing for each axis:
+
+- `FIXED`: the size it was given.
+- `HUG`: as big as what is in it. For a frame with a layout that is its flow, the spacing and its padding (a frame with nothing in its flow keeps the size it has). For text it says the same as `textAutoResize`, which decides: `WIDTH_AND_HEIGHT` hugs both ways, `HEIGHT` hugs the height, `NONE` neither.
+- `FILL`: the room the frame it is in has left. Along the direction, what remains after the other children, the spacing and the padding is shared equally between the children that fill, and one that fills is never less than a pixel. Across the direction a child that fills takes the whole room between the padding (in a wrapping row, the height of its line).
+
+A sizing that cannot apply where a layer is, is stored as `FIXED`, which is how the layer then behaves (`settleSizing`, part of the layout pass): `HUG` on anything but a frame with a layout or a text; `FILL` on a layer that no layout places, that is rotated, that has nothing to stretch along that axis (a line's height), or whose frame hugs that axis (a frame cannot be as big as its children and be filled by them); and `ABSOLUTE` outside a frame with a layout becomes `AUTO`. The operation that sets a sizing does what goes with it: it sets a text's `textAutoResize`, and makes a frame that hugged keep its size when a child is told to fill it.
+
+**Limits.** `minWidth`, `maxWidth`, `minHeight` and `maxHeight` bound the size the layout gives a frame with a layout and the layers in a flow, whatever their sizing; where a minimum and a maximum disagree the minimum wins. When a child that fills reaches a limit, the others that fill share the difference. They are not applied to rotated layers, nor anywhere outside a layout.
+
+**Wrapping.** Only a row wraps. Its children are taken in order and a child starts a new line when it no longer fits between the padding (a child that fills counts for its minimum, then takes what is left of its own line). Each line is as tall as its tallest child, with `counterAxisSpacing` between lines. The lines are packed where `counterAxisAlignItems` puts a single row, or with `counterAxisAlignContent: 'SPACE_BETWEEN'` spread from top to bottom; if the frame has height to spare and a child fills its line's height, the spare height is shared equally between the lines.
+
+**Nesting.** A frame with a layout that is in the flow of another is laid out with it: the outer frame gives it its size where it fills, and takes its size where it hugs or is fixed. Widths are settled first, from the outside in, and heights after, because how tall a wrapped text or a wrapping row is depends on its width. A frame with a layout that is not in a flow (on a page, in an ordinary frame or a group, rotated, hidden or `ABSOLUTE`) is laid out on its own, innermost first, and whatever contains it then sees it at its new size.
+
 ---
 
 ## 6. Coordinate system and transforms
@@ -441,6 +486,9 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 10 | A vector layer's box is the bounding box of its curves. | Refit the box, without moving the curves on the page. |
 | 11 | A text layer's `styleRanges` are in order, do not overlap, are not empty, lie inside `characters`, each change something, and no two neighbours are alike; their values are within the limits of the layer's own font properties. | Drop bad values (that part of the text falls back to the layer's style), then cut, clamp, order and join the ranges. |
 
+| 12 | A text layer's layout sizing is `HUG` exactly where its `textAutoResize` fits it to its content. Only a row wraps: a frame with `layoutMode: 'VERTICAL'` has `layoutWrap: 'NO_WRAP'`. Padding is ≥ 0; a size limit is ≥ 0 or null. | Set the sizing from `textAutoResize`; set `NO_WRAP`; clamp. |
+| 13 | Layout sizing and positioning are ones that can apply where the layer is (§5.7), and every frame with a layout is laid out: the boxes of the layers in its flow, and its own where it hugs, are what the layout gives. | Not by `repairDocument`, which cannot measure text: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
+
 Repair never silently discards user content except under rule 7, and every repair is surfaced to the user when a file is opened.
 
 ---
@@ -448,7 +496,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 15;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -480,6 +528,11 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // 13 -> 14: every text layer and every image paint gets flipX false and flipY false
   // (in a paint, after saturation); every frame gets guides [].
   13: addFlipsAndFrameGuides,
+  // 14 -> 15: every layer gets layoutSizingHorizontal and layoutSizingVertical 'FIXED' (text: 'HUG' where its
+  // textAutoResize fits it to its content), layoutPositioning 'AUTO' and the four size limits null; every frame
+  // gets layoutMode 'NONE', layoutWrap 'NO_WRAP', alignments 'MIN' / 'MIN' / 'AUTO', spacings and padding 0
+  // and itemsReversed false.
+  14: addAutoLayout,
 };
 ```
 
@@ -498,6 +551,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 11 | 12 | Image adjustments (`exposure`, `contrast`, `saturation` on image paints) | `src/imageedit.test.ts` ("are kept in range in a file, and are zero in a file from before they existed") |
 | 12 | 13 | Text: `JUSTIFIED` alignment, `listType`, `styleRanges` | `src/richtext.test.ts` ("opens a version 12 file") |
 | 13 | 14 | `flipX` / `flipY` on text layers and image paints; `guides` on frames | `src/mirror.test.ts` ("opens a version 13 file") |
+| 14 | 15 | Auto Layout: layout sizing, positioning and size limits on every layer; direction, wrap, alignment, spacing, padding and order on frames | `src/autolayout.test.ts` ("opens a version 14 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -528,7 +582,7 @@ These are reserved so that later versions extend the schema without restructurin
 |---|---|
 | 2 | (Done: mirrored text and image fills and guides on frames in version 14; per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
-| 4 | Auto Layout properties on frames (`layoutMode`, padding, `itemSpacing`, alignment, wrap) and on children (`layoutSizingHorizontal/Vertical`, `layoutPositioning`, min/max sizes). |
+| 4 | (Done in version 15: Auto Layout properties on frames and on every layer, §5.7.) |
 | 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |
 | 7 | `exportSettings[]`, annotations, development status. |

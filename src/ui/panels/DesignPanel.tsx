@@ -6,12 +6,14 @@ import {
   clean,
   DEFAULT_SHAPE_FILL,
   hasCornerRadius,
+  isInFlow,
   isLayer,
   isPage,
   lineBox,
   lineEndpoints,
   paintColor,
   patchNodes,
+  releaseSizing,
   resizeFromTopLeft,
   setLayerBox,
   stylesBetween,
@@ -47,6 +49,7 @@ import { ColorField } from '../components/ColorField';
 import { MIXED, NumberField, type Mixed } from '../components/Fields';
 import { Icon, type IconName } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
+import { AutoLayoutSection, ResizingSection } from './AutoLayoutSection';
 import { EffectsSection } from './EffectsSection';
 import { ConstraintsSection, LayoutGridSection } from './LayoutSections';
 import { PaintList } from './PaintList';
@@ -474,6 +477,8 @@ export function DesignPanel() {
   const frames = layers.filter((layer): layer is FrameNode => layer.type === 'FRAME');
   // Constraints only do something for a layer that sits directly inside a frame.
   const insideFrames = layers.every((layer) => doc.nodes[layer.parentId]?.type === 'FRAME');
+  // A layer that an Auto Layout frame places has no position of its own to type in, and no use for constraints.
+  const placed = layers.some((layer) => isInFlow(doc, layer));
   const pointLayers = layers.filter((layer) => layer.type === 'POLYGON' || layer.type === 'STAR');
   // Groups have no appearance of their own, so they are left out of fills and strokes.
   const paintable = layers.filter((layer) => layer.type !== 'GROUP');
@@ -521,7 +526,8 @@ export function DesignPanel() {
     store.getState().apply(label, (d) => {
       let next = d;
       for (const id in patches) next = setLayerBox(next, id, patches[id] as LayerPatch);
-      return next;
+      // A size typed in stands: the layers no longer hug or fill in that direction.
+      return releaseSizing(next, Object.keys(patches), { horizontal: size.width !== undefined, vertical: size.height !== undefined });
     });
   };
 
@@ -535,8 +541,8 @@ export function DesignPanel() {
 
       <Section title="Position and size">
         <Row>
-          <NumberField label="X position" prefix="X" value={shared(layers, (l) => l.x)} onCommit={(x) => set('Move', { x })} />
-          <NumberField label="Y position" prefix="Y" value={shared(layers, (l) => l.y)} onCommit={(y) => set('Move', { y })} />
+          <NumberField label="X position" prefix="X" disabled={placed} value={shared(layers, (l) => l.x)} onCommit={(x) => set('Move', { x })} />
+          <NumberField label="Y position" prefix="Y" disabled={placed} value={shared(layers, (l) => l.y)} onCommit={(y) => set('Move', { y })} />
         </Row>
         <Row>
           <NumberField
@@ -704,7 +710,11 @@ export function DesignPanel() {
         )}
       </Section>
 
-      {insideFrames && <ConstraintsSection layers={layers} />}
+      <ResizingSection layers={layers} />
+
+      {frames.length === layers.length && <AutoLayoutSection frames={frames} />}
+
+      {insideFrames && !placed && <ConstraintsSection layers={layers} />}
 
       {frames.length === layers.length && <LayoutGridSection frames={frames} />}
 

@@ -1,5 +1,6 @@
 /**
- * OPEN DESIGN document schema, version 14 (adds mirrored text and image fills, and guides on frames;
+ * OPEN DESIGN document schema, version 15 (adds Auto Layout: frames that lay out their children, and how each
+ * layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
  * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
  * version 8 added the VECTOR layer type, version 7 ruler guides on pages).
@@ -9,7 +10,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -227,6 +228,38 @@ export interface LayoutGrid {
   visible: boolean;
 }
 
+/** Whether a frame places its children itself (Auto Layout), and if so in a row or in a column. */
+export type LayoutMode = 'NONE' | 'HORIZONTAL' | 'VERTICAL';
+export const LAYOUT_MODES: readonly LayoutMode[] = ['NONE', 'HORIZONTAL', 'VERTICAL'];
+
+/** Whether the children of a row carry on in a new line when they no longer fit. */
+export type LayoutWrap = 'NO_WRAP' | 'WRAP';
+export const LAYOUT_WRAPS: readonly LayoutWrap[] = ['NO_WRAP', 'WRAP'];
+
+/** Where children sit along the direction of the layout: at its start, middle or end, or spread out from end to end. */
+export type PrimaryAxisAlign = 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
+export const PRIMARY_AXIS_ALIGNS: readonly PrimaryAxisAlign[] = ['MIN', 'CENTER', 'MAX', 'SPACE_BETWEEN'];
+
+/** Where children sit across the direction of the layout. */
+export type CounterAxisAlign = 'MIN' | 'CENTER' | 'MAX';
+export const COUNTER_AXIS_ALIGNS: readonly CounterAxisAlign[] = ['MIN', 'CENTER', 'MAX'];
+
+/** How the lines of a wrapping row are spaced: by the frame's line spacing, or spread out from top to bottom. */
+export type CounterAxisAlignContent = 'AUTO' | 'SPACE_BETWEEN';
+export const COUNTER_AXIS_ALIGN_CONTENTS: readonly CounterAxisAlignContent[] = ['AUTO', 'SPACE_BETWEEN'];
+
+/**
+ * What decides a layer's size along one axis: the size it was given, what is
+ * in it ("hug": frames that lay out their children, and text), or the room
+ * left in the Auto Layout frame it is in ("fill").
+ */
+export type LayoutSizing = 'FIXED' | 'HUG' | 'FILL';
+export const LAYOUT_SIZINGS: readonly LayoutSizing[] = ['FIXED', 'HUG', 'FILL'];
+
+/** Whether an Auto Layout frame places a child (AUTO), or leaves it where it was put (ABSOLUTE). */
+export type LayoutPositioning = 'AUTO' | 'ABSOLUTE';
+export const LAYOUT_POSITIONINGS: readonly LayoutPositioning[] = ['AUTO', 'ABSOLUTE'];
+
 /** Corner radii in the order top-left, top-right, bottom-right, bottom-left. */
 export type CornerRadii = [number, number, number, number];
 
@@ -291,6 +324,25 @@ interface LayerBase extends NodeBase {
    * strongly as it would have painted there.
    */
   isMask: boolean;
+  /**
+   * What decides the layer's width and height. HUG applies to frames that lay
+   * out their children and to text; FILL to a layer placed by an Auto Layout
+   * frame. A setting that cannot apply where the layer is, is turned into
+   * FIXED by the editor (see `settleSizing`).
+   */
+  layoutSizingHorizontal: LayoutSizing;
+  layoutSizingVertical: LayoutSizing;
+  /** ABSOLUTE takes the layer out of the flow of the Auto Layout frame it is in: it stays where it is put. */
+  layoutPositioning: LayoutPositioning;
+  /**
+   * Limits on the size Auto Layout gives the layer, or null for none. They
+   * apply to frames that lay out their children and to the layers such a
+   * frame places.
+   */
+  minWidth: number | null;
+  maxWidth: number | null;
+  minHeight: number | null;
+  maxHeight: number | null;
 }
 
 export interface FrameNode extends LayerBase {
@@ -302,6 +354,24 @@ export interface FrameNode extends LayerBase {
   layoutGrids: LayoutGrid[];
   /** Ruler guides of this frame, at positions in its own space. They move with it and are never exported. */
   guides: Guide[];
+  /** Auto Layout: NONE leaves the children where they are; otherwise the frame places them in a row or a column. */
+  layoutMode: LayoutMode;
+  /** Whether a row carries on in new lines. Columns do not wrap. */
+  layoutWrap: LayoutWrap;
+  primaryAxisAlignItems: PrimaryAxisAlign;
+  counterAxisAlignItems: CounterAxisAlign;
+  counterAxisAlignContent: CounterAxisAlignContent;
+  /** The space between neighbouring children along the direction of the layout. May be negative, which overlaps them. */
+  itemSpacing: number;
+  /** The space between the lines of a wrapping row. */
+  counterAxisSpacing: number;
+  /** The space kept free between each edge of the frame and its children. */
+  paddingLeft: number;
+  paddingRight: number;
+  paddingTop: number;
+  paddingBottom: number;
+  /** Lays the children out from the top of the stack to the bottom, instead of from the bottom to the top. */
+  itemsReversed: boolean;
 }
 
 /**
@@ -588,6 +658,18 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   cornerRadii?: CornerRadii | null;
   layoutGrids?: LayoutGrid[];
   guides?: Guide[];
+  layoutMode?: LayoutMode;
+  layoutWrap?: LayoutWrap;
+  primaryAxisAlignItems?: PrimaryAxisAlign;
+  counterAxisAlignItems?: CounterAxisAlign;
+  counterAxisAlignContent?: CounterAxisAlignContent;
+  itemSpacing?: number;
+  counterAxisSpacing?: number;
+  paddingLeft?: number;
+  paddingRight?: number;
+  paddingTop?: number;
+  paddingBottom?: number;
+  itemsReversed?: boolean;
   pointCount?: number;
   innerRadius?: number;
   network?: VectorNetwork;

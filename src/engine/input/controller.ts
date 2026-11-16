@@ -19,13 +19,17 @@ import {
   hitGuide,
   mirrorInPlace,
   isFrame,
+  isInFlow,
   isPage,
   measureDistances,
+  placeInFlow,
+  releaseSizing,
   setGuide,
   getWorldBounds,
   getWorldMatrix,
   getWorldRotation,
   invert,
+  isAncestor,
   isLayer,
   isGroupLike,
   isText,
@@ -881,14 +885,25 @@ export class InteractionController {
       let doc = moveNodesBy(mode.base, mode.ids, dx, dy, this.state.pixelSnap);
       // Dropping onto a frame puts the layers inside it; dragging out takes them out.
       // A layer inside a group stays in its group while it remains over the same frame.
-      const container = containerAt(doc, pageId, world, new Set(mode.ids));
+      let container = containerAt(doc, pageId, world, new Set(mode.ids));
+      // A layer that a frame lays out stays in that frame while the pointer is over it, also where it passes
+      // over a neighbour that is a frame itself: there the drag changes its place, it does not put it inside.
+      const first = getLayer(mode.base, mode.ids[0] as NodeId);
+      if (first && isInFlow(mode.base, first) && isAncestor(doc, first.parentId, container)) container = first.parentId;
       const outside = mode.ids.filter((id) => {
         const parentId = doc.nodes[id]?.parentId;
         return parentId != null && enclosingFrameOrPage(doc, parentId) !== container;
       });
       if (outside.length > 0) doc = reparentNodes(doc, outside, container);
-      return doc;
+      // In a frame that lays out its children a layer cannot be put anywhere: the drag gives it a place among them.
+      return placeInFlow(doc, mode.ids, world);
     }, mode.ids);
+
+    // A layer that a frame places is not snapped to anything: where it goes is the layout's business.
+    if (mode.ids.some((id) => isInFlow(this.state.doc, getLayer(this.state.doc, id)))) {
+      this.guides = [];
+      return;
+    }
 
     // The equal gaps the layers have come to rest in are shown with their sizes, however they got there.
     if (bounds) {
@@ -926,6 +941,8 @@ export class InteractionController {
         let resized = setLayerBox(base, single.id, box);
         if (crossed.x) resized = mirrorInPlace(resized, [single.id], 'horizontal');
         if (crossed.y) resized = mirrorInPlace(resized, [single.id], 'vertical');
+        // A size dragged out by hand stands: the layer no longer hugs or fills in the directions that were dragged.
+        resized = releaseSizing(resized, [single.id], { horizontal: box.width !== single.width, vertical: box.height !== single.height });
         return textMode ? patchNode(resized, single.id, textMode) : resized;
       });
       return;
@@ -940,7 +957,7 @@ export class InteractionController {
       let resized = resizeNodesInBounds(base, mode.ids, from, to, pixelSnap);
       if (crossed.x) resized = flipNodes(resized, mode.ids, 'horizontal');
       if (crossed.y) resized = flipNodes(resized, mode.ids, 'vertical');
-      return resized;
+      return releaseSizing(resized, mode.ids, { horizontal: to.width !== from.width, vertical: to.height !== from.height });
     });
   }
 
@@ -977,7 +994,9 @@ export class InteractionController {
     const origin = this.toParent(state.doc, parentId, startWorld);
     state.beginGesture();
     state.setHovered(null);
-    const created = addLayer(state.doc, type, parentId, { x: origin.x, y: origin.y, width: 0, height: 0 });
+    const added = addLayer(state.doc, type, parentId, { x: origin.x, y: origin.y, width: 0, height: 0 });
+    // Drawn into a frame that lays out its children, the shape takes the place in the row or column it is drawn over.
+    const created = { id: added.id, doc: placeInFlow(added.doc, [added.id], startWorld) };
     this.mode = {
       kind: 'draw',
       type,
@@ -1012,7 +1031,8 @@ export class InteractionController {
       const lineHeight = resolveLineHeight({ lineHeight: null, fontSize: 16 });
       props = { x: a.x, y: state.pixelSnap ? Math.round(a.y - lineHeight / 2) : clean(a.y - lineHeight / 2) };
     }
-    const created = addLayer(state.doc, 'TEXT', parentId, props);
+    const added = addLayer(state.doc, 'TEXT', parentId, props);
+    const created = { id: added.id, doc: placeInFlow(added.doc, [added.id], mode.startWorld) };
     state.updateGesture(() => created.doc, [created.id]);
     state.setTool('move');
     this.store.getState().setEditingText(created.id);

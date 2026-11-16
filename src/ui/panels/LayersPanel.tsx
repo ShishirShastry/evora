@@ -280,7 +280,21 @@ export function LayersPanel() {
                 <Icon name={row.expanded ? 'chevronDown' : 'chevronRight'} size={10} />
               </button>
               <span className={`mr-1.5 flex-none ${isSelected ? 'text-accent' : 'text-dim'}`}>
-                <Icon name={node.isMask ? 'mask' : node.type === 'BOOLEAN_OPERATION' ? OPERATION_ICONS[node.operation] : TYPE_ICONS[node.type]} size={13} />
+                <Icon
+                  name={
+                    node.isMask
+                      ? 'mask'
+                      : node.type === 'BOOLEAN_OPERATION'
+                        ? OPERATION_ICONS[node.operation]
+                        : // A frame that lays out its children shows which way.
+                          node.type === 'FRAME' && node.layoutMode !== 'NONE'
+                          ? node.layoutMode === 'VERTICAL'
+                            ? 'layoutColumn'
+                            : 'layoutRow'
+                          : TYPE_ICONS[node.type]
+                  }
+                  size={13}
+                />
               </span>
               {renamingId === node.id ? (
                 <TextEdit

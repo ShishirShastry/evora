@@ -1,7 +1,7 @@
 import { createId } from '../ids';
 import { fitVectorNode } from '../vector/fit';
 import { freshKeys } from '../order';
-import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND } from './factory';
+import { createLayer, createPage, DEFAULT_PAGE_BACKGROUND, textLayoutSizing } from './factory';
 import {
   ARROW_TYPES,
   BLEND_MODES,
@@ -10,6 +10,13 @@ import {
   CONTAINER_TYPES,
   LAYOUT_GRID_ALIGNMENTS,
   LAYOUT_GRID_PATTERNS,
+  LAYOUT_MODES,
+  LAYOUT_POSITIONINGS,
+  LAYOUT_SIZINGS,
+  LAYOUT_WRAPS,
+  PRIMARY_AXIS_ALIGNS,
+  COUNTER_AXIS_ALIGNS,
+  COUNTER_AXIS_ALIGN_CONTENTS,
   GRADIENT_TYPES,
   IMAGE_SCALE_MODES,
   LAYER_TYPES,
@@ -272,6 +279,11 @@ function vectorNetwork(value: unknown): VectorNetwork {
   return { vertices, segments };
 }
 
+/** A minimum or maximum size: a number that is not negative, or null for no limit. */
+function sizeLimit(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(1e6, Math.max(0, value)) : null;
+}
+
 function cornerRadii(value: unknown): CornerRadii | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   return value.map((item) => finite(item, 0, 0)) as CornerRadii;
@@ -328,6 +340,13 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
       vertical: oneOf(isObject(raw.constraints) ? raw.constraints.vertical : undefined, CONSTRAINT_TYPES, 'MIN'),
     },
     isMask: raw.isMask === true,
+    layoutSizingHorizontal: oneOf(raw.layoutSizingHorizontal, LAYOUT_SIZINGS, 'FIXED'),
+    layoutSizingVertical: oneOf(raw.layoutSizingVertical, LAYOUT_SIZINGS, 'FIXED'),
+    layoutPositioning: oneOf(raw.layoutPositioning, LAYOUT_POSITIONINGS, 'AUTO'),
+    minWidth: sizeLimit(raw.minWidth),
+    maxWidth: sizeLimit(raw.maxWidth),
+    minHeight: sizeLimit(raw.minHeight),
+    maxHeight: sizeLimit(raw.maxHeight),
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
@@ -336,6 +355,19 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
     layer.layoutGrids = layoutGrids(raw.layoutGrids);
     layer.guides = guides(raw.guides);
+    layer.layoutMode = oneOf(raw.layoutMode, LAYOUT_MODES, 'NONE');
+    // Only rows wrap.
+    layer.layoutWrap = layer.layoutMode === 'VERTICAL' ? 'NO_WRAP' : oneOf(raw.layoutWrap, LAYOUT_WRAPS, 'NO_WRAP');
+    layer.primaryAxisAlignItems = oneOf(raw.primaryAxisAlignItems, PRIMARY_AXIS_ALIGNS, 'MIN');
+    layer.counterAxisAlignItems = oneOf(raw.counterAxisAlignItems, COUNTER_AXIS_ALIGNS, 'MIN');
+    layer.counterAxisAlignContent = oneOf(raw.counterAxisAlignContent, COUNTER_AXIS_ALIGN_CONTENTS, 'AUTO');
+    layer.itemSpacing = finite(raw.itemSpacing, 0, -10000, 10000);
+    layer.counterAxisSpacing = finite(raw.counterAxisSpacing, 0, -10000, 10000);
+    layer.paddingLeft = finite(raw.paddingLeft, 0, 0, 100000);
+    layer.paddingRight = finite(raw.paddingRight, 0, 0, 100000);
+    layer.paddingTop = finite(raw.paddingTop, 0, 0, 100000);
+    layer.paddingBottom = finite(raw.paddingBottom, 0, 0, 100000);
+    layer.itemsReversed = raw.itemsReversed === true;
   } else if (layer.type === 'RECTANGLE') {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
@@ -368,6 +400,8 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.flipY = raw.flipY === true;
     layer.listType = oneOf(raw.listType, TEXT_LIST_TYPES, 'NONE');
     layer.styleRanges = styleRanges(raw.styleRanges, layer.characters.length);
+    // A text hugs exactly where its own sizing mode fits it to its content.
+    Object.assign(layer, textLayoutSizing(layer));
   } else if (layer.type === 'VECTOR') {
     layer.network = vectorNetwork(raw.network);
     layer.windingRule = oneOf(raw.windingRule, WINDING_RULES, 'NONZERO');

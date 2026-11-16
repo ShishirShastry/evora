@@ -314,9 +314,13 @@ export function applyConstraints(
 ): Document {
   if (beforeWidth === afterWidth && beforeHeight === afterHeight) return doc;
   let next = doc;
+  const frame = doc.nodes[frameId];
+  // An Auto Layout frame places the children in its flow itself; only what it holds outside the flow follows constraints.
+  const flows = frame?.type === 'FRAME' && frame.layoutMode !== 'NONE';
   for (const childId of getChildIds(doc, frameId)) {
     const child = doc.nodes[childId];
     if (!isLayer(child)) continue;
+    if (flows && child.visible && child.layoutPositioning === 'AUTO') continue;
     const h = constrainAxis(child.constraints.horizontal, child.x, child.width, beforeWidth, afterWidth);
     const v = constrainAxis(child.constraints.vertical, child.y, child.height, beforeHeight, afterHeight);
     const box: Partial<Box> = {};

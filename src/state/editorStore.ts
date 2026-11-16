@@ -3,14 +3,11 @@ import {
   applyPatch,
   approximateMeasurer,
   diffDocuments,
-  fitTextLayers,
-  fitTextRanges,
-  fitVectors,
   getPageIdOf,
   getPages,
   isGradient,
   isLayer,
-  normalizeGroups,
+  restoreLayout,
   type AssetInfo,
   type Document,
   type DocumentPatch,
@@ -243,9 +240,8 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
   const initialPage = resolvePage(doc, session?.pageId);
   const viewports = { ...(session?.viewports ?? {}) };
   const measurer = options.measurer ?? approximateMeasurer;
-  /** Restores the invariants that depend on content: text sizes and vector boxes, then group bounds. */
-  const normalize = (previous: Document, next: Document): Document =>
-    normalizeGroups(fitVectors(previous, fitTextLayers(previous, fitTextRanges(previous, next), measurer)));
+  /** Restores what follows from content: text sizes, vector boxes, group bounds and every Auto Layout frame. */
+  const normalize = (previous: Document, next: Document): Document => restoreLayout(previous, next, measurer);
 
   return createStore<EditorState & EditorActions>()((set, get) => {
     /** Switches page (if needed) and selection after a history step or page change. */

@@ -1,4 +1,5 @@
 import {
+  addAutoLayout,
   addPage,
   addSegment,
   alignNodes,
@@ -29,10 +30,12 @@ import {
   duplicatePage,
   flattenNodes,
   flipNodes,
+  flowDirection,
   getChildIds,
   getPages,
   getWorldBounds,
   groupNodes,
+  isAutoLayout,
   isContainer,
   isFrame,
   isLayer,
@@ -43,7 +46,9 @@ import {
   styleTextRange,
   rectCenter,
   rectsIntersect,
+  removeAutoLayout,
   reorderNodes,
+  shiftInFlow,
   ungroupNodes,
   unionRects,
   type AlignMode,
@@ -317,6 +322,15 @@ export function nudgeSelection(store: EditorStore, dx: number, dy: number): void
     return;
   }
   if (selection.length === 0) return;
+  // Layers that a frame lays out cannot be moved a pixel; the arrow keys along its direction change their place in it.
+  const { doc } = store.getState();
+  const direction = flowDirection(doc, selection[0] as NodeId);
+  if (direction) {
+    const step = direction === 'HORIZONTAL' ? dx : dy;
+    if (step === 0) return;
+    apply('Reorder', (d) => shiftInFlow(d, selection, step > 0 ? 1 : -1) ?? moveNodesBy(d, selection, dx, dy));
+    return;
+  }
   apply('Move', (doc) => moveNodesBy(doc, selection, dx, dy));
 }
 
@@ -399,6 +413,35 @@ export function groupSelection(store: EditorStore): void {
     return out.doc;
   });
   if (created) store.getState().setSelection([created]);
+}
+
+/**
+ * "Add Auto Layout". A selected frame starts laying out its children; any
+ * other selection is put into a new frame that lays it out. Either way the
+ * frame ends up selected.
+ */
+export function addAutoLayoutSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  if (selection.length === 0) return;
+  let frame: NodeId | null = null;
+  apply('Add Auto Layout', (doc) => {
+    const out = addAutoLayout(doc, selection);
+    if (!out) return doc;
+    frame = out.id;
+    return out.doc;
+  });
+  if (frame) store.getState().setSelection([frame]);
+}
+
+/** Switches Auto Layout off for the selected frames; their children stay where they are. */
+export function removeAutoLayoutSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  apply('Remove Auto Layout', (doc) => removeAutoLayout(doc, selection));
+}
+
+/** Whether the selection is a single frame that lays out its children (a second "Add" would wrap it in another). */
+export function hasAutoLayout(state: EditorState): boolean {
+  return state.selection.some((id) => isAutoLayout(state.doc.nodes[id]));
 }
 
 /**
@@ -966,6 +1009,24 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyG', ctrl: true, shift: true }],
     enabled: canUngroup,
     run: ({ store }) => ungroupSelection(store),
+  },
+  {
+    id: 'object.autoLayout',
+    label: 'Add Auto Layout',
+    group: 'Object',
+    shortcut: 'Shift+A',
+    keys: [{ code: 'KeyA', shift: true }],
+    enabled: hasSelection,
+    run: ({ store }) => addAutoLayoutSelection(store),
+  },
+  {
+    id: 'object.removeAutoLayout',
+    label: 'Remove Auto Layout',
+    group: 'Object',
+    shortcut: 'Alt+Shift+A',
+    keys: [{ code: 'KeyA', shift: true, alt: true }],
+    enabled: hasAutoLayout,
+    run: ({ store }) => removeAutoLayoutSelection(store),
   },
   {
     id: 'object.flatten',

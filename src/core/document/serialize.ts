@@ -189,6 +189,51 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 14, document: { ...body, nodes: upgraded } };
   },
+  // Version 15 adds Auto Layout. No older frame lays out its children, and every older layer is the
+  // size it was given, except text, which hugs in the directions its own sizing mode fits to its content.
+  14: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node) || node.type === 'PAGE') {
+        upgraded[id] = node;
+        continue;
+      }
+      const hugsWidth = node.type === 'TEXT' && (node.textAutoResize === undefined || node.textAutoResize === 'WIDTH_AND_HEIGHT');
+      const hugsHeight = node.type === 'TEXT' && node.textAutoResize !== 'NONE';
+      const next: Raw = {
+        layoutSizingHorizontal: hugsWidth ? 'HUG' : 'FIXED',
+        layoutSizingVertical: hugsHeight ? 'HUG' : 'FIXED',
+        layoutPositioning: 'AUTO',
+        minWidth: null,
+        maxWidth: null,
+        minHeight: null,
+        maxHeight: null,
+        ...node,
+      };
+      if (node.type === 'FRAME') {
+        const frame: Raw = {
+          layoutMode: 'NONE',
+          layoutWrap: 'NO_WRAP',
+          primaryAxisAlignItems: 'MIN',
+          counterAxisAlignItems: 'MIN',
+          counterAxisAlignContent: 'AUTO',
+          itemSpacing: 0,
+          counterAxisSpacing: 0,
+          paddingLeft: 0,
+          paddingRight: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+          itemsReversed: false,
+        };
+        for (const key in frame) if (!(key in node)) next[key] = frame[key];
+      }
+      upgraded[id] = next;
+    }
+    return { ...file, schemaVersion: 15, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

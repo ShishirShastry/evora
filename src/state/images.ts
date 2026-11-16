@@ -1,6 +1,7 @@
 import {
   addLayer,
   containerAt,
+  placeInFlow,
   imagePaint,
   isImageMimeType,
   nameFromFile,
@@ -115,7 +116,8 @@ export function placeImages(store: EditorStore, imported: readonly ImportedImage
         height,
         fills: [imagePaint(image.hash)],
       });
-      next = out.doc;
+      // On a frame that lays out its children it takes the place in the row or column that it was dropped over.
+      next = placeInFlow(out.doc, [out.id], middle);
       created.push(out.id);
     });
     return next;
