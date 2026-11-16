@@ -184,6 +184,8 @@ Not in the specification's lists, and not built: strokes of varying width.
 
 **Phase 5 (Components and design systems) is the next phase in the specification** and has not been started.
 
+**An owner's requirement for Phase 7, added on 2026-11-16 and not in the specification's list:** Figma's `.fig` files. In the owner's words: "it should be compatile with .fig figma files too i should be able to open,view and edit them completely". So Phase 7's import work includes opening a `.fig` file from disk as an OPEN DESIGN document that can be viewed and edited like any other. What whoever builds it must know and report honestly: `.fig` is Figma's own binary format with no published specification, and it changes without notice, so it has to be read from what can be worked out about the file itself, with no Figma account, server or library (the specification's rule that the application does not depend on Figma still holds: this is an import, and the native format stays `.opendesign`). "Completely" can therefore only be promised feature by feature: each kind of layer and property is either converted and tested against a real `.fig` file the owner supplies, or listed as not converted. It also depends on Phases 5 and 6, since a `.fig` file holds components, variables and prototype connections that have nowhere to go until those exist. Writing `.fig` files was not asked for.
+
 Rules that have held so far and should keep holding:
 
 - Every schema addition bumps `CURRENT_SCHEMA_VERSION`, adds a migration in `MIGRATIONS` (`src/core/document/serialize.ts`) and a test that opens a file of the previous version. The schema is at version 17.
