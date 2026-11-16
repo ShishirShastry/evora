@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **17**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **18**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -166,6 +166,9 @@ interface LayerBase extends NodeBase {
   maxWidth: number | null;
   minHeight: number | null;
   maxHeight: number | null;
+
+  // Version 18: components (see §5.8)
+  sourceId: NodeId | null;   // inside an instance: the layer of the component that this one mirrors; otherwise null
 }
 ```
 
@@ -181,6 +184,12 @@ interface FrameNode extends LayerBase {
   cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
   layoutGrids: LayoutGrid[]; // version 6
   guides: Guide[];           // version 14: guides of this frame, in its own space
+
+  // Version 18: components (see §5.8)
+  kind: 'FRAME' | 'COMPONENT' | 'INSTANCE';   // an ordinary frame, the original of a component, or an instance of one
+  description: string;                         // a component's description
+  componentId: NodeId | null;                  // an instance's component; null for anything else
+  overrides: Record<NodeId, Record<string, unknown>>;   // an instance's overrides; {} for anything else
 
   // Version 15: Auto Layout (see §5.7)
   layoutMode: 'NONE' | 'HORIZONTAL' | 'VERTICAL';     // NONE: children stay where they are put
@@ -451,6 +460,23 @@ A wrapping column needs its height before its width, since its height says where
 
 **Nesting.** A frame with a layout that is in the flow of another is laid out with it: the outer frame gives it its size where it fills, and takes its size where it hugs or is fixed. Widths are settled first, from the outside in, and heights after, because how tall a wrapped text or a wrapping row is depends on its width (a wrapping column is the exception described above). A frame with a layout that is not in a flow (on a page, in an ordinary frame or a group, rotated, hidden or `ABSOLUTE`) is laid out on its own, innermost first, and whatever contains it then sees it at its new size.
 
+### 5.8 Components and instances (version 18)
+
+A component and an instance are frames (`type: 'FRAME'`) whose `kind` says so, which is why everything that works on a frame (painting, clipping, constraints, Auto Layout) works on them unchanged. A **component** (`kind: 'COMPONENT'`) is the original: what is in it is made and arranged by the designer like the contents of any frame. An **instance** (`kind: 'INSTANCE'`) shows the component named by its `componentId` somewhere else.
+
+**What is in an instance is stored**, like the result of a layout: for every layer of the component the instance holds a layer that mirrors it, with the same properties, in the same place in the tree, and with `sourceId` naming the layer it mirrors. The ID of a mirror is worked out from the ID of the instance and the ID of the layer it mirrors (`mirrorId`), so it is the same however often the instance is rebuilt. The editor brings every instance into step with its component after every change (`syncInstances`, the first thing `restoreLayout` does), in the same undo step:
+
+- A layer added to the component appears in every instance, a removed one goes, and their order is the component's. A mirror that is deleted or moved out of its instance is put back.
+- Every property of a mirror is the component's, except `id`, `parentId`, `order` and `sourceId`, and except its **overrides** (below). Its place and size (`x`, `y`, `width`, `height`, `rotation`) are taken from the component only when the component's change: in between they belong to the instance's own layout, so that an instance that is resized, or whose text is longer, is laid out for itself by constraints and Auto Layout.
+- The instance itself takes its look (fills, strokes, effects, corner radii, clipping) and its Auto Layout settings from the component. Its position, rotation, constraints and sizing are its own. Its size is the component's until it is given another, and follows the component's while it is.
+- An instance whose component no longer exists becomes an ordinary frame, and its mirrors ordinary layers.
+
+**Overrides.** `overrides` holds what differs in this instance: for a layer of the component, by its ID, the properties that have another value here (the component's own ID stands for the instance's own look). The properties that can be overridden are what a layer shows, not where it is: visibility, opacity, fills, strokes and their settings, effects, blend mode, corner radii, clipping, and for text its characters and all its type settings. When a designer changes such a property on a mirror, the editor records it as an override in the same step; a change to the component then reaches the instance for every property that has no override, and takes none away. "Reset" empties `overrides`.
+
+**Components inside components.** A component may hold instances of other components, never of itself, however indirectly. In an instance of the outer component, the inner instance is mirrored as an instance (its `kind`, `componentId` and `overrides` are mirrored like any property) and then given its own mirrors of the inner component. What is changed inside it is recorded on the outer instance, as an override of the inner one's `overrides` holding only what goes beyond the inner one's own; showing another component in it is an override of its `componentId`. So a change at any level reaches every instance, and each level keeps what was changed at it.
+
+**Swapping.** Giving an instance another `componentId` keeps each override whose layer has a counterpart of the same type and name at the same place in the new component, and drops the rest.
+
 ---
 
 ## 6. Coordinate system and transforms
@@ -489,6 +515,8 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 11 | A text layer's `styleRanges` are in order, do not overlap, are not empty, lie inside `characters`, each change something, and no two neighbours are alike; their values are within the limits of the layer's own font properties. | Drop bad values (that part of the text falls back to the layer's style), then cut, clamp, order and join the ranges. |
 
 | 12 | A text layer's layout sizing is `HUG` exactly where its `textAutoResize` fits it to its content. Padding is ≥ 0; a size limit is ≥ 0 or null. | Set the sizing from `textAutoResize`; clamp. |
+| 14 | Only an instance has a `componentId` and `overrides`. | Set to null and {}. |
+| 15 | Every instance is in step with its component (§5.8): it holds exactly one mirror of each of the component's layers, with the component's properties and its own overrides, and no layer has a `sourceId` outside an instance. | Not by `repairDocument`: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 | 13 | Layout sizing and positioning are ones that can apply where the layer is (§5.7), and every frame with a layout is laid out: the boxes of the layers in its flow, and its own where it hugs, are what the layout gives. | Not by `repairDocument`, which cannot measure text: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 
 Repair never silently discards user content except under rule 7, and every repair is surfaced to the user when a file is opened.
@@ -498,7 +526,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 17;
+const CURRENT_SCHEMA_VERSION = 18;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -540,6 +568,9 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // 16 -> 17: a frame with layoutMode 'VERTICAL' may have layoutWrap 'WRAP'. Older files have it on rows only
   // (it was removed from columns when a file was opened), so only the version number changes.
   16: (file) => ({ ...file, schemaVersion: 17 }),
+  // 17 -> 18: every layer gets sourceId null; every frame gets kind 'FRAME', description '', componentId null
+  // and overrides {}.
+  17: addComponents,
 };
 ```
 
@@ -561,6 +592,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 14 | 15 | Auto Layout: layout sizing, positioning and size limits on every layer; direction, wrap, alignment, spacing, padding and order on frames | `src/autolayout.test.ts` ("opens a version 14 file") |
 | 15 | 16 | `STRETCH` among the alignments across a layout | `src/autolayout.test.ts` ("opens a version 15 file, where no frame stretches") |
 | 16 | 17 | `layoutWrap: 'WRAP'` on columns as well as rows | `src/autolayout.test.ts` ("opens a version 16 file, where only rows wrap") |
+| 17 | 18 | Components and instances: `sourceId` on every layer; `kind`, `description`, `componentId` and `overrides` on frames | `src/components.test.ts` ("opens a version 17 file, where nothing is a component") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -592,7 +624,7 @@ These are reserved so that later versions extend the schema without restructurin
 | 2 | (Done: mirrored text and image fills and guides on frames in version 14; per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | (Done in version 15: Auto Layout properties on frames and on every layer, §5.7; the stretch alignment in version 16; wrapping columns in version 17.) |
-| 5 | `COMPONENT`, `COMPONENT_SET`, `INSTANCE` with `overrides`; document-level `styles`, `variableCollections`, `variables`; property bindings. |
+| 5 | (Done in version 18: components and instances with overrides, as kinds of frame, §5.8.) Still to come: component sets, variants and component properties; document-level `styles`, `variableCollections`, `variables`; property bindings; libraries. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |
 | 7 | `exportSettings[]`, annotations, development status. |
 | 8 | Comments are stored outside the document body, keyed by document and node ID. |

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 
 export type IconName =
+  | 'component'
+  | 'instance'
   | 'layoutRow'
   | 'layoutColumn'
   | 'move'
@@ -151,6 +153,8 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="12.5" cy="3.5" r="2" fill="currentColor" />
     </>
   ),
+  component: <path {...s} d="M8 2.5L10 4.5 8 6.5 6 4.5zM8 9.5l2 2-2 2-2-2zM4.5 6l2 2-2 2-2-2zM11.5 6l2 2-2 2-2-2z" />,
+  instance: <path {...s} d="M8 2.5L13.5 8 8 13.5 2.5 8z" />,
   layoutRow: <path {...s} d="M2.5 4h3v8h-3zM6.5 4h3v8h-3zM10.5 4h3v8h-3z" />,
   layoutColumn: <path {...s} d="M4 2.5h8v3H4zM4 6.5h8v3H4zM4 10.5h8v3H4z" />,
   mask: (

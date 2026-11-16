@@ -17,6 +17,7 @@ import { Dialog } from '../components/Dialog';
 import { Logo } from '../components/Icon';
 import { PanelResizer } from '../components/PanelResizer';
 import { DesignPanel } from '../panels/DesignPanel';
+import { ComponentsPanel } from '../panels/ComponentSections';
 import { LayersPanel } from '../panels/LayersPanel';
 import { PagesPanel } from '../panels/PagesPanel';
 import { applyTheme } from '../theme';
@@ -391,6 +392,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
         <div className="flex min-h-0 flex-1">
           <nav aria-label="Pages and layers" className="relative z-10 flex flex-none flex-col border-r border-line bg-panel" style={{ width: panels.left }}>
             <PagesPanel />
+            <ComponentsPanel />
             <LayersPanel />
             <PanelResizer
               label="Resize the layers panel"

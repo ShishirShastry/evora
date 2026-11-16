@@ -1,5 +1,15 @@
 import {
   addAutoLayout,
+  containerAt,
+  createComponent,
+  createInstance,
+  detachInstances,
+  getPageIdOf,
+  instanceOf,
+  isComponent,
+  isInstance,
+  resetInstances,
+  applyToPoint,
   addPage,
   addSegment,
   alignNodes,
@@ -442,6 +452,104 @@ export function removeAutoLayoutSelection(store: EditorStore): void {
 /** Whether the selection is a single frame that lays out its children (a second "Add" would wrap it in another). */
 export function hasAutoLayout(state: EditorState): boolean {
   return state.selection.some((id) => isAutoLayout(state.doc.nodes[id]));
+}
+
+/** "Create component": the selected frame becomes a component, or the selection is put into one. */
+export function createComponentSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  let made: NodeId | null = null;
+  apply('Create component', (doc) => {
+    const out = createComponent(doc, selection);
+    if (!out) return doc;
+    made = out.id;
+    return out.doc;
+  });
+  if (made) store.getState().setSelection([made]);
+}
+
+/** Whether the selection can become a component: nothing in it is one already, or is inside one or inside an instance. */
+export function canCreateComponent(state: EditorState): boolean {
+  return state.selection.length > 0 && createComponent(state.doc, state.selection) !== null;
+}
+
+/**
+ * Places an instance of a component in the middle of the view (inside the
+ * frame that is there, if any), and selects it.
+ */
+export function insertInstance(store: EditorStore, componentId: NodeId): void {
+  const state = store.getState();
+  const component = state.doc.nodes[componentId];
+  if (!isComponent(component)) return;
+  const view = visibleRect(state.viewport, state.canvasSize);
+  const middle = state.canvasSize.width === 0 ? null : rectCenter(view);
+  let made: NodeId | null = null;
+  state.apply('Insert instance', (doc) => {
+    let place: { parentId: NodeId; at: { x: number; y: number } } | undefined;
+    // On another page, or with nothing to see, it goes beside its component.
+    if (middle && getPageIdOf(doc, componentId) !== null) {
+      const parentId = containerAt(doc, state.pageId, middle, new Set([componentId]));
+      const local = applyToPoint(invert(getWorldMatrix(doc, parentId === state.pageId ? null : parentId)), middle);
+      place = { parentId, at: { x: Math.round(local.x - component.width / 2), y: Math.round(local.y - component.height / 2) } };
+    }
+    const out = createInstance(doc, componentId, place) ?? createInstance(doc, componentId);
+    if (!out) return doc;
+    made = out.id;
+    return out.doc;
+  });
+  if (made) store.getState().setSelection([made]);
+}
+
+/** The single selected component, if that is what is selected. */
+function selectedComponent(state: EditorState): NodeId | null {
+  const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
+  return isComponent(only) ? only.id : null;
+}
+
+/** "Create instance": an instance of the selected component, beside it. */
+export function createInstanceOfSelection(store: EditorStore): void {
+  const state = store.getState();
+  const componentId = selectedComponent(state);
+  if (!componentId) return;
+  let made: NodeId | null = null;
+  state.apply('Create instance', (doc) => {
+    const out = createInstance(doc, componentId);
+    if (!out) return doc;
+    made = out.id;
+    return out.doc;
+  });
+  if (made) store.getState().setSelection([made]);
+}
+
+/** The instances among the selected layers that are not themselves inside an instance. */
+function selectedInstances(state: EditorState): NodeId[] {
+  return state.selection.filter((id) => {
+    const node = state.doc.nodes[id];
+    return isInstance(node) && node.sourceId === null;
+  });
+}
+
+export function detachSelection(store: EditorStore): void {
+  const state = store.getState();
+  const ids = selectedInstances(state);
+  if (ids.length > 0) state.apply('Detach instance', (doc) => detachInstances(doc, ids));
+}
+
+export function resetSelection(store: EditorStore): void {
+  const state = store.getState();
+  const ids = state.selection.filter((id) => isInstance(state.doc.nodes[id]));
+  if (ids.length > 0) state.apply('Reset instance', (doc) => resetInstances(doc, ids));
+}
+
+/** Shows and selects the component of the selected instance (or of the instance the selected layer is in). */
+export function goToMainComponent(store: EditorStore): void {
+  const state = store.getState();
+  const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
+  const instance = isInstance(only) ? only : only ? instanceOf(state.doc, only.id) : null;
+  const componentId = instance?.componentId;
+  if (!componentId) return;
+  const pageId = getPageIdOf(state.doc, componentId);
+  if (pageId) state.setPage(pageId);
+  store.getState().setSelection([componentId]);
 }
 
 /**
@@ -1009,6 +1117,52 @@ export const COMMANDS: readonly Command[] = [
     keys: [{ code: 'KeyG', ctrl: true, shift: true }],
     enabled: canUngroup,
     run: ({ store }) => ungroupSelection(store),
+  },
+  {
+    id: 'object.createComponent',
+    label: 'Create component',
+    group: 'Object',
+    shortcut: 'Ctrl+Alt+K',
+    keys: [{ code: 'KeyK', ctrl: true, alt: true }],
+    enabled: canCreateComponent,
+    run: ({ store }) => createComponentSelection(store),
+  },
+  {
+    id: 'object.createInstance',
+    label: 'Create instance',
+    group: 'Object',
+    enabled: (state) => selectedComponent(state) !== null,
+    run: ({ store }) => createInstanceOfSelection(store),
+  },
+  {
+    id: 'object.goToMain',
+    label: 'Go to component',
+    group: 'Object',
+    enabled: (state) => {
+      const only = state.selection.length === 1 ? state.doc.nodes[state.selection[0] as NodeId] : undefined;
+      return isInstance(only) || (only !== undefined && instanceOf(state.doc, only.id) !== null);
+    },
+    run: ({ store }) => goToMainComponent(store),
+  },
+  {
+    id: 'object.resetInstance',
+    label: 'Reset instance',
+    group: 'Object',
+    enabled: (state) =>
+      state.selection.some((id) => {
+        const node = state.doc.nodes[id];
+        return isInstance(node) && Object.keys(node.overrides).length > 0;
+      }),
+    run: ({ store }) => resetSelection(store),
+  },
+  {
+    id: 'object.detachInstance',
+    label: 'Detach instance',
+    group: 'Object',
+    shortcut: 'Ctrl+Alt+B',
+    keys: [{ code: 'KeyB', ctrl: true, alt: true }],
+    enabled: (state) => selectedInstances(state).length > 0,
+    run: ({ store }) => detachSelection(store),
   },
   {
     id: 'object.autoLayout',

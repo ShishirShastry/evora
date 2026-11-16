@@ -183,7 +183,9 @@ function chainTo(doc: Document, id: NodeId): NodeId[] {
 function defaultTargetIndex(doc: Document, chain: readonly NodeId[], selection: readonly NodeId[]): number {
   const first = chain[0] as NodeId;
   let index = 0;
-  if (isFrame(doc.nodes[first])) {
+  const top = doc.nodes[first];
+  // A frame on the page is passed through to what is in it; an instance is one thing, picked as a whole.
+  if (isFrame(top) && top.kind !== 'INSTANCE') {
     if (chain.length > 1) index = 1;
     else if (getChildIds(doc, first).length > 0) index = -1;
   }
@@ -307,7 +309,8 @@ export function containerAt(
     for (let i = children.length - 1; i >= 0; i--) {
       const id = children[i] as NodeId;
       const node = doc.nodes[id];
-      if (!isFrame(node) || !node.visible || node.locked || exclude.has(id)) continue;
+      // What is in an instance is its component's: nothing is put into one.
+      if (!isFrame(node) || node.kind === 'INSTANCE' || !node.visible || node.locked || exclude.has(id)) continue;
       const local = applyToPoint(invert(getWorldMatrix(doc, id)), point);
       if (!inBox(local, node.width, node.height, 0)) continue;
       return search(id) ?? id;

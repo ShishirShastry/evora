@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 17 (columns of an Auto Layout frame can wrap as rows can; version 16
+ * OPEN DESIGN document schema, version 18 (adds components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
  * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
@@ -10,7 +10,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 18;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -351,10 +351,38 @@ interface LayerBase extends NodeBase {
   maxWidth: number | null;
   minHeight: number | null;
   maxHeight: number | null;
+  /**
+   * For a layer inside an instance: the layer of the component that it
+   * mirrors. Null for every layer a designer made. Such a layer is kept in
+   * step with the one it mirrors (see `syncInstances`).
+   */
+  sourceId: NodeId | null;
 }
+
+/**
+ * What a frame is, as far as components go: an ordinary frame, the original
+ * of a component, or an instance that shows a component somewhere else.
+ */
+export type FrameKind = 'FRAME' | 'COMPONENT' | 'INSTANCE';
+export const FRAME_KINDS: readonly FrameKind[] = ['FRAME', 'COMPONENT', 'INSTANCE'];
+
+/**
+ * What differs in an instance from its component: for a layer of the
+ * component (by its ID; the component's own ID stands for the instance
+ * itself), the properties that have another value here.
+ */
+export type InstanceOverrides = Readonly<Record<NodeId, Readonly<Record<string, unknown>>>>;
 
 export interface FrameNode extends LayerBase {
   type: 'FRAME';
+  /** Whether this frame is a component, an instance of one, or neither. */
+  kind: FrameKind;
+  /** A component's description, shown where it is chosen. */
+  description: string;
+  /** An instance's component. Null for anything that is not an instance. */
+  componentId: NodeId | null;
+  /** An instance's overrides. Empty for anything that is not an instance. */
+  overrides: InstanceOverrides;
   clipsContent: boolean;
   cornerRadius: number;
   /** One radius per corner; when null, `cornerRadius` applies to all four. */
@@ -666,6 +694,10 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   cornerRadii?: CornerRadii | null;
   layoutGrids?: LayoutGrid[];
   guides?: Guide[];
+  kind?: FrameKind;
+  description?: string;
+  componentId?: NodeId | null;
+  overrides?: InstanceOverrides;
   layoutMode?: LayoutMode;
   layoutWrap?: LayoutWrap;
   primaryAxisAlignItems?: PrimaryAxisAlign;

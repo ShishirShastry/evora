@@ -238,6 +238,26 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
   15: (file) => ({ ...file, schemaVersion: 16 }),
   // Version 17 lets a column wrap. In older files only rows do, so only the version number changes.
   16: (file) => ({ ...file, schemaVersion: 17 }),
+  // Version 18 adds components and instances. No older frame is either, and no older layer mirrors another.
+  17: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node) || node.type === 'PAGE') {
+        upgraded[id] = node;
+        continue;
+      }
+      const next: Raw = { sourceId: null, ...node };
+      if (node.type === 'FRAME') {
+        const frame: Raw = { kind: 'FRAME', description: '', componentId: null, overrides: {} };
+        for (const key in frame) if (!(key in node)) next[key] = frame[key];
+      }
+      upgraded[id] = next;
+    }
+    return { ...file, schemaVersion: 18, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

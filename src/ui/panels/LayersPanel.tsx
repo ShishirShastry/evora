@@ -286,8 +286,12 @@ export function LayersPanel() {
                       ? 'mask'
                       : node.type === 'BOOLEAN_OPERATION'
                         ? OPERATION_ICONS[node.operation]
-                        : // A frame that lays out its children shows which way.
-                          node.type === 'FRAME' && node.layoutMode !== 'NONE'
+                        : node.type === 'FRAME' && node.kind === 'COMPONENT'
+                          ? 'component'
+                          : node.type === 'FRAME' && node.kind === 'INSTANCE'
+                            ? 'instance'
+                            : // A frame that lays out its children shows which way.
+                              node.type === 'FRAME' && node.layoutMode !== 'NONE'
                           ? node.layoutMode === 'VERTICAL'
                             ? 'layoutColumn'
                             : 'layoutRow'

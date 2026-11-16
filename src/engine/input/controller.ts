@@ -825,7 +825,8 @@ export class InteractionController {
     const state = this.state;
     const ids = topLevelIds(state.doc, state.selection).filter((id) => {
       const node = state.doc.nodes[id];
-      return isLayer(node) && !node.locked;
+      // A layer inside an instance is where its component has it: it is not dragged about.
+      return isLayer(node) && !node.locked && node.sourceId === null;
     });
     if (ids.length === 0) {
       this.mode = { kind: 'idle' };

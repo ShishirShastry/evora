@@ -50,6 +50,7 @@ import { MIXED, NumberField, type Mixed } from '../components/Fields';
 import { Icon, type IconName } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 import { AutoLayoutSection, ResizingSection } from './AutoLayoutSection';
+import { ComponentSection } from './ComponentSections';
 import { EffectsSection } from './EffectsSection';
 import { ConstraintsSection, LayoutGridSection } from './LayoutSections';
 import { PaintList } from './PaintList';
@@ -478,7 +479,7 @@ export function DesignPanel() {
   // Constraints only do something for a layer that sits directly inside a frame.
   const insideFrames = layers.every((layer) => doc.nodes[layer.parentId]?.type === 'FRAME');
   // A layer that an Auto Layout frame places has no position of its own to type in, and no use for constraints.
-  const placed = layers.some((layer) => isInFlow(doc, layer));
+  const placed = layers.some((layer) => isInFlow(doc, layer) || layer.sourceId !== null);
   const pointLayers = layers.filter((layer) => layer.type === 'POLYGON' || layer.type === 'STAR');
   // Groups have no appearance of their own, so they are left out of fills and strokes.
   const paintable = layers.filter((layer) => layer.type !== 'GROUP');
@@ -709,6 +710,8 @@ export function DesignPanel() {
           </Row>
         )}
       </Section>
+
+      <ComponentSection layers={layers} />
 
       <ResizingSection layers={layers} />
 

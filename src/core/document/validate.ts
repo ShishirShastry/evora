@@ -17,6 +17,7 @@ import {
   PRIMARY_AXIS_ALIGNS,
   COUNTER_AXIS_ALIGNS,
   COUNTER_AXIS_ALIGN_CONTENTS,
+  FRAME_KINDS,
   GRADIENT_TYPES,
   IMAGE_SCALE_MODES,
   LAYER_TYPES,
@@ -279,6 +280,17 @@ function vectorNetwork(value: unknown): VectorNetwork {
   return { vertices, segments };
 }
 
+/** An instance's overrides: for each layer, an object of properties. Anything else is dropped. */
+function overrides(value: unknown): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  if (!isObject(value)) return out;
+  for (const id in value) {
+    const props = value[id];
+    if (isObject(props)) out[id] = props;
+  }
+  return out;
+}
+
 /** A minimum or maximum size: a number that is not negative, or null for no limit. */
 function sizeLimit(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? Math.min(1e6, Math.max(0, value)) : null;
@@ -347,6 +359,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     maxWidth: sizeLimit(raw.maxWidth),
     minHeight: sizeLimit(raw.minHeight),
     maxHeight: sizeLimit(raw.maxHeight),
+    sourceId: typeof raw.sourceId === 'string' && raw.sourceId ? raw.sourceId : null,
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
@@ -355,6 +368,11 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.cornerRadii = cornerRadii(raw.cornerRadii);
     layer.layoutGrids = layoutGrids(raw.layoutGrids);
     layer.guides = guides(raw.guides);
+    layer.kind = oneOf(raw.kind, FRAME_KINDS, 'FRAME');
+    layer.description = typeof raw.description === 'string' ? raw.description : '';
+    // Only an instance has a component and overrides.
+    layer.componentId = layer.kind === 'INSTANCE' && typeof raw.componentId === 'string' && raw.componentId ? raw.componentId : null;
+    layer.overrides = layer.kind === 'INSTANCE' ? overrides(raw.overrides) : {};
     layer.layoutMode = oneOf(raw.layoutMode, LAYOUT_MODES, 'NONE');
     layer.layoutWrap = oneOf(raw.layoutWrap, LAYOUT_WRAPS, 'NO_WRAP');
     layer.primaryAxisAlignItems = oneOf(raw.primaryAxisAlignItems, PRIMARY_AXIS_ALIGNS, 'MIN');
