@@ -153,6 +153,7 @@ Not covered by automated tests: the native save/open file dialogs for `.opendesi
 - Node.js v24.22.3 was unpacked into `.tools/node` (git-ignored) after its SHA-256 was checked against nodejs.org. The npm cache is in `.tools/npm-cache`. Nothing was installed system-wide.
 - `git config --global safe.directory "F:/Open Design"` was added; git refuses to work on exFAT without it.
 - Playwright uses the installed Microsoft Edge (`channel: 'msedge'`); no browsers were downloaded.
+- Phase 4 was built in a clone of the repository inside `.tools` (git-ignored), because another session was changing the same files in this folder at the time; its one commit was then brought onto `main` as a fast-forward. The clone was removed afterwards, except for an empty folder, `.tools\phase4\dist\licenses`, which Windows would not release. It holds nothing and can be deleted.
 - The Inter font is the npm package `@fontsource/inter` (5.3.0, OFL-1.1, about 4.3 MB unpacked), added as a dependency with the owner's go-ahead on 2026-11-16. It is the only thing fetched besides the project's other npm dependencies and Node itself.
 
 ## Next actions
