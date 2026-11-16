@@ -308,15 +308,15 @@ test('a row: spacing and padding, fill and hug, limits, and wrapping follow the 
   expect(await firstAndLast()).toEqual([50, 220]);
   await select(page, 'Alignment along the layout').selectOption('MAX');
   expect(await firstAndLast()).toEqual([80, 250]);
-  // Spread from edge to edge: the gap is whatever is left over, so it can no longer be typed.
+  // Spread from edge to edge: the gap is whatever is left over, and the gap field says so.
   await select(page, 'Alignment along the layout').selectOption('SPACE_BETWEEN');
   expect(await firstAndLast()).toEqual([20, 250]);
-  await expect(field(page, 'Spacing between items')).toBeDisabled();
+  await expect(field(page, 'Spacing between items')).toHaveValue('Auto');
   expect(await colourAt(20 + 50 + 20, 45)).toEqual(WHITE);
   expect(await colourAt(20 + 50 + 40 + 50, 45)).toEqual(GREY);
   await select(page, 'Alignment along the layout').selectOption('MIN');
   expect(await firstAndLast()).toEqual([20, 190]);
-  await expect(field(page, 'Spacing between items')).toBeEnabled();
+  await expect(field(page, 'Spacing between items')).toHaveValue('10');
 
   await set(page, 'Width', '200');
   await layer(page, 'Rectangle 2').click();
@@ -346,7 +346,7 @@ test('a row: spacing and padding, fill and hug, limits, and wrapping follow the 
   await set(page, 'Height', '200');
   await expect(select(page, 'Vertical sizing')).toHaveValue('FIXED');
   await select(page, 'Line distribution').selectOption('SPACE_BETWEEN');
-  await expect(field(page, 'Spacing between lines')).toBeDisabled();
+  await expect(field(page, 'Spacing between lines')).toHaveValue('Auto');
   await layer(page, 'Rectangle 3').click();
   await expect(field(page, 'Y position')).toHaveValue('130');
   await layer(page, 'Frame 1').click();
@@ -594,5 +594,130 @@ test('stretch: every item is as tall as the row, whatever its own sizing', async
   await expect(select(page, 'Vertical sizing')).toBeEnabled();
   await expect(page.getByRole('note', { name: 'Stretched by the frame' })).toHaveCount(0);
   await expect(field(page, 'Height')).toHaveValue('180');
+  expect(errors).toEqual([]);
+});
+
+test('automatic spacing: the gap field takes Auto, in step with “space between”', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await newFile(page);
+  const inFrame = await drawFrame(page, [500, 300]);
+  const colourAt = (x: number, y: number): Promise<[number, number, number]> => pixel(page, ...inFrame(x, y));
+  // Three squares of 50, 40 apart, in a 400 × 200 frame.
+  await drawRect(page, inFrame, { x: 20, y: 20, w: 50, h: 50 });
+  await drawRect(page, inFrame, { x: 110, y: 20, w: 50, h: 50 });
+  await drawRect(page, inFrame, { x: 200, y: 20, w: 50, h: 50 });
+  await layer(page, 'Frame 1').click();
+  await page.getByRole('button', { name: 'Add Auto Layout' }).click();
+  const gap = field(page, 'Spacing between items');
+  const auto = page.getByRole('button', { name: 'Automatic spacing between items' });
+  const along = select(page, 'Alignment along the layout');
+  /** Where the middle and the last square are, as the panel shows them; the frame is selected again afterwards. */
+  const middleAndLast = async (): Promise<[number, number]> => {
+    await layer(page, 'Rectangle 2').click();
+    const middle = await number(page, 'X position');
+    await layer(page, 'Rectangle 3').click();
+    const last = await number(page, 'X position');
+    await layer(page, 'Frame 1').click();
+    return [middle, last];
+  };
+  await expect(gap).toHaveValue('40');
+  await expect(auto).toHaveAttribute('aria-pressed', 'false');
+  await expect(along).toHaveValue('MIN');
+  await expect(select(page, 'Horizontal sizing')).toHaveValue('HUG');
+
+  // "Auto" typed into the gap field: the alignment shows "space between", and the field shows Auto, not 40.
+  await set(page, 'Spacing between items', 'auto');
+  await expect(gap).toHaveValue('Auto');
+  await expect(auto).toHaveAttribute('aria-pressed', 'true');
+  await expect(along).toHaveValue('SPACE_BETWEEN');
+  // The gaps are now what the frame's width leaves over, so the frame keeps its width and can no longer hug it.
+  await expect(field(page, 'Width')).toHaveValue('400');
+  await expect(select(page, 'Horizontal sizing')).toHaveValue('FIXED');
+  await expect(select(page, 'Horizontal sizing').locator('option')).toHaveText(['Fixed width']);
+  expect(await middleAndLast()).toEqual([110, 200]);
+
+  // 100 wider: the last square keeps to the right padding of 150, the middle one is half-way.
+  await set(page, 'Width', '500');
+  expect(await middleAndLast()).toEqual([160, 300]);
+  expect(await colourAt(135, 45)).toEqual(WHITE);
+  expect(await colourAt(185, 45)).toEqual(GREY);
+  expect(await colourAt(325, 45)).toEqual(GREY);
+
+  // A number typed into the gap field is fixed spacing again: packed at the left, 10 apart.
+  await set(page, 'Spacing between items', '10');
+  await expect(gap).toHaveValue('10');
+  await expect(auto).toHaveAttribute('aria-pressed', 'false');
+  await expect(along).toHaveValue('MIN');
+  await expect(select(page, 'Horizontal sizing').locator('option')).toHaveText(['Fixed width', 'Hug contents']);
+  expect(await middleAndLast()).toEqual([80, 140]);
+  expect(await colourAt(105, 45)).toEqual(GREY);
+  expect(await colourAt(325, 45)).toEqual(WHITE);
+
+  // The Auto button switches it on, and off again to the gap there was.
+  await auto.click();
+  await expect(gap).toHaveValue('Auto');
+  await expect(along).toHaveValue('SPACE_BETWEEN');
+  expect(await middleAndLast()).toEqual([160, 300]);
+  await auto.click();
+  await expect(gap).toHaveValue('10');
+  await expect(along).toHaveValue('MIN');
+  expect(await middleAndLast()).toEqual([80, 140]);
+
+  // The other way round: "space between" chosen as the alignment shows as Auto in the gap field.
+  await along.selectOption('SPACE_BETWEEN');
+  await expect(gap).toHaveValue('Auto');
+  await expect(auto).toHaveAttribute('aria-pressed', 'true');
+  await along.selectOption('CENTER');
+  await expect(gap).toHaveValue('10');
+  await expect(auto).toHaveAttribute('aria-pressed', 'false');
+  await along.selectOption('SPACE_BETWEEN');
+  // One undo step each way.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  await expect(gap).toHaveValue('10');
+  await expect(along).toHaveValue('CENTER');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(gap).toHaveValue('Auto');
+
+  // The gap between the lines of a wrapping row takes Auto in the same way, in step with "Line distribution".
+  await set(page, 'Right padding', '20');
+  await select(page, 'Layout direction').selectOption('WRAP');
+  await set(page, 'Width', '150');
+  const lineGap = field(page, 'Spacing between lines');
+  const lineAuto = page.getByRole('button', { name: 'Automatic spacing between lines' });
+  await expect(lineGap).toHaveValue('0');
+  await expect(select(page, 'Vertical sizing')).toHaveValue('HUG');
+  await set(page, 'Spacing between lines', 'Auto');
+  await expect(lineGap).toHaveValue('Auto');
+  await expect(lineAuto).toHaveAttribute('aria-pressed', 'true');
+  await expect(select(page, 'Line distribution')).toHaveValue('SPACE_BETWEEN');
+  await expect(select(page, 'Vertical sizing')).toHaveValue('FIXED');
+  await set(page, 'Height', '300');
+  await layer(page, 'Rectangle 3').click();
+  // The second line is at the bottom padding of 130: 300 less 130 and its own 50.
+  await expect(field(page, 'Y position')).toHaveValue('120');
+  expect(await colourAt(45, 145)).toEqual(GREY);
+  expect(await colourAt(45, 95)).toEqual(WHITE);
+  await layer(page, 'Frame 1').click();
+  await set(page, 'Spacing between lines', '10');
+  await expect(lineGap).toHaveValue('10');
+  await expect(select(page, 'Line distribution')).toHaveValue('AUTO');
+  await layer(page, 'Rectangle 3').click();
+  await expect(field(page, 'Y position')).toHaveValue('80');
+  await layer(page, 'Frame 1').click();
+  await select(page, 'Line distribution').selectOption('SPACE_BETWEEN');
+  await expect(lineGap).toHaveValue('Auto');
+
+  // Stored.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  await layer(page, 'Frame 1').click();
+  await expect(field(page, 'Spacing between items')).toHaveValue('Auto');
+  await expect(field(page, 'Spacing between lines')).toHaveValue('Auto');
+  await expect(select(page, 'Alignment along the layout')).toHaveValue('SPACE_BETWEEN');
+  await layer(page, 'Rectangle 3').click();
+  await expect(field(page, 'Y position')).toHaveValue('120');
   expect(errors).toEqual([]);
 });

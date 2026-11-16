@@ -2,10 +2,14 @@ import { useState } from 'react';
 import {
   belongsToFlow,
   isAutoLayout,
+  itemSpacingOf,
   layoutDirection,
+  lineSpacingOf,
   patchNodes,
+  setItemSpacing,
   setLayoutDirection,
   setLayoutSizing,
+  setLineSpacing,
   sizingChoices,
   stretchedAcross,
   type CounterAxisAlign,
@@ -15,6 +19,7 @@ import {
   type LayerPatch,
   type LayoutDirection,
   type LayoutSizing,
+  type LayoutSpacing,
   type NodeId,
   type PrimaryAxisAlign,
 } from '../../core';
@@ -63,6 +68,104 @@ const LINES: readonly (readonly [CounterAxisAlignContent, string])[] = [
   ['SPACE_BETWEEN', 'Space between'],
 ];
 
+interface SpacingFieldProps {
+  /** Accessible name of the field; the button beside it is "Automatic" followed by it. */
+  label: string;
+  prefix: string;
+  /** The spacing as it is: a number, or AUTO. */
+  value: LayoutSpacing | Mixed;
+  /** The fixed gap the frame goes back to when automatic spacing is switched off. */
+  fixed: number | Mixed;
+  onCommit: (value: LayoutSpacing) => void;
+}
+
+/**
+ * A gap of a layout, which is a number or "Auto". Typing a number sets a
+ * fixed gap; typing "auto", or pressing the Auto button, spreads the items
+ * from end to end. While it is automatic the field says "Auto" and not the
+ * number that is no longer in use. Enter, Tab or leaving the field commits;
+ * Escape reverts; the arrow keys step a number by 1, or by 10 with Shift.
+ */
+function SpacingField({ label, prefix, value, fixed, onCommit }: SpacingFieldProps) {
+  const format = (n: number): string => String(Math.round(n * 100) / 100);
+  const shown = value === MIXED ? '' : value === 'AUTO' ? 'Auto' : format(value);
+  const [text, setText] = useState(shown);
+  const [editing, setEditing] = useState(false);
+  const clamp = (n: number): number => Math.min(10000, Math.max(-10000, n));
+
+  const commit = (raw: string): void => {
+    const trimmed = raw.trim();
+    if (trimmed.toLowerCase() === 'auto') {
+      setText('Auto');
+      if (value !== 'AUTO') onCommit('AUTO');
+      return;
+    }
+    const parsed = Number.parseFloat(trimmed.replace(',', '.'));
+    if (!Number.isFinite(parsed)) {
+      setText(shown);
+      return;
+    }
+    const next = clamp(parsed);
+    setText(format(next));
+    if (next !== value) onCommit(next);
+  };
+
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <label className="flex h-[26px] min-w-0 flex-1 items-center rounded-[5px] border border-transparent bg-field pl-2 focus-within:border-accent hover:border-line">
+        <span className="mr-1.5 flex-none text-dim">{prefix}</span>
+        <input
+          aria-label={label}
+          className="h-full w-full min-w-0 border-0 bg-transparent p-0 outline-none"
+          spellCheck={false}
+          placeholder={value === MIXED ? 'Mixed' : undefined}
+          value={editing ? text : shown}
+          onFocus={(event) => {
+            setText(shown);
+            setEditing(true);
+            event.currentTarget.select();
+          }}
+          onChange={(event) => setText(event.currentTarget.value)}
+          onBlur={(event) => {
+            setEditing(false);
+            commit(event.currentTarget.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commit(event.currentTarget.value);
+              event.currentTarget.select();
+            } else if (event.key === 'Escape') {
+              setText(shown);
+              setEditing(false);
+              const input = event.currentTarget;
+              requestAnimationFrame(() => input.blur());
+            } else if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && typeof value === 'number') {
+              event.preventDefault();
+              const base = Number.parseFloat(event.currentTarget.value.replace(',', '.'));
+              const next = clamp((Number.isFinite(base) ? base : value) + (event.shiftKey ? 10 : 1) * (event.key === 'ArrowUp' ? 1 : -1));
+              setText(format(next));
+              if (next !== value) onCommit(next);
+            }
+            // Keep editor shortcuts from firing while typing.
+            event.stopPropagation();
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        className="od-icon-button !h-[26px] !w-10 flex-none text-[11px]"
+        aria-label={`Automatic ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
+        aria-pressed={value === 'AUTO'}
+        title="Automatic spacing: spread from end to end, with whatever is left over as the gaps"
+        // Switched off, the frame goes back to the fixed gap it had.
+        onClick={() => onCommit(value === 'AUTO' ? (fixed === MIXED ? 0 : fixed) : 'AUTO')}
+      >
+        Auto
+      </button>
+    </div>
+  );
+}
+
 /**
  * Auto Layout of the selected frames: switching it on and off, direction,
  * spacing, padding, alignment and order. Every control writes the frame's
@@ -104,6 +207,7 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
     store.getState().apply(label, (doc) => patchNodes(doc, patches));
   };
   const set = (label: string, patch: LayerPatch): void => setEach(label, () => patch);
+  const ids = frames.map((frame) => frame.id);
 
   const direction = shared(frames, (frame) => directionOf(frame as FrameNode));
   const wraps = frames.every((frame) => directionOf(frame) === 'WRAP');
@@ -148,28 +252,26 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
         />
       </Row>
       <Row>
-        <NumberField
+        <SpacingField
           label="Spacing between items"
           prefix="Gap"
-          min={-10000}
-          max={10000}
-          // Spread from edge to edge, the gaps are whatever is left over.
-          disabled={along === 'SPACE_BETWEEN'}
-          value={value('itemSpacing')}
-          onCommit={(itemSpacing) => set('Change spacing', { itemSpacing })}
+          // Automatic spacing is the alignment "space between" seen from the gap: the two are shown in step.
+          value={shared(frames, (frame) => itemSpacingOf(frame as FrameNode))}
+          fixed={value('itemSpacing')}
+          onCommit={(spacing) => store.getState().apply('Change spacing', (doc) => setItemSpacing(doc, ids, spacing))}
         />
-        {wraps && (
-          <NumberField
+      </Row>
+      {wraps && (
+        <Row>
+          <SpacingField
             label="Spacing between lines"
             prefix="Lines"
-            min={-10000}
-            max={10000}
-            disabled={lines === 'SPACE_BETWEEN'}
-            value={value('counterAxisSpacing')}
-            onCommit={(counterAxisSpacing) => set('Change line spacing', { counterAxisSpacing })}
+            value={shared(frames, (frame) => lineSpacingOf(frame as FrameNode))}
+            fixed={value('counterAxisSpacing')}
+            onCommit={(spacing) => store.getState().apply('Change line spacing', (doc) => setLineSpacing(doc, ids, spacing))}
           />
-        )}
-      </Row>
+        </Row>
+      )}
       {foursome ? (
         <div className="grid grid-cols-2 gap-1.5">
           <NumberField label="Left padding" prefix="L" min={0} max={100000} value={value('paddingLeft')} onCommit={(paddingLeft) => set('Change padding', { paddingLeft })} />

@@ -111,12 +111,16 @@ export function stretchedAcross(doc: Document, node: LayerNode | undefined): 'ho
 
 /**
  * Whether a frame with a layout can be as big as its children along an axis.
- * Across its layout it cannot while it stretches them: they would be as big
- * as the frame, and the frame as big as they are.
+ * It cannot where its size is what decides something about them. Along its
+ * layout: while its spacing is automatic, which makes the gaps whatever the
+ * frame's size leaves over. Across it: while it stretches its children (they
+ * would be as big as the frame, and the frame as big as they are), and while
+ * the lines of a wrapping layout are spread out with automatic gaps.
  */
 export function canHug(frame: FrameNode, axis: Axis): boolean {
-  if (mainAxis(frame) === axis) return true;
-  return frame.counterAxisAlignItems !== 'STRETCH';
+  if (mainAxis(frame) === axis) return frame.primaryAxisAlignItems !== 'SPACE_BETWEEN';
+  if (frame.counterAxisAlignItems === 'STRETCH') return false;
+  return !(frame.layoutWrap === 'WRAP' && frame.counterAxisAlignContent === 'SPACE_BETWEEN');
 }
 
 /**

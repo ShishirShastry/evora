@@ -16,8 +16,10 @@ import {
   groupNodes,
   isAutoLayout,
   isInFlow,
+  itemSpacingOf,
   layoutDirection,
   lineSizes,
+  lineSpacingOf,
   parseFile,
   patchNode,
   patchNodes,
@@ -29,8 +31,10 @@ import {
   repairDocument,
   restoreLayout,
   setLayerBox,
+  setItemSpacing,
   setLayoutDirection,
   setLayoutSizing,
+  setLineSpacing,
   settleSizing,
   shiftInFlow,
   sizingChoices,
@@ -1335,6 +1339,106 @@ describe('Auto Layout in the file format', () => {
     const column = JSON.parse(JSON.stringify(made.doc)) as { nodes: Record<string, Record<string, unknown>> };
     Object.assign(column.nodes[frameId] as Record<string, unknown>, { layoutWrap: 'WRAP' });
     expect(frameOf(repairDocument(column).doc, frameId).layoutWrap).toBe('NO_WRAP');
+  });
+});
+
+describe('automatic spacing', () => {
+  const xs = (doc: Document, ids: readonly NodeId[]): number[] => ids.map((id) => box(doc, id).x);
+
+  it('is the alignment “space between” seen from the gap: setting either shows as the other', () => {
+    const { doc, frameId } = frame(PADDED);
+    const made = fill(doc, frameId, THREE);
+    const laid = lay(made.doc);
+    expect(itemSpacingOf(frameOf(laid, frameId))).toBe(8);
+
+    const auto = lay(setItemSpacing(laid, [frameId], 'AUTO'));
+    expect(frameOf(auto, frameId).primaryAxisAlignItems).toBe('SPACE_BETWEEN');
+    expect(itemSpacingOf(frameOf(auto, frameId))).toBe('AUTO');
+    // The first at the left padding, the last at the right, equal gaps of 95 between.
+    expect(xs(auto, made.ids)).toEqual([10, 155, 310]);
+
+    const between = lay(patchNode(laid, frameId, { primaryAxisAlignItems: 'SPACE_BETWEEN' }));
+    expect(itemSpacingOf(frameOf(between, frameId))).toBe('AUTO');
+    expect(between).toEqual(auto);
+    // Asked for twice, it is the same document.
+    expect(setItemSpacing(auto, [frameId], 'AUTO')).toBe(auto);
+  });
+
+  it('goes back to a fixed gap when a number is given, with the items packed at the start', () => {
+    const { doc, frameId } = frame({ ...PADDED, primaryAxisAlignItems: 'SPACE_BETWEEN' });
+    const made = fill(doc, frameId, THREE);
+    const auto = lay(made.doc);
+    const fixed = lay(setItemSpacing(auto, [frameId], 12));
+    expect(frameOf(fixed, frameId)).toMatchObject({ itemSpacing: 12, primaryAxisAlignItems: 'MIN' });
+    expect(itemSpacingOf(frameOf(fixed, frameId))).toBe(12);
+    expect(xs(fixed, made.ids)).toEqual([10, 72, 144]);
+    // Any other alignment along the layout is fixed spacing too, with the gap the frame had before.
+    const centred = lay(patchNode(auto, frameId, { primaryAxisAlignItems: 'CENTER' }));
+    expect(itemSpacingOf(frameOf(centred, frameId))).toBe(8);
+    // A number given while the spacing is fixed changes the gap and nothing else.
+    expect(frameOf(lay(setItemSpacing(centred, [frameId], 20)), frameId)).toMatchObject({ itemSpacing: 20, primaryAxisAlignItems: 'CENTER' });
+  });
+
+  it('keeps a frame from hugging along its layout: the gaps are what its size leaves over', () => {
+    const { doc, frameId } = frame({ ...PADDED, layoutSizingHorizontal: 'HUG', layoutSizingVertical: 'HUG' });
+    const made = fill(doc, frameId, THREE);
+    const hugging = lay(made.doc);
+    expect(size(hugging, frameId)).toEqual([226, 110]);
+    const auto = lay(setItemSpacing(hugging, [frameId], 'AUTO'));
+    // It keeps its size, so nothing moves, but is fixed along the row from now on; across it still hugs.
+    expect(frameOf(auto, frameId)).toMatchObject({ layoutSizingHorizontal: 'FIXED', layoutSizingVertical: 'HUG', width: 226, height: 110 });
+    expect(xs(auto, made.ids)).toEqual(xs(hugging, made.ids));
+    expect(sizingChoices(auto, frameId, 'horizontal')).toEqual(['FIXED']);
+    expect(sizingChoices(auto, frameId, 'vertical')).toEqual(['FIXED', 'HUG']);
+    expect(setLayoutSizing(auto, [frameId], 'horizontal', 'HUG')).toBe(auto);
+    // Wider, the gaps take up the difference.
+    expect(xs(lay(setLayerBox(auto, frameId, { width: 426 })), made.ids)).toEqual([10, 168, 336]);
+    // With a fixed gap again the frame can hug again.
+    const fixed = lay(setItemSpacing(auto, [frameId], 8));
+    expect(sizingChoices(fixed, frameId, 'horizontal')).toEqual(['FIXED', 'HUG']);
+    expect(size(lay(setLayoutSizing(fixed, [frameId], 'horizontal', 'HUG')), frameId)).toEqual([226, 110]);
+  });
+
+  it('does the same for the lines of a wrapping row', () => {
+    const { doc, frameId } = frame({
+      width: 200,
+      layoutWrap: 'WRAP',
+      paddingLeft: 10,
+      paddingRight: 10,
+      paddingTop: 10,
+      paddingBottom: 10,
+      itemSpacing: 10,
+      counterAxisSpacing: 5,
+      layoutSizingVertical: 'HUG',
+    });
+    const made = fill(doc, frameId, [0, 1, 2, 3, 4].map(() => ({ width: 60, height: 20 })));
+    const hugging = lay(made.doc);
+    expect(size(hugging, frameId)).toEqual([200, 90]);
+    expect(lineSpacingOf(frameOf(hugging, frameId))).toBe(5);
+    const ys = (d: Document): number[] => [0, 2, 4].map((index) => box(d, made.ids[index] as NodeId).y);
+
+    const auto = lay(setLineSpacing(hugging, [frameId], 'AUTO'));
+    expect(frameOf(auto, frameId)).toMatchObject({ counterAxisAlignContent: 'SPACE_BETWEEN', layoutSizingVertical: 'FIXED', height: 90 });
+    expect(lineSpacingOf(frameOf(auto, frameId))).toBe('AUTO');
+    expect(sizingChoices(auto, frameId, 'vertical')).toEqual(['FIXED']);
+    expect(ys(auto)).toEqual([10, 35, 60]);
+    // Taller, the lines are spread over the 180 between the padding.
+    expect(ys(lay(setLayerBox(auto, frameId, { height: 200 })))).toEqual([10, 90, 170]);
+
+    const fixed = lay(setLineSpacing(setLayerBox(auto, frameId, { height: 200 }), [frameId], 15));
+    expect(frameOf(fixed, frameId)).toMatchObject({ counterAxisAlignContent: 'AUTO', counterAxisSpacing: 15 });
+    expect(ys(fixed)).toEqual([10, 45, 80]);
+    expect(sizingChoices(fixed, frameId, 'vertical')).toEqual(['FIXED', 'HUG']);
+    // Spread-out lines only stand in the way of hugging while the row wraps.
+    const oneLine = lay(patchNode(auto, frameId, { layoutWrap: 'NO_WRAP' }));
+    expect(sizingChoices(oneLine, frameId, 'vertical')).toEqual(['FIXED', 'HUG']);
+  });
+
+  it('is not given to a frame without a layout', () => {
+    const { doc, frameId } = frame({ layoutMode: 'NONE' });
+    expect(setItemSpacing(doc, [frameId], 'AUTO')).toBe(doc);
+    expect(setItemSpacing(doc, [frameId], 12)).toBe(doc);
+    expect(setLineSpacing(doc, [frameId], 'AUTO')).toBe(doc);
   });
 });
 

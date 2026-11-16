@@ -217,6 +217,51 @@ export function setLayoutDirection(doc: Document, ids: readonly NodeId[], direct
   return patchNodes(doc, patches);
 }
 
+/** A spacing of a layout: a fixed gap, or AUTO, where the gaps are whatever is left over when the items are spread from end to end. */
+export type LayoutSpacing = number | 'AUTO';
+
+/**
+ * The spacing between a frame's items. Automatic spacing and the alignment
+ * "space between" are one and the same setting of the frame, seen from the
+ * gap and from the alignment: the first item at the start, the last at the
+ * end, equal gaps between.
+ */
+export function itemSpacingOf(frame: FrameNode): LayoutSpacing {
+  return frame.primaryAxisAlignItems === 'SPACE_BETWEEN' ? 'AUTO' : frame.itemSpacing;
+}
+
+/** The spacing between the lines of a frame that wraps: a fixed gap, or AUTO when the lines are spread out. */
+export function lineSpacingOf(frame: FrameNode): LayoutSpacing {
+  return frame.counterAxisAlignContent === 'SPACE_BETWEEN' ? 'AUTO' : frame.counterAxisSpacing;
+}
+
+/**
+ * Sets the spacing between the items of frames with a layout. AUTO spreads
+ * the items from end to end (the alignment along the layout becomes "space
+ * between"); a number is a fixed gap, and takes the frame out of automatic
+ * spacing if it was in it, packing the items at the start.
+ */
+export function setItemSpacing(doc: Document, ids: readonly NodeId[], spacing: LayoutSpacing): Document {
+  const patches: Record<NodeId, LayerPatch> = {};
+  for (const id of ids) {
+    const frame = doc.nodes[id];
+    if (!isAutoLayout(frame)) continue;
+    if (spacing === 'AUTO') patches[id] = { primaryAxisAlignItems: 'SPACE_BETWEEN' };
+    else patches[id] = { itemSpacing: spacing, ...(frame.primaryAxisAlignItems === 'SPACE_BETWEEN' ? { primaryAxisAlignItems: 'MIN' as const } : {}) };
+  }
+  return patchNodes(doc, patches);
+}
+
+/** Sets the spacing between the lines of frames that wrap: AUTO spreads the lines out, a number packs them with that gap. */
+export function setLineSpacing(doc: Document, ids: readonly NodeId[], spacing: LayoutSpacing): Document {
+  const patches: Record<NodeId, LayerPatch> = {};
+  for (const id of ids) {
+    if (!isAutoLayout(doc.nodes[id])) continue;
+    patches[id] = spacing === 'AUTO' ? { counterAxisAlignContent: 'SPACE_BETWEEN' } : { counterAxisSpacing: spacing, counterAxisAlignContent: 'AUTO' };
+  }
+  return patchNodes(doc, patches);
+}
+
 /** Switches Auto Layout off. The children stay where the layout last put them, at the sizes it gave them. */
 export function removeAutoLayout(doc: Document, ids: readonly NodeId[]): Document {
   const patches: Record<NodeId, LayerPatch> = {};
