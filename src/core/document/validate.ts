@@ -18,6 +18,8 @@ import {
   COUNTER_AXIS_ALIGNS,
   COUNTER_AXIS_ALIGN_CONTENTS,
   FRAME_KINDS,
+  COMPONENT_PROP_TYPES,
+  type ComponentProp,
   GRADIENT_TYPES,
   IMAGE_SCALE_MODES,
   LAYER_TYPES,
@@ -280,6 +282,47 @@ function vectorNetwork(value: unknown): VectorNetwork {
   return { vertices, segments };
 }
 
+/** Which component properties a layer is bound to: names of properties, as strings. */
+function propRefs(value: unknown): { visible?: string; characters?: string; componentId?: string } {
+  const out: { visible?: string; characters?: string; componentId?: string } = {};
+  if (!isObject(value)) return out;
+  for (const key of ['visible', 'characters', 'componentId'] as const) {
+    const ref = value[key];
+    if (typeof ref === 'string' && ref) out[key] = ref;
+  }
+  return out;
+}
+
+function componentProps(value: unknown): ComponentProp[] {
+  const out: ComponentProp[] = [];
+  if (!Array.isArray(value)) return out;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isObject(item) || typeof item.id !== 'string' || !item.id || seen.has(item.id)) continue;
+    if (!(COMPONENT_PROP_TYPES as readonly unknown[]).includes(item.type)) continue;
+    seen.add(item.id);
+    out.push({ id: item.id, name: typeof item.name === 'string' && item.name ? item.name : 'Property', type: item.type as ComponentProp['type'] });
+  }
+  return out;
+}
+
+function stringMap(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!isObject(value)) return out;
+  for (const key in value) if (typeof value[key] === 'string') out[key] = value[key] as string;
+  return out;
+}
+
+function propValues(value: unknown): Record<string, boolean | string> {
+  const out: Record<string, boolean | string> = {};
+  if (!isObject(value)) return out;
+  for (const key in value) {
+    const item = value[key];
+    if (typeof item === 'boolean' || typeof item === 'string') out[key] = item;
+  }
+  return out;
+}
+
 /** An instance's overrides: for each layer, an object of properties. Anything else is dropped. */
 function overrides(value: unknown): Record<string, Record<string, unknown>> {
   const out: Record<string, Record<string, unknown>> = {};
@@ -360,6 +403,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     minHeight: sizeLimit(raw.minHeight),
     maxHeight: sizeLimit(raw.maxHeight),
     sourceId: typeof raw.sourceId === 'string' && raw.sourceId ? raw.sourceId : null,
+    propRefs: propRefs(raw.propRefs),
   } as LayerNode;
 
   if (layer.type === 'FRAME') {
@@ -373,6 +417,9 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     // Only an instance has a component and overrides.
     layer.componentId = layer.kind === 'INSTANCE' && typeof raw.componentId === 'string' && raw.componentId ? raw.componentId : null;
     layer.overrides = layer.kind === 'INSTANCE' ? overrides(raw.overrides) : {};
+    layer.componentProps = componentProps(raw.componentProps);
+    layer.variantProps = stringMap(raw.variantProps);
+    layer.propValues = layer.kind === 'INSTANCE' ? propValues(raw.propValues) : {};
     layer.layoutMode = oneOf(raw.layoutMode, LAYOUT_MODES, 'NONE');
     layer.layoutWrap = oneOf(raw.layoutWrap, LAYOUT_WRAPS, 'NO_WRAP');
     layer.primaryAxisAlignItems = oneOf(raw.primaryAxisAlignItems, PRIMARY_AXIS_ALIGNS, 'MIN');

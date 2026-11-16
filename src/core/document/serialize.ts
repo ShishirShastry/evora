@@ -258,6 +258,27 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 18, document: { ...body, nodes: upgraded } };
   },
+  // Version 19 adds component sets, variants and component properties. No older component has properties or is a
+  // variant, and no older layer is bound to a property.
+  18: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      if (!isObject(node) || node.type === 'PAGE') {
+        upgraded[id] = node;
+        continue;
+      }
+      const next: Raw = { propRefs: {}, ...node };
+      if (node.type === 'FRAME') {
+        const frame: Raw = { componentProps: [], variantProps: {}, propValues: {} };
+        for (const key in frame) if (!(key in node)) next[key] = frame[key];
+      }
+      upgraded[id] = next;
+    }
+    return { ...file, schemaVersion: 19, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

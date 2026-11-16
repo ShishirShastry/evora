@@ -192,3 +192,102 @@ test('a component, its instances, overrides that survive, reset, swap and detach
   await expect(field(page, 'Component description')).toHaveValue('A card with a picture');
   expect(errors).toEqual([]);
 });
+
+test('a component set: variants chosen on an instance, and a property that hides a layer', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New design file' }).click();
+  await expect(canvas(page)).toBeVisible();
+  await canvas(page).focus();
+  const checkbox = (name: string): Locator => page.getByRole('checkbox', { name, exact: true });
+
+  // A blue button, 120 × 40, with a red square for an icon, made a component and then a set of one variant.
+  await page.keyboard.press('f');
+  await drag(page, [100, 100], [220, 140]);
+  await set(page, 'Fill 1 colour hex', '0000FF');
+  const fx = await number(page, 'X position');
+  const fy = await number(page, 'Y position');
+  /** Where a point of the page is on the canvas: the frame's corner was drawn at (100, 100). */
+  const onCanvas = (x: number, y: number): [number, number] => [100 + x - fx, 100 + y - fy];
+  await canvas(page).focus();
+  await page.keyboard.press('r');
+  await drag(page, [108, 112], [124, 128]);
+  await set(page, 'Fill 1 colour hex', 'FF0000');
+  await layer(page, 'Frame 1').click();
+  await canvas(page).focus();
+  await page.keyboard.press('Control+Alt+K');
+  await button(page, 'Combine as variants').click();
+  await expect(section(page, 'Component set')).toBeVisible();
+
+  // Its one property is named "State", and a second variant is added: a copy, under the first, which is made green.
+  await field(page, 'Name of variant property Property 1').fill('State');
+  await field(page, 'Name of variant property Property 1').press('Enter');
+  await expect(layer(page, 'State=Default')).toBeVisible();
+  await button(page, 'Add variant').click();
+  await expect(section(page, 'Component')).toBeVisible();
+  await expect(field(page, 'Value of State')).toHaveValue('Variant 2');
+  await field(page, 'Value of State').fill('Hover');
+  await field(page, 'Value of State').press('Enter');
+  await expect(layer(page, 'State=Hover')).toHaveAttribute('aria-selected', 'true');
+  await set(page, 'Fill 1 colour hex', '00FF00');
+  // The copy is 60 further down the canvas.
+  expect(await pixel(page, 200, 180)).toEqual(GREEN);
+  expect(await pixel(page, 200, 120)).toEqual(BLUE);
+
+  // A property of the set, for all its variants: whether the icon shows. The icon of each variant is bound to it.
+  await layer(page, 'Component 1').click();
+  await button(page, 'Add boolean property').click();
+  await field(page, 'Name of property Show').fill('Show icon');
+  await field(page, 'Name of property Show').press('Enter');
+  for (const y of [120, 180]) {
+    await click(page, [116, y], 2);
+    await expect(section(page, 'Component properties')).toBeVisible();
+    await select(page, 'Visibility property').selectOption({ label: 'Show icon' });
+  }
+
+  // An instance of the first variant, from the Components list.
+  await page.getByRole('region', { name: 'Components' }).getByRole('button', { name: 'Insert an instance of Component 1/State=Default' }).click();
+  await expect(section(page, 'Instance')).toBeVisible();
+  await expect(layer(page, 'Component 1').first()).toHaveAttribute('aria-selected', 'true');
+  const [ix, iy] = onCanvas(await number(page, 'X position'), await number(page, 'Y position'));
+  const body: [number, number] = [ix + 90, iy + 20];
+  const icon: [number, number] = [ix + 16, iy + 20];
+  expect(await pixel(page, ...body)).toEqual(BLUE);
+  expect(await pixel(page, ...icon)).toEqual(RED);
+  await expect(select(page, 'Variant State').locator('option')).toHaveText(['Default', 'Hover']);
+  await expect(select(page, 'Variant State')).toHaveValue('Default');
+  await expect(checkbox('Property Show icon')).toBeChecked();
+
+  // The other variant is chosen: the instance turns green.
+  await select(page, 'Variant State').selectOption('Hover');
+  expect(await pixel(page, ...body)).toEqual(GREEN);
+  expect(await pixel(page, ...icon)).toEqual(RED);
+  // The icon is switched off by the property, and stays off when the variant is changed back.
+  await checkbox('Property Show icon').uncheck();
+  expect(await pixel(page, ...icon)).toEqual(GREEN);
+  await select(page, 'Variant State').selectOption('Default');
+  expect(await pixel(page, ...body)).toEqual(BLUE);
+  expect(await pixel(page, ...icon)).toEqual(BLUE);
+  await expect(checkbox('Property Show icon')).not.toBeChecked();
+  // The variants themselves still show their icons.
+  expect(await pixel(page, 116, 120)).toEqual(RED);
+  // One undo step for the variant, one for the property.
+  await canvas(page).focus();
+  await page.keyboard.press('Control+z');
+  expect(await pixel(page, ...body)).toEqual(GREEN);
+  await page.keyboard.press('Control+Shift+z');
+
+  // Stored: after a reload the instance is the Default variant without its icon; reset brings the icon back.
+  await expect(page.getByRole('status')).toHaveText('Saved');
+  await page.reload();
+  await expect(canvas(page)).toBeVisible();
+  expect(await pixel(page, ...icon)).toEqual(BLUE);
+  await click(page, body);
+  await expect(select(page, 'Variant State')).toHaveValue('Default');
+  await expect(checkbox('Property Show icon')).not.toBeChecked();
+  await button(page, 'Reset instance').click();
+  expect(await pixel(page, ...icon)).toEqual(RED);
+  await expect(checkbox('Property Show icon')).toBeChecked();
+  expect(errors).toEqual([]);
+});

@@ -201,11 +201,12 @@ export function createLayer(
     minHeight: null,
     maxHeight: null,
     sourceId: null,
+    propRefs: {},
   };
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], kind: 'FRAME', description: '', componentId: null, overrides: {}, ...NO_AUTO_LAYOUT };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], kind: 'FRAME', description: '', componentId: null, overrides: {}, componentProps: [], variantProps: {}, propValues: {}, ...NO_AUTO_LAYOUT };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };

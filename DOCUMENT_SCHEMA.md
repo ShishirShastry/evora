@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **18**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **19**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, and version 19 component sets, variants and component properties. This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -169,6 +169,9 @@ interface LayerBase extends NodeBase {
 
   // Version 18: components (see §5.8)
   sourceId: NodeId | null;   // inside an instance: the layer of the component that this one mirrors; otherwise null
+
+  // Version 19: component properties (see §5.8)
+  propRefs: { visible?: string; characters?: string; componentId?: string };   // in a component: the properties, by ID, that decide these
 }
 ```
 
@@ -186,10 +189,14 @@ interface FrameNode extends LayerBase {
   guides: Guide[];           // version 14: guides of this frame, in its own space
 
   // Version 18: components (see §5.8)
-  kind: 'FRAME' | 'COMPONENT' | 'INSTANCE';   // an ordinary frame, the original of a component, or an instance of one
+  kind: 'FRAME' | 'COMPONENT' | 'COMPONENT_SET' | 'INSTANCE';   // an ordinary frame, a component, a set of variants (version 19), or an instance
   description: string;                         // a component's description
   componentId: NodeId | null;                  // an instance's component; null for anything else
   overrides: Record<NodeId, Record<string, unknown>>;   // an instance's overrides; {} for anything else
+  // Version 19
+  componentProps: { id: string; name: string; type: 'BOOLEAN' | 'TEXT' | 'INSTANCE_SWAP' }[];   // of a component, or of a set for all its variants
+  variantProps: Record<string, string>;        // of a component in a set: its value for each of the set's variant properties
+  propValues: Record<string, boolean | string>;   // an instance's values for its component's properties, by property ID
 
   // Version 15: Auto Layout (see §5.7)
   layoutMode: 'NONE' | 'HORIZONTAL' | 'VERTICAL';     // NONE: children stay where they are put
@@ -475,6 +482,10 @@ A component and an instance are frames (`type: 'FRAME'`) whose `kind` says so, w
 
 **Components inside components.** A component may hold instances of other components, never of itself, however indirectly. In an instance of the outer component, the inner instance is mirrored as an instance (its `kind`, `componentId` and `overrides` are mirrored like any property) and then given its own mirrors of the inner component. What is changed inside it is recorded on the outer instance, as an override of the inner one's `overrides` holding only what goes beyond the inner one's own; showing another component in it is an override of its `componentId`. So a change at any level reaches every instance, and each level keeps what was changed at it.
 
+**Component sets and variants (version 19).** A component set (`kind: 'COMPONENT_SET'`) is a frame whose direct children are components: its variants. Each variant says which one it is in `variantProps`, a value for each variant property of the set ("Type": "Primary", "State": "Hover"); the properties a set has, and the values each can take, are read off its variants and stored nowhere else. A variant's name is made from its values. An instance of a variant shows another variant by getting that one's `componentId`, which is a swap like any other (below): the variant chosen is the one with the new value that agrees with the old variant's other values in the most places.
+
+**Component properties (version 19).** `componentProps` on a component, or on a set for all its variants, defines properties an instance can set without reaching into its layers: `BOOLEAN`, `TEXT` or `INSTANCE_SWAP`. A layer of the component is bound to a property in its `propRefs`: a boolean property decides its `visible`, a text property a text's `characters`, an instance-swap property the `componentId` of an instance inside the component. A property has no default of its own: until an instance sets it, a bound layer is as the component has it. An instance's values are in `propValues`, by property ID; where it has one, the mirrors of the bound layers get it, over any override. A designer's change to a bound property of a mirror is recorded as the instance's value for the property, not as an override. For an instance inside an instance, `propValues` is overridden from the outer one like `overrides`, as a whole. Removing a property removes every binding to it and every value for it. "Reset" empties `propValues` as well as `overrides`.
+
 **Swapping.** Giving an instance another `componentId` keeps each override whose layer has a counterpart of the same type and name at the same place in the new component, and drops the rest.
 
 ---
@@ -515,7 +526,7 @@ A valid document satisfies all of the following. `validateDocument()` reports vi
 | 11 | A text layer's `styleRanges` are in order, do not overlap, are not empty, lie inside `characters`, each change something, and no two neighbours are alike; their values are within the limits of the layer's own font properties. | Drop bad values (that part of the text falls back to the layer's style), then cut, clamp, order and join the ranges. |
 
 | 12 | A text layer's layout sizing is `HUG` exactly where its `textAutoResize` fits it to its content. Padding is ≥ 0; a size limit is ≥ 0 or null. | Set the sizing from `textAutoResize`; clamp. |
-| 14 | Only an instance has a `componentId` and `overrides`. | Set to null and {}. |
+| 14 | Only an instance has a `componentId`, `overrides` and `propValues`. Property definitions have an ID, a known type and a name; `propRefs` and `variantProps` hold strings. | Set to null and {}; drop what is malformed. |
 | 15 | Every instance is in step with its component (§5.8): it holds exactly one mirror of each of the component's layers, with the component's properties and its own overrides, and no layer has a `sourceId` outside an instance. | Not by `repairDocument`: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 | 13 | Layout sizing and positioning are ones that can apply where the layer is (§5.7), and every frame with a layout is laid out: the boxes of the layers in its flow, and its own where it hugs, are what the layout gives. | Not by `repairDocument`, which cannot measure text: the editor restores it with `restoreLayout` after the first change, as it does after every change. |
 
@@ -526,7 +537,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 18;
+const CURRENT_SCHEMA_VERSION = 19;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -571,6 +582,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // 17 -> 18: every layer gets sourceId null; every frame gets kind 'FRAME', description '', componentId null
   // and overrides {}.
   17: addComponents,
+  // 18 -> 19: every layer gets propRefs {}; every frame gets componentProps [], variantProps {} and propValues {}.
+  18: addComponentProperties,
 };
 ```
 
@@ -593,6 +606,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 15 | 16 | `STRETCH` among the alignments across a layout | `src/autolayout.test.ts` ("opens a version 15 file, where no frame stretches") |
 | 16 | 17 | `layoutWrap: 'WRAP'` on columns as well as rows | `src/autolayout.test.ts` ("opens a version 16 file, where only rows wrap") |
 | 17 | 18 | Components and instances: `sourceId` on every layer; `kind`, `description`, `componentId` and `overrides` on frames | `src/components.test.ts` ("opens a version 17 file, where nothing is a component") |
+| 18 | 19 | Component sets (`kind: 'COMPONENT_SET'`), `variantProps`, `componentProps`, `propValues` on frames; `propRefs` on every layer | `src/variants.test.ts` ("opens a version 18 file") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
@@ -624,7 +638,7 @@ These are reserved so that later versions extend the schema without restructurin
 | 2 | (Done: mirrored text and image fills and guides on frames in version 14; per-range text styles, lists and justified text in version 13; `GROUP` in version 2, `TEXT` in version 3, gradients, stroke options, corner radii, effects and blend modes in version 4, image paints and assets in version 5, constraints and layout grids in version 6, ruler guides in version 7, masks in version 10, image adjustments in version 12.) |
 | 3 | (Done: `VECTOR` in version 8, arcs and arrowheads in version 9, `BOOLEAN_OPERATION` in version 11.) |
 | 4 | (Done in version 15: Auto Layout properties on frames and on every layer, §5.7; the stretch alignment in version 16; wrapping columns in version 17.) |
-| 5 | (Done in version 18: components and instances with overrides, as kinds of frame, §5.8.) Still to come: component sets, variants and component properties; document-level `styles`, `variableCollections`, `variables`; property bindings; libraries. |
+| 5 | (Done in version 18: components and instances with overrides, as kinds of frame, §5.8.) Done in version 19: component sets, variants and component properties. Still to come: document-level `styles`, `variableCollections`, `variables`; property bindings; libraries. |
 | 6 | `interactions[]` on nodes, `flows[]` on pages, scroll behaviour, fixed/sticky children. |
 | 7 | `exportSettings[]`, annotations, development status. |
 | 8 | Comments are stored outside the document body, keyed by document and node ID. |

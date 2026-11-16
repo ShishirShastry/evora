@@ -1,5 +1,6 @@
 /**
- * OPEN DESIGN document schema, version 18 (adds components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
+ * OPEN DESIGN document schema, version 19 (adds component sets, variants and component properties; version 18
+ * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
  * version 12 added image adjustments, version 11 boolean groups, version 10 masks; version 9 added arcs on ellipses and arrowheads on lines and vectors;
@@ -10,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 18;
+export const CURRENT_SCHEMA_VERSION = 19;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -357,14 +358,40 @@ interface LayerBase extends NodeBase {
    * step with the one it mirrors (see `syncInstances`).
    */
   sourceId: NodeId | null;
+  /**
+   * For a layer inside a component: the component properties that decide
+   * something about it in each instance. Each names a property by its ID.
+   */
+  propRefs: PropRefs;
+}
+
+/** What a component property can decide about a layer: whether it shows, what a text says, which component an instance shows. */
+export interface PropRefs {
+  visible?: string;
+  characters?: string;
+  componentId?: string;
+}
+
+export type ComponentPropType = 'BOOLEAN' | 'TEXT' | 'INSTANCE_SWAP';
+export const COMPONENT_PROP_TYPES: readonly ComponentPropType[] = ['BOOLEAN', 'TEXT', 'INSTANCE_SWAP'];
+
+/**
+ * A property of a component that every instance can set for itself: a
+ * switch, a text or a component. What it starts as in an instance is what
+ * the layers it is bound to have in the component.
+ */
+export interface ComponentProp {
+  id: string;
+  name: string;
+  type: ComponentPropType;
 }
 
 /**
  * What a frame is, as far as components go: an ordinary frame, the original
  * of a component, or an instance that shows a component somewhere else.
  */
-export type FrameKind = 'FRAME' | 'COMPONENT' | 'INSTANCE';
-export const FRAME_KINDS: readonly FrameKind[] = ['FRAME', 'COMPONENT', 'INSTANCE'];
+export type FrameKind = 'FRAME' | 'COMPONENT' | 'COMPONENT_SET' | 'INSTANCE';
+export const FRAME_KINDS: readonly FrameKind[] = ['FRAME', 'COMPONENT', 'COMPONENT_SET', 'INSTANCE'];
 
 /**
  * What differs in an instance from its component: for a layer of the
@@ -383,6 +410,12 @@ export interface FrameNode extends LayerBase {
   componentId: NodeId | null;
   /** An instance's overrides. Empty for anything that is not an instance. */
   overrides: InstanceOverrides;
+  /** The properties of a component, or of a component set, where they are shared by all its variants. */
+  componentProps: ComponentProp[];
+  /** For a component in a component set: which variant it is, as a value for each of the set's variant properties. */
+  variantProps: Readonly<Record<string, string>>;
+  /** An instance's values for its component's properties, by property ID. A property not named here is as the component has it. */
+  propValues: Readonly<Record<string, boolean | string>>;
   clipsContent: boolean;
   cornerRadius: number;
   /** One radius per corner; when null, `cornerRadius` applies to all four. */
@@ -698,6 +731,9 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   description?: string;
   componentId?: NodeId | null;
   overrides?: InstanceOverrides;
+  componentProps?: ComponentProp[];
+  variantProps?: Readonly<Record<string, string>>;
+  propValues?: Readonly<Record<string, boolean | string>>;
   layoutMode?: LayoutMode;
   layoutWrap?: LayoutWrap;
   primaryAxisAlignItems?: PrimaryAxisAlign;

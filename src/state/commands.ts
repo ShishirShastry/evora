@@ -2,6 +2,7 @@ import {
   addAutoLayout,
   containerAt,
   createComponent,
+  createComponentSet,
   createInstance,
   detachInstances,
   getPageIdOf,
@@ -460,6 +461,19 @@ export function createComponentSelection(store: EditorStore): void {
   let made: NodeId | null = null;
   apply('Create component', (doc) => {
     const out = createComponent(doc, selection);
+    if (!out) return doc;
+    made = out.id;
+    return out.doc;
+  });
+  if (made) store.getState().setSelection([made]);
+}
+
+/** "Combine as variants": the selected components become the variants of a new component set. */
+export function createComponentSetSelection(store: EditorStore): void {
+  const { selection, apply } = store.getState();
+  let made: NodeId | null = null;
+  apply('Combine as variants', (doc) => {
+    const out = createComponentSet(doc, selection);
     if (!out) return doc;
     made = out.id;
     return out.doc;
@@ -1128,6 +1142,13 @@ export const COMMANDS: readonly Command[] = [
     run: ({ store }) => createComponentSelection(store),
   },
   {
+    id: 'object.createComponentSet',
+    label: 'Combine as variants',
+    group: 'Object',
+    enabled: (state) => state.selection.length > 0 && createComponentSet(state.doc, state.selection) !== null,
+    run: ({ store }) => createComponentSetSelection(store),
+  },
+  {
     id: 'object.createInstance',
     label: 'Create instance',
     group: 'Object',
@@ -1151,7 +1172,7 @@ export const COMMANDS: readonly Command[] = [
     enabled: (state) =>
       state.selection.some((id) => {
         const node = state.doc.nodes[id];
-        return isInstance(node) && Object.keys(node.overrides).length > 0;
+        return isInstance(node) && (Object.keys(node.overrides).length > 0 || Object.keys(node.propValues).length > 0);
       }),
     run: ({ store }) => resetSelection(store),
   },

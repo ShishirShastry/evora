@@ -286,7 +286,7 @@ export function LayersPanel() {
                       ? 'mask'
                       : node.type === 'BOOLEAN_OPERATION'
                         ? OPERATION_ICONS[node.operation]
-                        : node.type === 'FRAME' && node.kind === 'COMPONENT'
+                        : node.type === 'FRAME' && (node.kind === 'COMPONENT' || node.kind === 'COMPONENT_SET')
                           ? 'component'
                           : node.type === 'FRAME' && node.kind === 'INSTANCE'
                             ? 'instance'

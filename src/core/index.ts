@@ -32,6 +32,7 @@ export * from './layout/autoLayout';
 export * from './layout/restore';
 export * from './components/instances';
 export * from './ops/components';
+export * from './ops/variants';
 export * from './ops/autoLayout';
 export * from './vector/bezier';
 export * from './vector/network';

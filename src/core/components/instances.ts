@@ -1,5 +1,5 @@
 import { setNodes } from '../document/mutate';
-import { isFrame, isLayer, type DesignNode, type Document, type FrameNode, type InstanceOverrides, type LayerNode, type NodeId } from '../document/schema';
+import { isFrame, isLayer, type ComponentProp, type DesignNode, type Document, type FrameNode, type InstanceOverrides, type LayerNode, type NodeId } from '../document/schema';
 import { getAncestorIds, getChildIds } from '../scene/tree';
 
 /**
@@ -47,10 +47,32 @@ export const OVERRIDABLE: readonly string[] = [
   'textCase',
   'listType',
   'styleRanges',
-  // A component used inside the component: which one it is, and what was changed in it.
+  // A component used inside the component: which one it is, what was changed in it, and what its properties are set to.
   'componentId',
   'overrides',
+  'propValues',
 ];
+
+/** What a component property can decide about a layer, and the type of property that decides it. */
+const BOUND: readonly (readonly ['visible' | 'characters' | 'componentId', ComponentProp['type']])[] = [
+  ['visible', 'BOOLEAN'],
+  ['characters', 'TEXT'],
+  ['componentId', 'INSTANCE_SWAP'],
+];
+
+/** The component set a component is a variant in, if it is in one. */
+export function setOf(doc: Document, componentId: NodeId): FrameNode | null {
+  const component = doc.nodes[componentId];
+  const parent = isLayer(component) ? doc.nodes[component.parentId] : undefined;
+  return isFrame(parent) && parent.kind === 'COMPONENT_SET' ? parent : null;
+}
+
+/** The properties of a component: its own, and those of the component set it is a variant in. */
+export function propsOf(doc: Document, componentId: NodeId): ComponentProp[] {
+  const component = doc.nodes[componentId];
+  if (!isFrame(component)) return [];
+  return [...(setOf(doc, componentId)?.componentProps ?? []), ...component.componentProps];
+}
 
 /** What an instance takes from its component for itself, as a frame: its look and its layout. */
 const ROOT_COPIED: readonly string[] = [
@@ -240,11 +262,25 @@ function captureOverrides(previous: Document, doc: Document): Document {
     if (node.sourceId === null) continue;
     const owner = instanceOf(working(), id);
     if (!owner) continue;
+    // What a component property decides about this layer is recorded as the instance's value for that property.
+    const source = doc.nodes[node.sourceId];
+    const defined = owner.componentId === null ? [] : propsOf(doc, owner.componentId);
+    const viaProperty = new Set<string>();
+    if (isLayer(source)) {
+      for (const [key, type] of BOUND) {
+        const ref = source.propRefs[key];
+        const value = (nodes[id] as unknown as Props)[key];
+        if (!ref || same(value, was[key]) || !defined.some((prop) => prop.id === ref && prop.type === type)) continue;
+        const current = nodes[owner.id] as FrameNode;
+        nodes[owner.id] = { ...current, propValues: { ...current.propValues, [ref]: value as boolean | string } };
+        viaProperty.add(key);
+      }
+    }
     // For an instance inside an instance, that record is what the outer one keeps (as part of `overrides`).
     const current = nodes[id] as unknown as Props;
     const props: Props = {};
     for (const key of OVERRIDABLE) {
-      if (own && ROOT_OVERRIDABLE.includes(key)) continue;
+      if ((own && ROOT_OVERRIDABLE.includes(key)) || viaProperty.has(key)) continue;
       const now = current;
       if (!(key in now) || same(now[key], was[key])) continue;
       if (key === 'overrides') {
@@ -293,6 +329,7 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
 
   const expected = new Set<NodeId>();
   const inner: NodeId[] = [];
+  const properties = propsOf(doc, component.id);
   for (const source of sourcesOf(doc, component.id)) {
     const id = mirrorId(instanceId, source.id);
     expected.add(id);
@@ -311,6 +348,15 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
       }
       if (key === 'overrides') next[key] = mergeOverrides(from[key] as InstanceOverrides, override[key] as InstanceOverrides | undefined);
       else next[key] = key in override && OVERRIDABLE.includes(key) ? override[key] : from[key];
+    }
+    // A property of the component that this layer is bound to decides it, where the instance has set the property.
+    for (const [key, type] of BOUND) {
+      const ref = source.propRefs[key];
+      if (!ref || !(ref in instance.propValues) || !properties.some((prop) => prop.id === ref && prop.type === type)) continue;
+      const value = instance.propValues[ref];
+      if (type === 'BOOLEAN' ? typeof value !== 'boolean' : typeof value !== 'string') continue;
+      if (type === 'INSTANCE_SWAP' && !isComponent(doc.nodes[value as string])) continue;
+      if (key in next) next[key] = value;
     }
     next.id = id;
     next.sourceId = source.id;

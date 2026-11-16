@@ -100,7 +100,8 @@ export function createInstance(doc: Document, componentId: NodeId, place?: { par
   }
   const { keys, rekeyed } = insertionKeys(doc, parentId, topIndex(doc, parentId), 1);
   const instance = createLayer('FRAME', parentId, keys[0] as string, {
-    name: component.name,
+    // An instance of a variant goes by the name of the set.
+    name: (isFrame(doc.nodes[component.parentId]) && (doc.nodes[component.parentId] as FrameNode).kind === 'COMPONENT_SET' ? (doc.nodes[component.parentId] as FrameNode) : component).name,
     x: at.x,
     y: at.y,
     width: component.width,
@@ -146,12 +147,12 @@ export function detachInstances(doc: Document, ids: readonly NodeId[]): Document
   return patchNodes(doc, patches);
 }
 
-/** Takes away everything that was changed in instances: they are their components again, at the size they have. */
+/** Takes away everything that was changed in instances, and what their properties were set to: they are their components again, at the size they have. */
 export function resetInstances(doc: Document, ids: readonly NodeId[]): Document {
   const patches: Record<NodeId, LayerPatch> = {};
   for (const id of ids) {
     const node = doc.nodes[id];
-    if (isInstance(node) && Object.keys(node.overrides).length > 0) patches[id] = { overrides: {} };
+    if (isInstance(node) && (Object.keys(node.overrides).length > 0 || Object.keys(node.propValues).length > 0)) patches[id] = { overrides: {}, propValues: {} };
   }
   return patchNodes(doc, patches);
 }
