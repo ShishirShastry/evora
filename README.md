@@ -34,3 +34,7 @@ npm run build           # production build into dist/
 | `e2e` | Browser acceptance tests. |
 
 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) explains the design and [DOCUMENT_SCHEMA.md](DOCUMENT_SCHEMA.md) defines the file format.
+
+## Licence
+
+OPEN DESIGN is released under the [MIT License](LICENSE). The Inter font that ships with it is under the SIL Open Font License 1.1; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

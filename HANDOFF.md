@@ -1,6 +1,6 @@
 # OPEN DESIGN — Handoff note
 
-Last updated: 2026-11-16, after the last open items of Phases 1 to 3 were closed (mirrored text and pictures, guides on frames, the bundled font). Every item in the specification's lists for those three phases has a tested implementation; the one thing still open in them is the choice of a licence, which is the owner's. The finer limits of what exists are under "Known limitations". Phase 4 (Auto Layout) is being built by another session in its own clone of the repository and is not in this tree yet; Phases 5 to 10 have not been started.
+Last updated: 2026-11-16, after the last open items of Phases 1 to 3 were closed (mirrored text and pictures, guides on frames, the bundled font). Every item in the specification's lists for those three phases has a tested implementation, and nothing recorded as open in them is left: the owner chose the MIT licence on 2026-11-16. The finer limits of what exists are under "Known limitations". Phase 4 (Auto Layout) is being built by another session in its own clone of the repository and is not in this tree yet; Phases 5 to 10 have not been started.
 
 ## Where the project stands
 
@@ -8,7 +8,7 @@ Last updated: 2026-11-16, after the last open items of Phases 1 to 3 were closed
 |---|---|
 | 0 — Planning | Partly done, then stopped at the owner's request. `PROJECT_ARCHITECTURE.md` and `DOCUMENT_SCHEMA.md` exist. The other four planning documents were **not written**. |
 | 1 — Editor foundation | **Implemented and tested.** Acceptance criterion met (see below). |
-| 2 — Design functionality | **Implemented and tested.** Shape properties, fills (solid, gradients, images with crop and adjustments), strokes, effects, blend modes, typography (styles on parts of a text, lists, justified lines), image import, alignment, distribution, grouping, frame clipping, rulers, guides, snapping (to layers, grids, guides, even spacing), distances, layout grids, constraints, masks, a colour picker. Limits are listed under "Known limitations"; two things need the owner (a bundled font, a licence). Whether the acceptance criterion ("a complete static UI design without another application") is met is a judgement for the owner: screens can be designed and kept, but nothing can be exported yet (Phase 7). |
+| 2 — Design functionality | **Implemented and tested.** Shape properties, fills (solid, gradients, images with crop and adjustments), strokes, effects, blend modes, typography (styles on parts of a text, lists, justified lines), image import, alignment, distribution, grouping, frame clipping, rulers, guides, snapping (to layers, grids, guides, even spacing), distances, layout grids, constraints, masks, a colour picker. Limits are listed under "Known limitations". Whether the acceptance criterion ("a complete static UI design without another application") is met is a judgement for the owner: screens can be designed and kept, but nothing can be exported yet (Phase 7). |
 | 3 — Vector editing | **Implemented and tested.** Done and tested: the vector layer (a vector network of points and Bézier segments), "Flatten to vector" for shapes, the Pen and Pencil tools, editing points and handles on the canvas (nodes, control handles, close and join paths, add and remove points), boolean operations (union, subtract, intersect, exclude), arcs (an ellipse as a slice, a ring or a piece of a ring) and arrowheads on lines and open paths. Outline stroke (a stroke turned into a filled shape) and boolean groups that keep their shapes are done too. **Not done:** strokes of varying width, which are not in the specification's list. Every item in that list has a tested implementation; whether the acceptance criterion ("a designer can create and edit vector illustrations and icons") is met is for the owner to judge, with the limits listed under "Known limitations". |
 | 4 – 10 | **Not started.** Nothing from these phases exists, not even as UI. |
 
@@ -138,7 +138,7 @@ Not covered by automated tests: the native save/open file dialogs for `.opendesi
 - Keyboard shortcuts match physical key positions, so letter shortcuts follow a QWERTY layout.
 - Theme: the file browser follows the theme but has no switch of its own (it is in the editor's View menu). A new file's page is dark in both themes, because the page colour belongs to the design. The colours drawn over the canvas (selection, guides, frame names) are the same in both themes.
 - Files live in the browser profile that created them, per address (`localhost:5173`). Clearing site data deletes them; use "Save a copy to disk" for anything that matters.
-- No licence has been chosen for the project yet. That is the owner's decision.
+- Licence: the project is under the MIT licence (`LICENSE`, chosen by the owner on 2026-11-16); the bundled Inter font keeps its own, the SIL Open Font License 1.1 (`THIRD_PARTY_NOTICES.md`). The copyright line names "The OPEN DESIGN contributors"; it should be changed if a person or an organisation is to be named instead.
 
 ## Environment notes
 
@@ -155,7 +155,7 @@ Not covered by automated tests: the native save/open file dialogs for `.opendesi
 1. (Done: the Inter font ships with the application.)
 2. (Done in schema version 14: text and image fills are mirrored by a flip, and a resize dragged past the edge that stays fixed mirrors what is in the layer.)
 3. (Done in schema version 14: guides that belong to a frame.)
-4. **A licence.** None has been chosen; that is the owner's decision.
+4. (Done: the owner chose the MIT licence; see `LICENSE`.)
 5. The finer limits listed under "Known limitations": each is a place where what exists stops short, not something missing from the lists.
 
 Not in the specification's lists, and not built: strokes of varying width.

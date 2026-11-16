@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "OPEN DESIGN - a free, open-source, local-first design and prototyping application.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"
