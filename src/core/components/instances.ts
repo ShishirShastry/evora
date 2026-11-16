@@ -304,10 +304,10 @@ function captureOverrides(previous: Document, doc: Document): Document {
   return setNodes(doc, nodes);
 }
 
-/** Brings one instance into step with its component. Returns the document and the instances inside it that it made or changed. */
-function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Document; inner: NodeId[] } {
+/** What brings one instance into step with its component, and the instances inside it that it makes or changes. */
+function mirror(doc: Document, since: Document, instanceId: NodeId): { changes: Record<NodeId, DesignNode | null>; inner: NodeId[] } {
   const instance = doc.nodes[instanceId];
-  if (!isInstance(instance)) return { doc, inner: [] };
+  if (!isInstance(instance)) return { changes: {}, inner: [] };
   const component = instance.componentId === null ? undefined : doc.nodes[instance.componentId];
   const changes: Record<NodeId, DesignNode | null> = {};
 
@@ -315,11 +315,11 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
     // Its component is gone: it stays as it is, as an ordinary frame with ordinary layers in it.
     changes[instanceId] = { ...instance, kind: 'FRAME', componentId: null, overrides: {} };
     for (const node of mirrorsIn(doc, instanceId)) changes[node.id] = { ...node, sourceId: null };
-    return { doc: setNodes(doc, changes), inner: [] };
+    return { changes, inner: [] };
   }
   // A component cannot hold an instance of itself, however indirectly: there would be no end to it.
-  if (getAncestorIds(doc, instanceId).some((id) => id === component.id || doc.nodes[id]?.id === instance.componentId)) return { doc, inner: [] };
-  if (getAncestorIds(doc, instanceId).length > 60) return { doc, inner: [] };
+  if (getAncestorIds(doc, instanceId).some((id) => id === component.id || doc.nodes[id]?.id === instance.componentId)) return { changes: {}, inner: [] };
+  if (getAncestorIds(doc, instanceId).length > 60) return { changes: {}, inner: [] };
 
   const before = since.nodes[instanceId];
   const fresh = !isInstance(before) || before.componentId !== instance.componentId;
@@ -402,6 +402,11 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
     }
     // What it is exported as and what developers are told about it are the instance's own; a new one starts with none.
     if (made) Object.assign(next, { exportSettings: [], devStatus: 'NONE', annotations: [], devResources: [], codeConnect: null });
+    // A text the instance says otherwise keeps the component's styled parts only as far as its own text goes.
+    if (typeof next.characters === 'string' && Array.isArray(next.styleRanges) && next.characters !== (from.characters as string | undefined)) {
+      const length = next.characters.length;
+      next.styleRanges = (next.styleRanges as { start: number; end: number }[]).filter((range) => range.start < length).map((range) => (range.end > length ? { ...range, end: length } : range));
+    }
     next.id = id;
     next.sourceId = source.id;
     next.parentId = source.parentId === component.id ? instanceId : mirrorId(instanceId, source.parentId);
@@ -417,7 +422,7 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { doc: Docu
   const gone = new Set<NodeId>();
   for (const node of mirrorsIn(doc, instanceId)) if (!expected.has(node.id) && !gone.has(node.id)) subtreeIds(doc, node.id, gone);
   for (const id of gone) if (!expected.has(id)) changes[id] = null;
-  return { doc: setNodes(doc, changes), inner };
+  return { changes, inner };
 }
 
 /**
@@ -457,17 +462,30 @@ export function syncInstances(since: Document, doc: Document, capture: boolean):
   const depth = new Map<NodeId, number>();
   for (const id of queue) depth.set(id, getAncestorIds(next, id).length);
   queue.sort((a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || (a < b ? -1 : 1));
+  // The instances at one depth are brought into step together, against the document as it was before them: they
+  // are not inside one another, so none changes what another reads. The tree is indexed once for each depth, not
+  // once for each instance, which matters in a file with a thousand instances.
+  let pending = queue;
   const done = new Set<NodeId>();
-  for (let i = 0; i < queue.length && i < 100000; i++) {
-    const id = queue[i] as NodeId;
-    if (done.has(id)) continue;
-    done.add(id);
-    const out = mirror(next, since, id);
-    next = out.doc;
-    for (const innerId of out.inner) {
-      done.delete(innerId);
-      queue.push(innerId);
+  for (let wave = 0; pending.length > 0 && wave < 200; wave++) {
+    const shallowest = Math.min(...pending.map((id) => depth.get(id) ?? 0));
+    const now = pending.filter((id) => (depth.get(id) ?? 0) === shallowest && !done.has(id));
+    const later = pending.filter((id) => (depth.get(id) ?? 0) !== shallowest);
+    const changes: Record<NodeId, DesignNode | null> = {};
+    const inner: NodeId[] = [];
+    for (const id of new Set(now)) {
+      done.add(id);
+      const out = mirror(next, since, id);
+      Object.assign(changes, out.changes);
+      inner.push(...out.inner);
     }
+    next = setNodes(next, changes);
+    // An instance inside an instance that was made or changed is brought into step in its turn, even if it was before.
+    for (const id of inner) {
+      done.delete(id);
+      depth.set(id, getAncestorIds(next, id).length);
+    }
+    pending = [...later.filter((id) => !inner.includes(id)), ...inner];
   }
   return next;
 }

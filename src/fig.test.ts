@@ -181,18 +181,21 @@ describe('reading files laid out as Figma’s', () => {
     message ParentIndex { string position = 7; GUID guid = 3; }
     message Number { NumberUnits units = 9; float value = 4; }
     message FontName { string family = 1; string style = 2; }
-    message TextData { string characters = 1; uint[] characterStyleIDs = 2; }
+    message TextData { string characters = 1; uint[] characterStyleIDs = 2; NodeChange[] styleOverrideTable = 3; }
     message Paint { PaintType type = 1; Color color = 2; float opacity = 3; bool visible = 4; }
     message SymbolOverride { string note = 1; }
     message SymbolData { GUID symbolID = 1; SymbolOverride[] symbolOverrides = 2; }
     message VectorData { uint vectorNetworkBlob = 1; Vector normalizedSize = 2; }
-    message Interaction { string kind = 1; }
+    message StyleId { GUID guid = 1; }
+    message PrototypeEvent { string interactionType = 1; float transitionTimeout = 2; }
+    message PrototypeAction { string connectionType = 1; string connectionURL = 2; GUID transitionNodeID = 3; string navigationType = 4; string transitionType = 5; float transitionDuration = 6; string easingType = 7; }
+    message PrototypeInteraction { PrototypeEvent event = 1; PrototypeAction[] actions = 2; }
     message NodeChange {
       string name = 100; GUID guid = 200; ParentIndex parentIndex = 300; NodeType type = 400;
       Vector size = 500; Matrix transform = 600; Paint[] fillPaints = 700; float opacity = 800;
       bool resizeToFit = 900; bool frameMaskDisabled = 901; TextData textData = 1000; float fontSize = 1001; FontName fontName = 1002;
       Number letterSpacing = 1003; Number lineHeight = 1004; SymbolData symbolData = 1100; VectorData vectorData = 1200;
-      Interaction[] prototypeInteractions = 1300; string styleIdForFill = 1400; bool internalOnly = 1500; uint someFutureField = 9999;
+      PrototypeInteraction[] prototypeInteractions = 1300; StyleId styleIdForFill = 1400; bool internalOnly = 1500; uint styleID = 1600; uint someFutureField = 9999;
     }
     message Blob { byte[] bytes = 1; }
     message Message { uint type = 1; NodeChange[] nodeChanges = 2; Blob[] blobs = 3; }
@@ -229,8 +232,8 @@ describe('reading files laid out as Figma’s', () => {
     { guid: g(0, 1), type: 'CANVAS', name: 'First', parentIndex: { guid: g(0, 0), position: 'a' } },
     { guid: g(0, 3), type: 'CANVAS', name: 'Internal Only Canvas', internalOnly: true, parentIndex: { guid: g(0, 0), position: 'c' } },
     { guid: g(9, 9), type: 'SYMBOL', name: 'Library button', parentIndex: { guid: g(0, 3), position: 'a' }, size: { x: 10, y: 10 }, transform: at(0, 0) },
-    { guid: g(1, 1), type: 'FRAME', name: 'Screen', parentIndex: { guid: g(0, 1), position: 'a' }, size: { x: 375, y: 812 }, transform: at(10, 20), fillPaints: [paint(1, 1, 1)], someFutureField: 7, prototypeInteractions: [{ kind: 'ON_CLICK' }] },
-    { guid: g(1, 4), type: 'TEXT', name: 'Heading', parentIndex: { guid: g(1, 1), position: 'b' }, size: { x: 200, y: 30 }, transform: at(16, 40), fillPaints: [paint(0, 0, 0)], textData: { characters: 'Welcome', characterStyleIDs: [0, 0, 1] }, fontSize: 24, fontName: { family: 'Roboto', style: 'Semi Bold Italic' }, letterSpacing: { value: 10, units: 'PERCENT' }, lineHeight: { value: 150, units: 'PERCENT' }, styleIdForFill: 'S:abc' },
+    { guid: g(1, 1), type: 'FRAME', name: 'Screen', parentIndex: { guid: g(0, 1), position: 'a' }, size: { x: 375, y: 812 }, transform: at(10, 20), fillPaints: [paint(1, 1, 1)], someFutureField: 7, prototypeInteractions: [{ event: { interactionType: 'ON_CLICK' }, actions: [{ connectionType: 'URL', connectionURL: 'https://example.com' }] }, { event: { interactionType: 'AFTER_TIMEOUT', transitionTimeout: 1.5 }, actions: [{ connectionType: 'INTERNAL_NODE', navigationType: 'NAVIGATE', transitionNodeID: g(1, 2), transitionType: 'PUSH_FROM_RIGHT', transitionDuration: 0.4, easingType: 'LINEAR' }] }] },
+    { guid: g(1, 4), type: 'TEXT', name: 'Heading', parentIndex: { guid: g(1, 1), position: 'b' }, size: { x: 200, y: 30 }, transform: at(16, 40), fillPaints: [paint(0, 0, 0)], textData: { characters: 'Welcome', characterStyleIDs: [0, 0, 1, 1], styleOverrideTable: [{ styleID: 1, fontName: { family: 'Roboto', style: 'Black' }, fillPaints: [paint(1, 0, 0)] }] }, fontSize: 24, fontName: { family: 'Roboto', style: 'Semi Bold Italic' }, letterSpacing: { value: 10, units: 'PERCENT' }, lineHeight: { value: 150, units: 'PERCENT' }, styleIdForFill: { guid: g(77, 1) } },
     // A frame that fits what is in it and does not clip: a group, as newer files keep them.
     { guid: g(1, 2), type: 'FRAME', name: 'Badge', parentIndex: { guid: g(1, 1), position: 'a' }, size: { x: 50, y: 50 }, transform: at(100, 100, 90), resizeToFit: true, frameMaskDisabled: true },
     { guid: g(1, 3), type: 'ROUNDED_RECTANGLE', name: 'Dot', parentIndex: { guid: g(1, 2), position: 'a' }, size: { x: 50, y: 50 }, transform: at(0, 0), fillPaints: [paint(1, 0, 0), { type: 'EMOJI' }] },
@@ -261,6 +264,10 @@ describe('reading files laid out as Figma’s', () => {
     expect(heading).toMatchObject({ characters: 'Welcome', fontFamily: 'Roboto', fontSize: 24, fontWeight: 600, italic: true });
     expect(heading.letterSpacing).toBeCloseTo(2.4);
     expect(heading.lineHeight).toBeCloseTo(36);
+    // Its third and fourth letters in a style of their own: black, and red.
+    expect(heading.styleRanges).toEqual([{ start: 2, end: 4, fontFamily: 'Roboto', fontWeight: 900, italic: false, color: RED }]);
+    // The screen's prototype: a timed push to the badge, and a link that is not converted.
+    expect(layers.get('Screen')!.reactions).toMatchObject([{ trigger: { type: 'AFTER_DELAY', delay: 1500 }, actions: [{ type: 'NAVIGATE', destinationId: badge.id, transition: { type: 'PUSH', direction: 'LEFT', duration: 400, easing: 'LINEAR' } }] }]);
     // The vector's points, scaled from the size they were stored at to the layer's.
     const art = layers.get('Line art') as VectorNode;
     expect(art.network.vertices).toEqual([{ x: 0, y: 50 }, { x: 100, y: 0 }]);
@@ -269,16 +276,14 @@ describe('reading files laid out as Figma’s', () => {
     expect(layers.get('Library button')).toMatchObject({ kind: 'FRAME' });
     expect(read.notConverted.sort()).toEqual(
       [
-        'Changes made inside instances (overrides): the instances show their component as it is: 1',
         'Components from libraries (kept in Figma on a hidden page): 1',
         'Image fills whose pictures are not in the file (a bare canvas.fig keeps none): 1',
         'Instances of components that are not in the file (they are left as empty frames): 1',
         'Layers of the kind “WIDGET”: 1',
-        'Links to shared styles (layers keep the look the styles gave them): 1',
+        'Links to shared styles of other files (layers keep the look the styles gave them): 1',
         'Paints of the kind “EMOJI”: 1',
-        'Prototype connections: 1',
+        'Prototype actions of the kind “URL”: 1',
         'Slices: 1',
-        'Text with parts in a style of their own (shown in the layer’s own style): 1',
       ].sort(),
     );
   });

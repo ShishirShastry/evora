@@ -532,3 +532,22 @@ describe('components on the canvas and in the file format', () => {
     expect(getLayer(repaired.doc, componentId)).toMatchObject({ kind: 'FRAME', componentId: null, overrides: {} });
   });
 });
+
+describe('text in an instance that differs from its component', () => {
+  it('keeps the component’s styled parts only as far as the instance’s own text goes', () => {
+    const c = card();
+    // "Title" in the component, with its last three letters bold.
+    act(c.store, (doc) => patchNode(doc, c.textId, { styleRanges: [{ start: 2, end: 5, fontWeight: 700 }] } as LayerPatch));
+    const instance = place(c.store, c.componentId);
+    const mirror = mirrorId(instance, c.textId);
+    expect(text(c.store, mirror).styleRanges).toEqual([{ start: 2, end: 5, fontWeight: 700 }]);
+    // Shortened in the instance: the bold part stops at the end of the shorter text, and the file needs no repair.
+    act(c.store, (doc) => patchNode(doc, mirror, { characters: 'Tit' } as LayerPatch));
+    expect(text(c.store, mirror)).toMatchObject({ characters: 'Tit', styleRanges: [{ start: 2, end: 3, fontWeight: 700 }] });
+    act(c.store, (doc) => patchNode(doc, mirror, { characters: 'T' } as LayerPatch));
+    expect(text(c.store, mirror).styleRanges).toEqual([]);
+    expect(repairDocument(JSON.parse(JSON.stringify(now(c.store)))).repairs).toEqual([]);
+    // The component's own text keeps its styled part.
+    expect(text(c.store, c.textId).styleRanges).toEqual([{ start: 2, end: 5, fontWeight: 700 }]);
+  });
+});
