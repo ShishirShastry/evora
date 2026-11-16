@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -16,7 +16,8 @@ import { createEditorStore, getSession, type EditorStore } from '../../state/edi
 import { Dialog } from '../components/Dialog';
 import { LibrariesDialog } from './LibrariesDialog';
 import { ExportDialog } from '../panels/ExportSection';
-import { exportEnvironment } from './exporting';
+import { downloadBytes, exportEnvironment } from './exporting';
+import { exportFigBytes } from '../../persistence/fig';
 import { exportOne, svgOf } from '../../engine/export/export';
 import { loadLibrary } from '../../persistence/libraries';
 import { Logo } from '../components/Icon';
@@ -117,6 +118,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [librariesOpen, setLibrariesOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(
     repairs.length > 0 ? { title: 'This file had problems that were repaired when it was opened.', lines: repairs } : null,
   );
@@ -240,11 +242,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
         });
       },
       saveNow: () => void saver.current?.flush(),
-      saveAs: () => {
-        const state = store.getState();
-        const fileMeta = saver.current?.meta() ?? meta;
-        void exportFileText(storage, state.doc, fileMeta).then((text) => saveTextToDisk(exportFileName(state.doc.name), text));
-      },
+      saveAs: () => setSaveAsOpen(true),
       placeImage: () => {
         void pickImageFiles().then((files) => (files.length > 0 ? placeFiles(files) : undefined));
       },
@@ -500,7 +498,77 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {librariesOpen && <LibrariesDialog onClose={() => setLibrariesOpen(false)} />}
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+      {saveAsOpen && (
+        <SaveCopyDialog
+          onClose={() => setSaveAsOpen(false)}
+          saveOpenDesign={() => {
+            const state = store.getState();
+            const fileMeta = saver.current?.meta() ?? meta;
+            void exportFileText(storage, state.doc, fileMeta).then((text) => saveTextToDisk(exportFileName(state.doc.name), text));
+          }}
+          saveFig={async () => {
+            const state = store.getState();
+            const out = await exportFigBytes(storage, state.doc);
+            downloadBytes(`${safeFileName(state.doc.name)}.fig`, 'application/octet-stream', out.bytes);
+            return out.notWritten;
+          }}
+        />
+      )}
     </EditorContext.Provider>
+  );
+}
+
+/** "Save a copy to disk": as an OPEN DESIGN file, or as a Figma file, with what a Figma file cannot hold said. */
+function SaveCopyDialog({ onClose, saveOpenDesign, saveFig }: { onClose: () => void; saveOpenDesign: () => void; saveFig: () => Promise<string[]> }) {
+  const [figResult, setFigResult] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog title="Save a copy to disk" onClose={onClose} width={520}>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            data-autofocus
+            className="od-button flex-none"
+            onClick={() => {
+              saveOpenDesign();
+              onClose();
+            }}
+          >
+            OPEN DESIGN (.opendesign)
+          </button>
+          <p className="m-0 text-dim">Everything in the file, exactly. It opens in OPEN DESIGN on any device.</p>
+        </div>
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            className="od-button flex-none"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void saveFig()
+                .then(setFigResult)
+                .finally(() => setBusy(false));
+            }}
+          >
+            {busy ? 'Saving…' : 'Figma (.fig)'}
+          </button>
+          <p className="m-0 text-dim">For opening in Figma. Not yet checked in Figma itself: the format is Figma’s own and unpublished, and what is written follows what can be worked out of its files.</p>
+        </div>
+        {figResult && (
+          <div role="status" aria-label="Figma file saved" className="text-dim">
+            <p className="m-0">Saved as a Figma file.{figResult.length > 0 ? ' These parts are not in it:' : ''}</p>
+            {figResult.length > 0 && (
+              <ul className="m-0 pl-4">
+                {figResult.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    </Dialog>
   );
 }
 

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileFormatError } from '../../core';
-import { pickTextFile } from '../../persistence/diskIO';
+import { FigError, FileFormatError, FILE_EXTENSION } from '../../core';
+import { pickFile } from '../../persistence/diskIO';
+import { importFigBytes, looksLikeFig } from '../../persistence/fig';
+import { getBrowserMeasurer } from '../../engine/text/measure';
 import { createFile, deleteFile, duplicateFile, importFileText, listFiles, renameFile } from '../../persistence/files';
 import { clearSession } from '../../persistence/session';
 import type { DocumentStorage, FileSummary } from '../../persistence/storage';
@@ -31,6 +33,7 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<FileSummary | null>(null);
+  const [figReport, setFigReport] = useState<{ id: string; name: string; lines: string[] } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -53,7 +56,7 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
       await action();
     } catch (cause) {
       setError(
-        cause instanceof FileFormatError
+        cause instanceof FileFormatError || cause instanceof FigError
           ? cause.message
           : `That did not work. ${cause instanceof Error ? cause.message : ''}`,
       );
@@ -66,11 +69,21 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
       onOpen(file.id);
     });
 
+  // An OPEN DESIGN file or a Figma file, told apart by its name and its first bytes.
   const importFile = (): Promise<void> =>
     attempt(async () => {
-      const text = await pickTextFile();
-      if (text === null) return;
-      const { id } = await importFileText(storage, text);
+      const file = await pickFile(`${FILE_EXTENSION},.fig,application/json`);
+      if (!file) return;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (looksLikeFig(file.name, bytes)) {
+        const { id, notConverted } = await importFigBytes(storage, bytes, file.name, getBrowserMeasurer() ?? undefined);
+        await refresh();
+        // What the file had that could not be brought over is said before it is opened.
+        if (notConverted.length > 0) setFigReport({ id, name: file.name, lines: notConverted });
+        else onOpen(id);
+        return;
+      }
+      const { id } = await importFileText(storage, new TextDecoder().decode(bytes));
       onOpen(id);
     });
 
@@ -192,6 +205,36 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
       </div>
 
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="File menu" onClose={() => setMenu(null)} />}
+      {figReport && (
+        <Dialog
+          title="Figma file opened"
+          onClose={() => setFigReport(null)}
+          width={520}
+          footer={
+            <button
+              type="button"
+              data-autofocus
+              className="od-button od-button-primary"
+              onClick={() => {
+                const { id } = figReport;
+                setFigReport(null);
+                onOpen(id);
+              }}
+            >
+              Open the file
+            </button>
+          }
+        >
+          <p className="m-0 mb-2">
+            <strong>{figReport.name}</strong> is now a file on this device. These parts of it could not be brought over, so they are missing or simplified:
+          </p>
+          <ul aria-label="Not converted" className="m-0 pl-4 text-dim">
+            {figReport.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </Dialog>
+      )}
       {deleting && (
         <Dialog
           title="Delete file"

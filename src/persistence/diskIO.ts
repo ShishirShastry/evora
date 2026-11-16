@@ -56,6 +56,18 @@ export function pickImageFiles(multiple = true): Promise<File[]> {
   });
 }
 
+/** Lets the user choose one file of the given kinds (an `accept` list). Null if they cancelled. */
+export function pickFile(accept: string): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
 /** Lets the user choose a file and returns its text, or null if they cancelled. */
 export async function pickTextFile(): Promise<string | null> {
   const picker = (window as unknown as PickerWindow).showOpenFilePicker;
