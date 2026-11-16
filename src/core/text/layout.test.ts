@@ -188,7 +188,8 @@ describe('text in the file format', () => {
     const repaired = repairDocument(data).doc.nodes[node.id];
     expect(repaired).toMatchObject({
       characters: '',
-      fontFamily: 'Arial',
+      // A family that is not a name falls back to the font that ships with the application.
+      fontFamily: 'Inter',
       fontSize: 1,
       fontWeight: 500,
       textAlign: 'LEFT',

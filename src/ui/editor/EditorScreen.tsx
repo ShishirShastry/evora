@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CLIPBOARD_MIME, FileFormatError, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
-import { getBrowserMeasurer } from '../../engine/text/measure';
+import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
+import { getBrowserMeasurer, resetTextMeasurements } from '../../engine/text/measure';
 import { createAutosaver, type Autosaver } from '../../persistence/autosave';
 import { pickImageFiles, saveTextToDisk } from '../../persistence/diskIO';
 import { exportFileName, exportFileText, openFile } from '../../persistence/files';
@@ -44,12 +45,17 @@ export function EditorScreen({ storage, fileId, onExit }: EditorScreenProps) {
     let cancelled = false;
     setLoad({ status: 'loading' });
     openFile(storage, fileId)
-      .then((opened) => {
+      .then(async (opened) => {
         if (cancelled) return;
         if (!opened) {
           setLoad({ status: 'missing' });
           return;
         }
+        // Text is measured on a canvas, which uses a fallback font for a face that has not been loaded.
+        // So the faces of the bundled font, and whatever else the file's text is set in, are loaded first.
+        await loadFonts([...bundledFonts(), ...fontsUsedBy(opened.doc)]);
+        if (cancelled) return;
+        resetTextMeasurements();
         const store = createEditorStore(opened.doc, loadSession(opened.doc.id), {
           measurer: getBrowserMeasurer() ?? undefined,
           ...loadPreferences(),
@@ -331,6 +337,17 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     };
   }, [store, app, placeFiles]);
 
+  // A font face that arrives later (text in a script whose face was not needed until now) changes how
+  // text measures: what was measured is forgotten, and text layers are sized to their content again.
+  useEffect(
+    () =>
+      onFontsLoaded(() => {
+        resetTextMeasurements();
+        store.getState().refitText();
+      }),
+    [store],
+  );
+
   // The widths of the two side panels: dragged by their edges, remembered on this device.
   const [panels, setPanels] = useState(() => {
     const preferences = loadPreferences();
@@ -415,7 +432,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
 /** The keyboard shortcut reference, generated from the same command table the shortcuts run from. */
 function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   return (
-    <Dialog title="Keyboard shortcuts" onClose={onClose} width={560}>
+    <Dialog title="Keyboard shortcuts" onClose={onClose} width={640}>
       <div className="grid grid-cols-2 gap-x-8 gap-y-4">
         {shortcutGroups().map(({ group, commands }) => (
           <section key={group} aria-label={group}>

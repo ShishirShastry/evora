@@ -1,4 +1,5 @@
-import { fontString, type TextMeasurer, type TextStyle } from '../../core';
+import { clearTextLayoutCache, fontString, type TextMeasurer, type TextStyle } from '../../core';
+import { BUNDLED_FONT_FAMILY } from './fonts';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -19,7 +20,7 @@ export function applyTextStyle(ctx: Ctx, style: TextStyle): boolean {
  * will paint it, so layout and painting always agree. Widths are cached,
  * because the same words are measured again on every keystroke and resize.
  */
-export function createCanvasMeasurer(ctx: Ctx): TextMeasurer {
+export function createCanvasMeasurer(ctx: Ctx): TextMeasurer & { reset(): void } {
   const widths = new Map<string, number>();
   const metrics = new Map<string, { ascent: number; descent: number }>();
 
@@ -49,12 +50,17 @@ export function createCanvasMeasurer(ctx: Ctx): TextMeasurer {
       metrics.set(key, result);
       return result;
     },
+    /** Forgets what was measured: the same text may measure differently once its font has loaded. */
+    reset() {
+      widths.clear();
+      metrics.clear();
+    },
   };
 }
 
-let shared: { measurer: TextMeasurer; ctx: CanvasRenderingContext2D } | null = null;
+let shared: { measurer: TextMeasurer & { reset(): void }; ctx: CanvasRenderingContext2D } | null = null;
 
-function sharedContext(): { measurer: TextMeasurer; ctx: CanvasRenderingContext2D } | null {
+function sharedContext(): { measurer: TextMeasurer & { reset(): void }; ctx: CanvasRenderingContext2D } | null {
   if (shared) return shared;
   if (typeof document === 'undefined') return null;
   const ctx = document.createElement('canvas').getContext('2d');
@@ -68,11 +74,23 @@ export function getBrowserMeasurer(): TextMeasurer | null {
   return sharedContext()?.measurer ?? null;
 }
 
-/** Font families offered in the font menu when the machine has them. */
+/**
+ * Forgets everything measured so far, and with it every text layout and what
+ * was found out about which fonts are installed. Called when font faces have
+ * finished loading, because a canvas measures text in a fallback font until
+ * the real one is there.
+ */
+export function resetTextMeasurements(): void {
+  shared?.measurer.reset();
+  availability.clear();
+  clearTextLayoutCache();
+}
+
+/** Font families offered in the font menu: the one that ships with the application, and these when the machine has them. */
 export const FONT_CANDIDATES = [
+  BUNDLED_FONT_FAMILY,
   'Arial',
   'Helvetica',
-  'Inter',
   'Roboto',
   'Segoe UI',
   'Calibri',
@@ -96,6 +114,8 @@ const availability = new Map<string, boolean>();
  * alone; an installed one differs from at least one of two generics.
  */
 export function isFontAvailable(family: string): boolean {
+  // The bundled font is always there, whether or not its faces have been fetched yet.
+  if (family === BUNDLED_FONT_FAMILY) return true;
   const known = availability.get(family);
   if (known !== undefined) return known;
   const context = sharedContext();

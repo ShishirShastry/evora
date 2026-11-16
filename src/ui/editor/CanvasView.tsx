@@ -3,6 +3,7 @@ import { InteractionController, type PointerInput } from '../../engine/input/con
 import { renderOverlay } from '../../engine/render/overlay';
 import { renderScene } from '../../engine/render/scene';
 import { screenToWorld } from '../../engine/viewport';
+import { onFontsLoaded } from '../../engine/text/fonts';
 import { getBrowserMeasurer } from '../../engine/text/measure';
 import { zoomToFit } from '../../state/commands';
 import { PopupMenu, type MenuItem } from '../components/Menu';
@@ -159,6 +160,11 @@ export function CanvasView() {
       lastScene = null;
       schedule();
     });
+    // Repaint when a font face finishes loading: text drawn before then was drawn in a fallback font.
+    const stopWatchingFonts = onFontsLoaded(() => {
+      lastScene = null;
+      schedule();
+    });
 
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -250,6 +256,7 @@ export function CanvasView() {
     return () => {
       observer.disconnect();
       stopWatchingImages();
+      stopWatchingFonts();
       overlay.removeEventListener('dragover', onDragOver);
       overlay.removeEventListener('drop', onDrop);
       unsubscribe();

@@ -36,7 +36,8 @@ export const TYPE_LABELS: Record<LayerType, string> = {
   BOOLEAN_OPERATION: 'Boolean',
 };
 
-export const DEFAULT_FONT_FAMILY = 'Arial';
+/** The family new text is set in: the font that ships with the application, so that it looks the same on every machine. */
+export const DEFAULT_FONT_FAMILY = 'Inter';
 export const DEFAULT_FONT_SIZE = 16;
 
 export function solidPaint(color: RGB, opacity = 1): SolidPaint {

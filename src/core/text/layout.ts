@@ -174,7 +174,16 @@ function wrapParagraph(tokens: readonly Token[], maxWidth: number, measurer: Tex
   return lines;
 }
 
-const layoutCache = new WeakMap<TextMeasurer, WeakMap<TextNode, TextLayout>>();
+let layoutCache = new WeakMap<TextMeasurer, WeakMap<TextNode, TextLayout>>();
+
+/**
+ * Forgets every layout worked out so far. Layouts are kept per layer for as
+ * long as a measurer gives the same answers; when it stops doing so (a font
+ * has finished loading, and text now measures differently) they are stale.
+ */
+export function clearTextLayoutCache(): void {
+  layoutCache = new WeakMap();
+}
 
 /**
  * Lays a text layer out into lines positioned inside its box. Auto-width text

@@ -50,7 +50,9 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
       ref={ref}
       role="menu"
       aria-label={label}
-      className="min-w-[200px] rounded-lg border border-line bg-panel py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      // A submenu hangs off the side of its item, where there is no width to fill: its items must not wrap,
+      // so that it is as wide as its longest label and shortcut.
+      className="min-w-[200px] whitespace-nowrap rounded-lg border border-line bg-panel py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
     >
       {items.map((item, index) => {
         if (item.type === 'separator') return <div key={index} role="separator" className="my-1 h-px bg-line" />;

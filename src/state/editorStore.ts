@@ -159,6 +159,12 @@ export interface EditorActions {
    * the table only ever grows, and an entry no layer uses costs nothing.
    */
   addAssets(assets: Readonly<Record<string, AssetInfo>>): void;
+  /**
+   * Sizes every text layer to its content again. For when text measures
+   * differently than it did (a font has finished loading). Not an undo step:
+   * nothing was edited, the layers are only given the sizes they should have had.
+   */
+  refitText(): void;
   setSaveStatus(status: SaveStatus, error?: string | null): void;
 }
 
@@ -539,6 +545,16 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const withAssets = (doc: Document): Document => ({ ...doc, assets: { ...doc.assets, ...fresh } });
         // Keep an open gesture's snapshot in step, so cancelling it does not forget the assets.
         set({ doc: withAssets(state.doc), gesture: state.gesture ? { ...state.gesture, doc: withAssets(state.gesture.doc) } : null });
+      },
+
+      refitText() {
+        const state = get();
+        // Measured against a document with no layers in it, every text layer counts as changed.
+        const refit = (doc: Document): Document => normalize({ ...doc, nodes: {} }, doc);
+        const next = refit(state.doc);
+        if (next === state.doc) return;
+        // Keep an open gesture's snapshot in step, so that the refit is not undone with the gesture, nor recorded as part of it.
+        set({ doc: next, gesture: state.gesture ? { ...state.gesture, doc: refit(state.gesture.doc) } : null });
       },
 
       setSaveStatus(status, error = null) {
