@@ -102,7 +102,7 @@ export function inspectLayer(doc: Document, id: NodeId): InspectSection[] {
     ]);
   }
   if (isFrame(node) && node.layoutMode !== 'NONE') {
-    const align = { MIN: 'Start', CENTER: 'Centre', MAX: 'End', SPACE_BETWEEN: 'Space between', STRETCH: 'Stretch' };
+    const align = { MIN: 'Start', CENTER: 'Centre', MAX: 'End', SPACE_BETWEEN: 'Space between', STRETCH: 'Stretch', BASELINE: 'Text baseline' };
     section('Auto Layout', [
       { label: 'Direction', value: `${node.layoutMode === 'HORIZONTAL' ? 'Horizontal' : 'Vertical'}${node.layoutWrap === 'WRAP' ? ', wraps' : ''}${node.itemsReversed ? ', reversed' : ''}` },
       { label: 'Spacing', value: node.primaryAxisAlignItems === 'SPACE_BETWEEN' ? 'Auto' : px(node.itemSpacing), token: variableOf('itemSpacing') },

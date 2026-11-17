@@ -210,6 +210,7 @@ export function createLayer(
     styleRefs: {},
     boundVariables: {},
     variableModes: {},
+    strokeSides: null,
     reactions: [] as LayerNode['reactions'],
     scrollBehavior: 'SCROLLS' as const,
     exportSettings: [] as LayerNode['exportSettings'],

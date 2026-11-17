@@ -57,6 +57,8 @@ function alignmentNames(direction: Direction | Mixed): {
       ['CENTER', 'Center'],
       ['MAX', bottom as string],
       ['STRETCH', 'Stretch'],
+      // Text lines up in a row; in a column, which has no baseline to line up, the items keep to the start.
+      ['BASELINE', 'Text baseline'],
     ],
   };
 }

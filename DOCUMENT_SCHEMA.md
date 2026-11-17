@@ -1,6 +1,6 @@
 # OPEN DESIGN — Document Schema
 
-Current schema version: **23**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **24**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping), and version 24 a stroke weight for each side of a box, links in prototypes and Auto Layout rows aligned on the baseline of their text (all needed to open Figma files faithfully). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -200,8 +200,13 @@ interface LayerBase extends NodeBase {
   annotations: { id: string; text: string }[];              // notes on it for developers
   devResources: { id: string; name: string; url: string }[];   // links that go with it
   codeConnect: { component: string; source: string; snippet: string } | null;   // how it is known in code (components and sets)
+
+  // Version 24
+  strokeSides: { top: number; right: number; bottom: number; left: number } | null;   // frames and rectangles: a weight for each side, in place of strokeWeight; null for one weight all round
 }
 ```
+
+**Strokes with a weight for each side (version 24).** A frame or rectangle with `strokeSides` has its stroke drawn as four bands along its edges, each as thick as its side says (a side of 0 is not drawn), with the stroke's paints. Inside strokes stay within the box, and within its rounded corners; centred ones straddle the edge; outside ones lie beyond it. In SVG and PDF the bands are filled shapes. `strokeWeight` is kept, and is what the stroke goes back to when `strokeSides` is set to null. Other layer types ignore `strokeSides`. An instance may have its own (it is one of the properties an instance can override).
 
 **Masks.** A layer with `isMask` is not painted. The layers above it in the same parent, up to the next mask (or the end of the parent), are shown only where the mask would have painted, and only as strongly: a half-transparent mask lets half through, and a mask with a gradient that fades out fades them out. A hidden mask masks nothing. A mask reaches no further than its parent, which is why "Use as mask" on several layers groups them first. On the canvas a masked layer can be clicked only where its mask lets it show, and a mask cannot be clicked at all (it is selected in the layers panel).
 
@@ -235,7 +240,7 @@ interface FrameNode extends LayerBase {
   layoutMode: 'NONE' | 'HORIZONTAL' | 'VERTICAL';     // NONE: children stay where they are put
   layoutWrap: 'NO_WRAP' | 'WRAP';                      // the layout carries on in new lines: rows under a row, columns beside a column (columns from version 17)
   primaryAxisAlignItems: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';   // along the direction
-  counterAxisAlignItems: 'MIN' | 'CENTER' | 'MAX' | 'STRETCH';         // across it; STRETCH from version 16
+  counterAxisAlignItems: 'MIN' | 'CENTER' | 'MAX' | 'STRETCH' | 'BASELINE';   // across it; STRETCH from version 16, BASELINE from 24
   counterAxisAlignContent: 'AUTO' | 'SPACE_BETWEEN';   // the lines of a layout that wraps
   itemSpacing: number;       // between neighbouring children; may be negative
   counterAxisSpacing: number;// between the lines of a layout that wraps
@@ -482,7 +487,7 @@ A frame whose `layoutMode` is `HORIZONTAL` or `VERTICAL` places its children its
 
 **The flow.** The children a frame places are those that are visible and have `layoutPositioning: 'AUTO'`, taken in stack order from the bottom up (from the top down when `itemsReversed`). The place of a layer in the layout is therefore its place in the stack; there is no separate order. A hidden child, and one with `ABSOLUTE`, is left where it is and takes up no room; an `ABSOLUTE` child follows its constraints (§5.6) when the frame changes size, and the children in the flow never do.
 
-**Placing.** Inside the padding, the children follow one another along the direction with `itemSpacing` between them. `primaryAxisAlignItems` packs them at the start, in the middle or at the end, or with `SPACE_BETWEEN` puts the first at the start and the last at the end with equal gaps between (this is automatic spacing: it is not a property of its own but this alignment seen from the gap, which is how the editor shows it, as "Auto" in the gap field. While it is on, `itemSpacing` is not used and keeps the fixed gap the frame goes back to. It needs two children and room to spare, and otherwise they follow one another from the start). Across the direction each child sits at the start, middle or end of the room, by `counterAxisAlignItems`. With `STRETCH` (version 16) every child in the flow that can be given a size across the layout is as big there as the room between the padding (in a layout that wraps, as its line), within its own limits, whatever its own sizing across says; that sizing is kept, unused, and is the child's again when the alignment changes. A rotated child, a line's height and a text that fits itself to its content that way are not stretched, and sit at the start. A rotated child takes the room of the box round it and turns about the middle of that room.
+**Placing.** Inside the padding, the children follow one another along the direction with `itemSpacing` between them. `primaryAxisAlignItems` packs them at the start, in the middle or at the end, or with `SPACE_BETWEEN` puts the first at the start and the last at the end with equal gaps between (this is automatic spacing: it is not a property of its own but this alignment seen from the gap, which is how the editor shows it, as "Auto" in the gap field. While it is on, `itemSpacing` is not used and keeps the fixed gap the frame goes back to. It needs two children and room to spare, and otherwise they follow one another from the start). Across the direction each child sits at the start, middle or end of the room, by `counterAxisAlignItems`. With `STRETCH` (version 16) every child in the flow that can be given a size across the layout is as big there as the room between the padding (in a layout that wraps, as its line), within its own limits, whatever its own sizing across says; that sizing is kept, unused, and is the child's again when the alignment changes. A rotated child, a line's height and a text that fits itself to its content that way are not stretched, and sit at the start. A rotated child takes the room of the box round it and turns about the middle of that room. With `BASELINE` (version 24) the children of a row are moved down until the baselines of their first lines of text are level: a text's first line, a frame's or group's first text (where it sits in it), and for anything without text its bottom edge, as in Figma; a row that hugs is as tall as from the highest baseline's top to the lowest bottom. A column has no baseline to line up, and treats `BASELINE` as `MIN`.
 
 **Sizing.** Each layer has a sizing for each axis:
 
@@ -601,11 +606,12 @@ interface Reaction {
 }
 
 interface Action {             // every action has every field; its type says which count
-  type: 'NAVIGATE' | 'OPEN_OVERLAY' | 'SWAP_OVERLAY' | 'CLOSE_OVERLAY' | 'SCROLL_TO' | 'BACK' | 'CHANGE_TO' | 'SET_VARIABLE' | 'CONDITIONAL' | 'INPUT';
+  type: 'NAVIGATE' | 'OPEN_OVERLAY' | 'SWAP_OVERLAY' | 'CLOSE_OVERLAY' | 'SCROLL_TO' | 'BACK' | 'CHANGE_TO' | 'SET_VARIABLE' | 'CONDITIONAL' | 'INPUT'
+      | 'OPEN_LINK';             // version 24
   destinationId: NodeId | null;   // a frame to go to or open, a layer to scroll to, a variant to change to
   transition: Transition;
   variableId: string | null;      // SET_VARIABLE: the variable set; INPUT: the string variable that typing goes into
-  expression: string;             // SET_VARIABLE: its new value; CONDITIONAL: the condition
+  expression: string;             // SET_VARIABLE: its new value; CONDITIONAL: the condition; OPEN_LINK: the web address
   then: Action[];                 // CONDITIONAL: when the condition holds
   otherwise: Action[];            // CONDITIONAL: when it does not
 }
@@ -624,7 +630,7 @@ interface Transition {
 
 **Triggers.** `MOUSE_ENTER` ("while hovering") and `ON_PRESS` ("while pressing") last only while the pointer is over the layer or held down on it: what they did is undone after, unless something else happened in between, which is then kept. `ON_KEY` names a key as the keyboard does (`Enter`, `ArrowRight`, `a`), compared without regard to case; a gamepad button is the key `Gamepad0`, `Gamepad1`… An event on a layer with no interaction for it goes to the layers it is in, innermost first.
 
-**Actions.** `NAVIGATE` shows a frame as the screen and closes any overlays. `OPEN_OVERLAY` shows a frame over the screen, placed by that frame's `overlayPosition`, with its `overlayBackground` behind it; `SWAP_OVERLAY` replaces the top overlay; `CLOSE_OVERLAY` closes it. `BACK` closes the top overlay or, without one, returns to the screen before, with the transition that led here run the other way. `SCROLL_TO` scrolls the nearest scrolling frame round a layer until the layer is at its top-left. `CHANGE_TO` makes the nearest instance round the layer (or the layer itself) that shows a variant of the destination's set show the destination instead: this is how interactive components work, and the interactions on a component apply to every instance of it. `SET_VARIABLE` gives a variable the value of an expression, in every mode. `CONDITIONAL` runs `then` or `otherwise`. `INPUT` makes what is typed go into a string variable until Enter.
+**Actions.** `NAVIGATE` shows a frame as the screen and closes any overlays. `OPEN_OVERLAY` shows a frame over the screen, placed by that frame's `overlayPosition`, with its `overlayBackground` behind it; `SWAP_OVERLAY` replaces the top overlay; `CLOSE_OVERLAY` closes it. `BACK` closes the top overlay or, without one, returns to the screen before, with the transition that led here run the other way. `SCROLL_TO` scrolls the nearest scrolling frame round a layer until the layer is at its top-left. `CHANGE_TO` makes the nearest instance round the layer (or the layer itself) that shows a variant of the destination's set show the destination instead: this is how interactive components work, and the interactions on a component apply to every instance of it. `SET_VARIABLE` gives a variable the value of an expression, in every mode. `CONDITIONAL` runs `then` or `otherwise`. `INPUT` makes what is typed go into a string variable until Enter. `OPEN_LINK` (version 24) hands its address to whatever shows the prototype; the viewer opens only `http:`, `https:` and `mailto:` addresses, in a new tab with no access back to the application, and the prototype stays where it is.
 
 **Expressions** (`src/core/prototype/expression.ts`): numbers, strings in quotes, `true` / `false`, colours as `#RRGGBB`, variables by name in braces (`{count}`, or `{Collection/name}`), `+ - * / %`, comparisons, `and` / `or` / `not` (also `&& || !`), parentheses. `+` joins when either side is a string. An expression that cannot be worked out changes nothing.
 
@@ -706,7 +712,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 23;
+const CURRENT_SCHEMA_VERSION = 24;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -764,6 +770,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   // 22 -> 23: every layer gets exportSettings [], devStatus 'NONE', annotations [], devResources [] and codeConnect null;
   // every page exportSettings [].
   22: addExportAndHandoff,
+  // 23 -> 24: every layer gets strokeSides null. OPEN_LINK actions and BASELINE alignment are new; no older file has either.
+  23: addStrokeSides,
 };
 ```
 
@@ -791,6 +799,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 20 | 21 | `publication` on the document; `library` on pages; `remote` on styles, variables and collections | `src/libraries.test.ts` ("opens a version 20 file, where nothing is published or from a library") |
 | 21 | 22 | `reactions` and `scrollBehavior` on every layer; `overflow` and the three overlay settings on frames; `flows` and `prototypeDevice` on pages | `src/prototype.test.ts` ("opens a version 21 file, which has no prototype") |
 | 22 | 23 | `exportSettings`, `devStatus`, `annotations`, `devResources` and `codeConnect` on every layer; `exportSettings` on pages | `src/export.test.ts` ("opens a version 22 file, which has no export settings") |
+| 23 | 24 | `strokeSides` on every layer; the `OPEN_LINK` action; `BASELINE` among the alignments across a layout | `src/export.test.ts` ("opens a version 23 file, which has none") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.

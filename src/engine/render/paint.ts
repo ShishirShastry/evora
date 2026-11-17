@@ -149,6 +149,36 @@ export function traceLayerPath(ctx: PathContext, node: LayerNode, inset = 0, par
   }
 }
 
+/**
+ * The bands a stroke with a weight for each side covers, in the layer's own
+ * space: inside the box, across its edge or outside it, as the stroke is
+ * aligned. Null for a layer whose stroke is the same all round.
+ */
+export function strokeSideBands(node: LayerNode): { x: number; y: number; width: number; height: number }[] | null {
+  const sides = node.strokeSides;
+  if (!sides || (node.type !== 'FRAME' && node.type !== 'RECTANGLE')) return null;
+  const shift = node.strokeAlign === 'INSIDE' ? 0 : node.strokeAlign === 'CENTER' ? 0.5 : 1;
+  const w = node.width;
+  const h = node.height;
+  // Where the bands start before the box's own edges (0, not -0, for a stroke inside).
+  const left = 0 - sides.left * shift;
+  const top = 0 - sides.top * shift;
+  const bands = [
+    { x: left, y: top, width: w + (sides.left + sides.right) * shift, height: sides.top },
+    { x: left, y: h - sides.bottom * (1 - shift), width: w + (sides.left + sides.right) * shift, height: sides.bottom },
+    { x: left, y: top, width: sides.left, height: h + (sides.top + sides.bottom) * shift },
+    { x: w - sides.right * (1 - shift), y: top, width: sides.right, height: h + (sides.top + sides.bottom) * shift },
+  ];
+  return bands.filter((band) => band.width > 0 && band.height > 0);
+}
+
+/** How thick a layer's stroke is at its thickest: its weight, or with a weight for each side, the heaviest side. */
+export function strokeWidthOf(node: LayerNode): number {
+  const bands = strokeSideBands(node);
+  if (!bands || !node.strokeSides) return node.strokeWeight;
+  return Math.max(node.strokeSides.top, node.strokeSides.right, node.strokeSides.bottom, node.strokeSides.left);
+}
+
 /** The arrowheads a layer's stroke ends in, in the layer's own space. Only lines and vectors with loose ends have any. */
 export function arrowHeads(node: LayerNode): ArrowShape[] {
   if (node.type !== 'LINE' && node.type !== 'VECTOR') return [];

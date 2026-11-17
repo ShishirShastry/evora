@@ -9,6 +9,7 @@ import {
   createComponentSet,
   createDocument,
   createInstance,
+  deleteNodes,
   CURRENT_SCHEMA_VERSION,
   getChildIds,
   getLayer,
@@ -304,6 +305,37 @@ describe('component properties', () => {
     // Something that is not a component is not shown.
     act(b.store, (doc) => setInstanceProp(doc, [a], made.prop, b.icon));
     expect(frameOf(b.store, mirrorId(a, made.slot)).componentId).toBe(made.star);
+  });
+
+  it('show the component they were made with again when the one swapped in is deleted, with none of its layers left', () => {
+    const b = buttons();
+    const made = { star: '', heart: '', starDot: '', heartDot: '', card: '', slot: '', prop: '' };
+    act(b.store, (doc) => {
+      let next = doc;
+      for (const [key, y] of [['star', 200], ['heart', 260]] as const) {
+        const frame = addLayer(next, 'FRAME', b.pageId, { x: 0, y, width: 24, height: 24, name: key });
+        const dot = addLayer(frame.doc, 'ELLIPSE', frame.id, { x: 4, y: 4, width: 16, height: 16, name: `${key} dot` });
+        next = (createComponent(dot.doc, [frame.id]) as { doc: Document }).doc;
+        made[key] = frame.id;
+        made[key === 'star' ? 'starDot' : 'heartDot'] = dot.id;
+      }
+      const card = addLayer(next, 'FRAME', b.pageId, { x: 0, y: 320, width: 100, height: 40, name: 'Card' });
+      const slot = createInstance(card.doc, made.star, { parentId: card.id, at: { x: 8, y: 8 } }) as { doc: Document; id: NodeId };
+      next = (createComponent(slot.doc, [card.id]) as { doc: Document }).doc;
+      const prop = addComponentProp(next, card.id, 'INSTANCE_SWAP', 'Icon') as { doc: Document; id: string };
+      Object.assign(made, { card: card.id, slot: slot.id, prop: prop.id });
+      return bindProp(prop.doc, slot.id, 'INSTANCE_SWAP', prop.id);
+    });
+    const a = place(b.store, made.card);
+    act(b.store, (doc) => setInstanceProp(doc, [a], made.prop, made.heart));
+    const inner = mirrorId(a, made.slot);
+    expect(getChildIds(now(b.store), inner).map((id) => getLayer(now(b.store), id)?.name)).toEqual(['heart dot']);
+    act(b.store, (doc) => deleteNodes(doc, [made.heart]));
+    expect(frameOf(b.store, inner)).toMatchObject({ kind: 'INSTANCE', componentId: made.star });
+    expect(getChildIds(now(b.store), inner).map((id) => getLayer(now(b.store), id)?.name)).toEqual(['star dot']);
+    // And it stays so after the next change.
+    act(b.store, (doc) => patchNode(doc, a, { x: 5 }));
+    expect(getChildIds(now(b.store), inner).map((id) => getLayer(now(b.store), id)?.name)).toEqual(['star dot']);
   });
 
   it('are shared by the variants of a set, and kept when an instance changes variant', () => {

@@ -21,7 +21,7 @@ import {
   type TextMeasurer,
   type TextNode,
 } from '../../core';
-import { arrowHeads, fillRuleOf, traceArrowHead, traceLayerPath, traceStrokePath, type PathContext } from '../render/paint';
+import { strokeSideBands, arrowHeads, fillRuleOf, traceArrowHead, traceLayerPath, traceStrokePath, type PathContext } from '../render/paint';
 import { strokeAlignOf } from '../render/scene';
 
 /**
@@ -262,7 +262,19 @@ function layerGroup(doc: Document, id: NodeId, measurer: TextMeasurer, hidden: R
       });
     }
   }
-  if (node.strokeWeight > 0 && node.strokes.some(visible)) {
+  const bands = strokeSideBands(node);
+  if (bands && node.strokes.some(visible)) {
+    const area = record((ctx) => {
+      ctx.beginPath();
+      for (const band of bands) ctx.rect(band.x, band.y, band.width, band.height);
+    });
+    const inside = node.strokeAlign === 'INSIDE' ? record((ctx) => traceLayerPath(ctx, node)) : null;
+    for (const paint of node.strokes) {
+      if (!visible(paint)) continue;
+      const fill: VectorFill = { kind: 'fill', path: area, rule: 'nonzero', paint, width: node.width, height: node.height };
+      group.items.push(inside ? { kind: 'group', layerId: null, name: '', matrix: IDENTITY, opacity: 1, blend: 'NORMAL', effects: [], clip: { path: inside, rule: 'nonzero' }, mask: null, items: [fill] } : fill);
+    }
+  } else if (node.strokeWeight > 0 && node.strokes.some(visible)) {
     const align = strokeAlignOf(node);
     const heads = arrowHeads(node);
     const base = { cap: node.strokeCap, join: node.strokeJoin, dash: [...node.dashPattern], width: node.width, height: node.height };

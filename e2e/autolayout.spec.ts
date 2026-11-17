@@ -167,6 +167,19 @@ test('a button resizes itself to its label, padding, spacing and icon', async ({
   await layer(page, 'Ellipse 1').click();
   await expect(field(page, 'Y position')).toHaveValue(String(12 + (longer.h - 16) / 2));
 
+  // On the text's baseline: the icon's bottom sits on the line the letters stand on, in the lower part of the label.
+  await layer(page, 'Frame 1').click();
+  await select(page, 'Alignment across the layout').selectOption('BASELINE');
+  await layer(page, 'Get Started Today').click();
+  const labelTop = Number(await field(page, 'Y position').inputValue());
+  await layer(page, 'Ellipse 1').click();
+  const iconBottom = Number(await field(page, 'Y position').inputValue()) + 16;
+  expect(iconBottom).toBeGreaterThan(labelTop + longer.h / 2);
+  expect(iconBottom).toBeLessThan(labelTop + longer.h);
+  await layer(page, 'Frame 1').click();
+  await select(page, 'Alignment across the layout').selectOption('CENTER');
+  await layer(page, 'Ellipse 1').click();
+
   // Removing the icon closes the button up again; undo brings it back.
   await canvas(page).focus();
   await page.keyboard.press('Delete');
@@ -531,7 +544,7 @@ test('stretch: every item is as tall as the row, whatever its own sizing', async
   await page.getByRole('button', { name: 'Add Auto Layout' }).click();
   await expect(field(page, 'Height')).toHaveValue('200');
   await expect(select(page, 'Vertical sizing')).toHaveValue('HUG');
-  await expect(select(page, 'Alignment across the layout').locator('option')).toHaveText(['Top', 'Center', 'Bottom', 'Stretch']);
+  await expect(select(page, 'Alignment across the layout').locator('option')).toHaveText(['Top', 'Center', 'Bottom', 'Stretch', 'Text baseline']);
   // Under the square, which ends 70 down, the frame shows.
   expect(await colourAt(45, 85)).toEqual(WHITE);
 

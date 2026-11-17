@@ -540,6 +540,17 @@ describe('playing a prototype', () => {
     expect(player.screenId).toBe(s.a);
   });
 
+  it('hands the address of a link to whoever shows the prototype', () => {
+    const s = screens();
+    react(s.store, s.button, ['ON_CLICK'], [newAction('OPEN_LINK', { expression: ' https://example.com/help ' }), newAction('OPEN_LINK', { expression: '  ' })]);
+    const player = play(s.store, s.a);
+    expect(player.links).toEqual([]);
+    click(player, 50, 40);
+    // The address, trimmed; an empty one opens nothing. The screen stays where it is.
+    expect(player.links).toEqual(['https://example.com/help']);
+    expect(player.screenId).toBe(s.a);
+  });
+
   it('runs interactions after a delay, on a key and on a drag, and types into an input field', () => {
     const s = screens();
     const name = variable(s.store, 'STRING', 'name', '');

@@ -69,9 +69,30 @@ export class KiwiBuffer {
   readByteArray(): Uint8Array {
     const size = this.readVarUint();
     if (this.at + size > this.length) throw new KiwiError('The data ends too soon.');
-    const out = this.bytes.slice(this.at, this.at + size);
+    // A view of the bytes, not a copy: a file's data is read once, and its blobs are most of it.
+    const out = this.bytes.subarray(this.at, this.at + size);
     this.at += size;
     return out;
+  }
+
+  /** Moves past bytes without reading them. */
+  skip(count: number): void {
+    if (this.at + count > this.length) throw new KiwiError('The data ends too soon.');
+    this.at += count;
+  }
+
+  /** Moves past a piece of text without decoding it. */
+  skipString(): void {
+    let end = this.at;
+    while (end < this.length && this.bytes[end] !== 0) end++;
+    if (end >= this.length) throw new KiwiError('A piece of text in the data has no end.');
+    this.at = end + 1;
+  }
+
+  /** Moves past a float as `readVarFloat` reads one. */
+  skipVarFloat(): void {
+    if (this.at >= this.length) throw new KiwiError('The data ends too soon.');
+    this.at += this.bytes[this.at] === 0 ? 1 : 4;
   }
 
   readVarUint(): number {
@@ -274,7 +295,11 @@ export type KiwiObject = { [name: string]: KiwiValue };
 
 /** A schema made ready to read and write data with: its definitions by name, and each message's fields by number. */
 export interface KiwiCodec {
-  decode(typeName: string, bytes: Uint8Array): KiwiObject;
+  /**
+   * Reads data of a type. Fields named in `skip` (at any depth) are moved
+   * past without being built: data that is not wanted then costs no memory.
+   */
+  decode(typeName: string, bytes: Uint8Array, skip?: ReadonlySet<string>): KiwiObject;
   encode(typeName: string, value: KiwiObject): Uint8Array;
 }
 
@@ -330,6 +355,62 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
     return out;
   };
 
+  let skipping: ReadonlySet<string> = new Set();
+
+  const skipOne = (type: string, input: KiwiBuffer): void => {
+    switch (type) {
+      case 'bool':
+      case 'byte':
+        input.skip(1);
+        return;
+      case 'int':
+      case 'uint':
+        input.readVarUint();
+        return;
+      case 'float':
+        input.skipVarFloat();
+        return;
+      case 'string':
+        input.skipString();
+        return;
+      case 'int64':
+      case 'uint64':
+        input.readVarUint64();
+        return;
+    }
+    const definition = byName.get(type);
+    if (!definition) throw new KiwiError(`The data is of a type, "${type}", that its schema does not define.`);
+    if (definition.kind === 'ENUM') {
+      input.readVarUint();
+      return;
+    }
+    if (definition.kind === 'STRUCT') {
+      for (const field of definition.fields) skipField(field, input);
+      return;
+    }
+    const fields = byNumber.get(definition.name) as Map<number, KiwiField>;
+    for (;;) {
+      const number = input.readVarUint();
+      if (number === 0) return;
+      const field = fields.get(number);
+      if (!field) throw new KiwiError(`The data has a field (number ${number} of "${definition.name}") that its schema does not have.`);
+      skipField(field, input);
+    }
+  };
+
+  function skipField(field: KiwiField, input: KiwiBuffer): void {
+    if (!field.isArray) {
+      skipOne(field.type, input);
+      return;
+    }
+    const count = input.readVarUint();
+    if (field.type === 'byte') {
+      input.skip(count);
+      return;
+    }
+    for (let i = 0; i < count; i++) skipOne(field.type, input);
+  }
+
   function readObject(definition: KiwiDefinition, input: KiwiBuffer): KiwiObject {
     const out: KiwiObject = {};
     if (definition.kind === 'STRUCT') {
@@ -342,7 +423,8 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
       if (number === 0) return out;
       const field = fields.get(number);
       if (!field) throw new KiwiError(`The data has a field (number ${number} of "${definition.name}") that its schema does not have.`);
-      out[field.name] = readField(field, input);
+      if (skipping.has(field.name)) skipField(field, input);
+      else out[field.name] = readField(field, input);
     }
   }
 
@@ -425,8 +507,13 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
   };
 
   return {
-    decode(typeName, bytes) {
-      return readObject(definitionOf(typeName), new KiwiBuffer(bytes));
+    decode(typeName, bytes, skip) {
+      skipping = skip ?? new Set();
+      try {
+        return readObject(definitionOf(typeName), new KiwiBuffer(bytes));
+      } finally {
+        skipping = new Set();
+      }
     },
     encode(typeName, value) {
       const output = new KiwiBuffer();

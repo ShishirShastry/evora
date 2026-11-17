@@ -30,7 +30,7 @@ import {
 import type { ImageSource } from '../images/imageCache';
 import { applyTextStyle } from '../text/measure';
 import { visibleRect, type Size, type Viewport } from '../viewport';
-import { arrowHeads, clipPath, fillPath, fillRuleOf, fillWithPaint, paintStyle, rgbToCss, traceArrowHead, traceLayerPath, traceStrokePath } from './paint';
+import { strokeSideBands, strokeWidthOf, arrowHeads, clipPath, fillPath, fillRuleOf, fillWithPaint, paintStyle, rgbToCss, traceArrowHead, traceLayerPath, traceStrokePath } from './paint';
 
 export interface RenderStats {
   /** Layers actually painted. */
@@ -122,10 +122,10 @@ export function getRenderBounds(doc: Document, id: NodeId): Rect {
   const node = doc.nodes[id];
   let bounds = getWorldBounds(doc, id);
   if (isLayer(node)) {
-    if (node.strokeWeight > 0 && node.strokes.length > 0) {
+    if (strokeWidthOf(node) > 0 && node.strokes.length > 0) {
       // The mitred tip of a sharp corner of a vector reaches well beyond the corner itself.
       const sharp = (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') && node.strokeJoin === 'MITER';
-      bounds = expandRect(bounds, node.strokeWeight * (sharp ? (strokeAlignOf(node) === 'OUTSIDE' ? 10 : 5) : 1));
+      bounds = expandRect(bounds, strokeWidthOf(node) * (sharp ? (strokeAlignOf(node) === 'OUTSIDE' ? 10 : 5) : 1));
       // Arrowheads reach beyond the ends of the stroke.
       const reach = arrowHeads(node).reduce((most, head) => Math.max(most, head.reach), 0);
       if (reach > 0) bounds = expandRect(bounds, reach);
@@ -297,6 +297,25 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
   };
 
   const stroke = (target: Ctx, node: LayerNode): void => {
+    const bands = strokeSideBands(node);
+    if (bands) {
+      // A weight for each side: the bands are filled with the stroke's paints, and an inside stroke stays inside rounded corners.
+      const alpha = target.globalAlpha;
+      for (const paint of node.strokes) {
+        if (!paint.visible || paint.opacity <= 0) continue;
+        target.save();
+        if (node.strokeAlign === 'INSIDE') {
+          traceLayerPath(target, node);
+          target.clip();
+        }
+        target.beginPath();
+        for (const band of bands) target.rect(band.x, band.y, band.width, band.height);
+        fillWithPaint(target, paint, node.width, node.height, options.images);
+        target.restore();
+      }
+      target.globalAlpha = alpha;
+      return;
+    }
     if (node.strokeWeight <= 0 || node.type === 'TEXT') return;
     const align = strokeAlignOf(node);
     const rule = fillRuleOf(node);
@@ -368,15 +387,20 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
       if (mirrored) target.restore();
     } else {
       const filled = node.type !== 'LINE' && hasVisiblePaint(node.fills);
-      const stroked = node.strokeWeight > 0 && hasVisiblePaint(node.strokes);
+      const bands = strokeSideBands(node);
+      const stroked = strokeWidthOf(node) > 0 && hasVisiblePaint(node.strokes);
       const boxLike = node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'FRAME';
       const align = strokeAlignOf(node);
       if (filled) {
         traceLayerPath(target, node, boxLike ? -shadow.spread : 0);
         fillPath(target, fillRuleOf(node));
       }
-      // An inside stroke lies within the fill, which already cast the shadow.
-      if (stroked && !(filled && align === 'INSIDE')) {
+      // A stroke with a weight for each side casts the shadow of its bands; an inside one lies within the fill.
+      if (bands && stroked && !(filled && align === 'INSIDE')) {
+        target.beginPath();
+        for (const band of bands) target.rect(band.x, band.y, band.width, band.height);
+        target.fill();
+      } else if (stroked && !(filled && align === 'INSIDE')) {
         traceStrokePath(target, node);
         target.lineCap = CAPS[node.strokeCap];
         target.lineJoin = JOINS[node.strokeJoin];
@@ -550,7 +574,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     const hasChildren = (node.type === 'FRAME' || node.type === 'GROUP') && getChildIds(doc, id).length > 0;
     const paintCount =
       (node.type !== 'LINE' && hasVisiblePaint(node.fills) ? node.fills.length : 0) +
-      (node.strokeWeight > 0 ? node.strokes.length : 0);
+      (strokeWidthOf(node) > 0 ? node.strokes.length : 0);
     // A shadow can be cast from the outline alone unless what is inside sticks out of it or shows through it.
     const outlineIsSilhouette = !hasChildren || (node.type === 'FRAME' && node.clipsContent && hasVisiblePaint(node.fills));
     const composite =

@@ -2,6 +2,7 @@ import { setNodes } from '../document/mutate';
 import { isFrame, isLayer, type ComponentProp, type DesignNode, type Document, type FrameNode, type InstanceOverrides, type LayerNode, type NodeId } from '../document/schema';
 import { getAncestorIds, getChildIds } from '../scene/tree';
 import { refsBeside, tokenControlled } from '../tokens/tokens';
+import { scaleNetwork } from '../vector/network';
 
 /**
  * Components and instances. A component is a frame that is the original of a
@@ -26,6 +27,11 @@ export const OVERRIDABLE: readonly string[] = [
   'fills',
   'strokes',
   'strokeWeight',
+  'strokeSides',
+  // Its name, which a designer may change in one instance.
+  'name',
+  // Whether it is taken out of its Auto Layout frame's flow, which an instance may say for itself.
+  'layoutPositioning',
   'strokeAlign',
   'strokeCap',
   'strokeJoin',
@@ -86,6 +92,7 @@ const ROOT_COPIED: readonly string[] = [
   'fills',
   'strokes',
   'strokeWeight',
+  'strokeSides',
   'strokeAlign',
   'strokeCap',
   'strokeJoin',
@@ -110,7 +117,7 @@ const ROOT_COPIED: readonly string[] = [
 ];
 
 /** Of those, the ones an instance may have its own way: its look. Its layout is always the component's. */
-const ROOT_OVERRIDABLE: readonly string[] = ROOT_COPIED.slice(0, 11);
+const ROOT_OVERRIDABLE: readonly string[] = ROOT_COPIED.slice(0, 12);
 
 /** What a layer inside an instance does not take from the layer it mirrors: who it is, and where the layout has put it. */
 const NOT_COPIED = new Set(['id', 'parentId', 'order', 'sourceId', 'exportSettings', 'devStatus', 'annotations', 'devResources', 'codeConnect']);
@@ -322,7 +329,7 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { changes: 
   if (getAncestorIds(doc, instanceId).length > 60) return { changes: {}, inner: [] };
 
   const before = since.nodes[instanceId];
-  const fresh = !isInstance(before) || before.componentId !== instance.componentId;
+  const fresh = before === undefined ? !mirrorsIn(doc, instanceId).length : !isInstance(before) || before.componentId !== instance.componentId;
   const componentBefore = since.nodes[component.id];
 
   // The instance itself: its look and layout are the component's, except where it has its own.
@@ -377,7 +384,8 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { changes: 
       if (NOT_COPIED.has(key)) continue;
       if (GEOMETRY.includes(key)) {
         // Where a layer is and how big belong to the layout of the instance; the component's are taken when they change.
-        if (made || !isLayer(sourceBefore) || (sourceBefore as unknown as Props)[key] !== from[key]) next[key] = from[key];
+        // Compared with nothing (a document laid out again from scratch), an existing layer keeps the instance's layout.
+        if (made || (isLayer(sourceBefore) && (sourceBefore as unknown as Props)[key] !== from[key])) next[key] = from[key];
         continue;
       }
       if (key === 'overrides') next[key] = mergeOverrides(from[key] as InstanceOverrides, override[key] as InstanceOverrides | undefined);
@@ -392,6 +400,17 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { changes: 
       if (type === 'INSTANCE_SWAP' && !isComponent(doc.nodes[value as string])) continue;
       if (key in next) next[key] = value;
     }
+    // An instance in it swapped for another component (by an override or a property) is the new one's size, as when an
+    // instance is swapped by hand, where it was the size of the one it replaced.
+    const had = isInstance(source) ? (made ? source.componentId : ((existing as unknown as Props).componentId as NodeId | null)) : null;
+    if (isInstance(source) && typeof next.componentId === 'string' && next.componentId !== had) {
+      const replaced = had === null ? undefined : doc.nodes[had];
+      const swapped = doc.nodes[next.componentId];
+      if (isFrame(replaced) && isFrame(swapped)) {
+        if (next.width === replaced.width) next.width = swapped.width;
+        if (next.height === replaced.height) next.height = swapped.height;
+      }
+    }
     // Where the instance has its own value, the component's style or variable for it does not apply.
     Object.assign(next, refsBeside(next.styleRefs as LayerNode['styleRefs'], next.boundVariables as LayerNode['boundVariables'], override));
     // What a style or a variable decides here is theirs to write: the mode that applies in this instance may be another.
@@ -402,6 +421,12 @@ function mirror(doc: Document, since: Document, instanceId: NodeId): { changes: 
     }
     // What it is exported as and what developers are told about it are the instance's own; a new one starts with none.
     if (made) Object.assign(next, { exportSettings: [], devStatus: 'NONE', annotations: [], devResources: [], codeConnect: null });
+    // A vector the instance has at a size of its own (its constraints scaled it) has the component's points at that size.
+    if (source.type === 'VECTOR' && !('network' in override)) {
+      const sx = source.width > 0 && typeof next.width === 'number' ? next.width / source.width : 1;
+      const sy = source.height > 0 && typeof next.height === 'number' ? next.height / source.height : 1;
+      if (sx !== 1 || sy !== 1) next.network = scaleNetwork(source.network, sx, sy);
+    }
     // A text the instance says otherwise keeps the component's styled parts only as far as its own text goes.
     if (typeof next.characters === 'string' && Array.isArray(next.styleRanges) && next.characters !== (from.characters as string | undefined)) {
       const length = next.characters.length;
@@ -456,9 +481,52 @@ export function syncInstances(since: Document, doc: Document, capture: boolean):
   }
   next = setNodes(next, loose);
 
+  // Only the instances a change can reach need bringing into step: those that changed, or have something in them
+  // that changed, and those whose component (or the set it is a variant in) changed. Everything above each layer
+  // that changed since `since` is marked; a file with a thousand instances then checks the few that matter.
+  const touched = new Set<NodeId>();
+  const mark = (doc: Document, id: NodeId): void => {
+    touched.add(id);
+    for (let current: NodeId | null = doc.nodes[id]?.parentId ?? null, step = 0; current !== null && step < 1000 && !touched.has(current); step++) {
+      touched.add(current);
+      current = doc.nodes[current]?.parentId ?? null;
+    }
+  };
+  // Where a changed layer is now, and where it was: a layer moved out of an instance changes that instance too.
+  for (const id in next.nodes) {
+    if (next.nodes[id] === since.nodes[id]) continue;
+    mark(next, id);
+    if (since.nodes[id]) mark(since, id);
+  }
+  for (const id in since.nodes) if (!(id in next.nodes)) mark(since, id);
+  const reached = (id: NodeId): boolean => {
+    const instance = next.nodes[id];
+    if (!isInstance(instance)) return false;
+    if (touched.has(id)) return true;
+    const componentId = instance.componentId;
+    if (componentId === null || !next.nodes[componentId]) return true;
+    if (touched.has(componentId)) return true;
+    const set = setOf(next, componentId);
+    if (set !== null && next.nodes[set.id] !== since.nodes[set.id]) return true;
+    // A component it swaps in, by a property's value or by a change inside it, at any depth: changed or gone.
+    const changed = (target: unknown): boolean => typeof target === 'string' && (touched.has(target) || (since.nodes[target] !== undefined && next.nodes[target] === undefined));
+    for (const key in instance.propValues) if (changed(instance.propValues[key])) return true;
+    const within = (overrides: InstanceOverrides | undefined, level: number): boolean => {
+      if (!overrides || level > 12) return false;
+      for (const key in overrides) {
+        const props = overrides[key] as Props;
+        if (changed(props.componentId)) return true;
+        for (const prop in (props.propValues as Record<string, unknown> | undefined) ?? {}) if (changed((props.propValues as Record<string, unknown>)[prop])) return true;
+        if (within(props.overrides as InstanceOverrides | undefined, level + 1)) return true;
+      }
+      return false;
+    };
+    return within(instance.overrides, 0);
+  };
+
   // Outermost first: an instance inside another exists only once the outer one has been given its layers.
   const queue: NodeId[] = [];
-  for (const id in next.nodes) if (isInstance(next.nodes[id])) queue.push(id);
+  for (const id in next.nodes) if (reached(id)) queue.push(id);
   const depth = new Map<NodeId, number>();
   for (const id of queue) depth.set(id, getAncestorIds(next, id).length);
   queue.sort((a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || (a < b ? -1 : 1));

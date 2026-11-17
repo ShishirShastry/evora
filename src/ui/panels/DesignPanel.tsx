@@ -815,6 +815,43 @@ export function DesignPanel() {
             </select>
           )}
         </Row>
+        {layers.every((l) => l.type === 'FRAME' || l.type === 'RECTANGLE') && (
+          <>
+            <label className="mt-0.5 flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                className="accent-[var(--od-accent)]"
+                checked={layers.every((l) => l.strokeSides !== null)}
+                onChange={(event) => {
+                  if (!event.currentTarget.checked) return set('Same stroke on every side', { strokeSides: null });
+                  // Each side starts at the weight the stroke has all round.
+                  const patches: Record<NodeId, LayerPatch> = {};
+                  for (const l of layers) if (l.strokeSides === null) patches[l.id] = { strokeSides: { top: l.strokeWeight, right: l.strokeWeight, bottom: l.strokeWeight, left: l.strokeWeight } };
+                  store.getState().apply('Stroke each side', (doc) => patchNodes(doc, patches));
+                }}
+              />
+              A weight for each side
+            </label>
+            {layers.every((l) => l.strokeSides !== null) && (
+              <Row>
+                {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                  <NumberField
+                    key={side}
+                    label={`Stroke weight, ${side}`}
+                    prefix={side[0]!.toUpperCase()}
+                    min={0}
+                    value={shared(layers, (l) => l.strokeSides?.[side] ?? 0)}
+                    onCommit={(weight) => {
+                      const patches: Record<NodeId, LayerPatch> = {};
+                      for (const l of layers) if (l.strokeSides) patches[l.id] = { strokeSides: { ...l.strokeSides, [side]: weight } };
+                      store.getState().apply(`Change ${side} stroke weight`, (doc) => patchNodes(doc, patches));
+                    }}
+                  />
+                ))}
+              </Row>
+            )}
+          </>
+        )}
         <Row>
           <SelectField<StrokeCap>
             label="Stroke ends"

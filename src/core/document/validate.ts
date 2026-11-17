@@ -676,6 +676,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     styleRefs: styleRefs(raw.styleRefs),
     boundVariables: stringMap(raw.boundVariables),
     variableModes: stringMap(raw.variableModes),
+    strokeSides: isObject(raw.strokeSides) ? { top: finite(raw.strokeSides.top, 0, 0, 10000), right: finite(raw.strokeSides.right, 0, 0, 10000), bottom: finite(raw.strokeSides.bottom, 0, 0, 10000), left: finite(raw.strokeSides.left, 0, 0, 10000) } : null,
     reactions: reactions(raw.reactions),
     scrollBehavior: oneOf(raw.scrollBehavior, SCROLL_BEHAVIORS, 'SCROLLS'),
     exportSettings: exportSettings(raw.exportSettings),

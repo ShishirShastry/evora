@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approximateMeasurer, getPages, isLayer, listComponents, readFig, repairDocument, sha256Hex, writeFig, type Document, type FigEnvironment } from './core';
+import { approximateMeasurer, getChildIds, getPages, isLayer, listComponents, readFig, repairDocument, sha256Hex, writeFig, type Document, type FigEnvironment } from './core';
 
 /**
  * A real file made by Figma: "EXPATS final.fig", supplied by the owner on
@@ -66,15 +66,25 @@ describe.skipIf(!present)('a real Figma file (EXPATS final.fig)', () => {
     expect(Object.keys(read.images)).toHaveLength(289);
     // A file that needs no repairing, and the short list of what could not be brought over.
     expect(repairDocument(JSON.parse(JSON.stringify(doc))).repairs).toEqual([]);
-    expect(read.notConverted).toEqual([
-      'Layers that were flipped (shown unflipped): 2',
-      'Strokes of a different weight on each side (drawn with one weight): 118',
-      'Changes made inside instances to layer names (shown as their component has them): 165',
-      'Changes made inside instances to sizes (shown as their component has them): 300',
-      'Changes made inside instances to Auto Layout positions (shown as their component has them): 3',
-      'Changes made inside instances to stroke weights (shown as their component has them): 1',
-      'Changes made inside instances to per-side stroke weights (shown as their component has them): 4',
-    ]);
+    // Strokes with a weight for each side, flips and the changes made inside instances all come through now.
+    expect(own.filter((layer) => layer.strokeSides !== null)).toHaveLength(118);
+    // Everything in it is converted: nothing is left out or simplified.
+    expect(read.notConverted).toEqual([]);
+    expect(own.filter((layer) => layer.type === 'FRAME' && layer.counterAxisAlignItems === 'BASELINE')).toHaveLength(1);
+    // Instances at a size of their own (icons placed smaller than drawn, logos scaled, instances swapped) hold what is
+    // in them within their bounds, as Figma shows them: nothing in any of them sticks out.
+    const spilling = Object.values(doc.nodes).filter((node) => {
+      if (!isLayer(node) || node.type !== 'FRAME' || node.kind !== 'INSTANCE') return false;
+      return getChildIds(doc, node.id).some((id) => {
+        const child = doc.nodes[id];
+        return isLayer(child) && child.visible && child.rotation === 0 && (child.x < -1.5 || child.y < -1.5 || child.x + child.width > node.width + 1.5 || child.y + child.height > node.height + 1.5);
+      });
+    });
+    expect(spilling).toEqual([]);
+    // The calendar icon, drawn at 24 and placed at 13, has its lines scaled to fit.
+    const calendar = Object.values(doc.nodes).find((node) => isLayer(node) && node.name === 'Icon/calendar' && node.type === 'FRAME' && node.kind === 'INSTANCE' && node.width === 13);
+    const lines = getChildIds(doc, calendar!.id).map((id) => doc.nodes[id]).filter(isLayer);
+    expect(Math.max(...lines.map((line) => line.x + line.width))).toBeLessThanOrEqual(13);
 
     // Saved as .fig and opened again, every layer is still there.
     const written = await writeFig(doc, read.images, env);

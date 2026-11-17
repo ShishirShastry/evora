@@ -3,6 +3,7 @@ import {
   isFrame,
   isLayer,
   type Document,
+  type DesignNode,
   type FrameNode,
   type LayerNode,
   type LayerPatch,
@@ -12,6 +13,7 @@ import {
 import { applyConstraints, clean, resizeFromTopLeft, setLayerBox } from '../ops/transform';
 import { getAncestorIds, getChildIds } from '../scene/tree';
 import { layoutText, type TextMeasurer } from '../text/layout';
+import { scaleNetwork } from '../vector/network';
 import { breakLines, clampSize, distribute, extent, lineSizes, placeAcross, placeAlong, type FlowItem } from './flow';
 
 /**
@@ -419,6 +421,39 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
       return { size: footprint(child, width, clampSize(ownHeight(child), min, max)).height, fill, min: 0, max: Infinity };
     };
 
+    /**
+     * How far below its top a layer's baseline is, for a row aligned on the baseline of text: a text's first line, the
+     * first text in a frame (where it sits in the frame), and for anything without text its bottom edge, as in Figma.
+     */
+    const textBaseline = (node: LayerNode, depth: number): number | null => {
+      if (!node.visible || node.rotation !== 0) return null;
+      const height = heights.get(node.id) ?? node.height;
+      if (node.type === 'TEXT') {
+        const laid = layoutText({ ...node, width: clean(widths.get(node.id) ?? node.width), height: clean(height) }, measurer);
+        return laid.lines[0]?.baseline ?? null;
+      }
+      if ((node.type !== 'FRAME' && node.type !== 'GROUP') || depth > 8) return null;
+      const inside = node.type === 'FRAME' && isAutoLayout(node) ? flowOf(node) : getChildIds(doc, node.id).map((id) => doc.nodes[id]).filter(isLayer);
+      for (const child of inside) {
+        const found = textBaseline(child, depth + 1);
+        if (found !== null) return (positions.get(child.id)?.y ?? child.y) - (node.type === 'GROUP' ? node.y : 0) + found;
+      }
+      return null;
+    };
+    const baselineOf = (node: LayerNode): number => textBaseline(node, 0) ?? (heights.get(node.id) ?? node.height);
+    /** The height a row aligned on the baseline takes: from the highest baseline's top to the lowest bottom. */
+    const baselineRow = (row: readonly number[], flow: readonly LayerNode[], heightOf: (index: number) => number): number => {
+      let above = 0;
+      let below = 0;
+      for (const index of row) {
+        const child = flow[index] as LayerNode;
+        const base = baselineOf(child);
+        above = Math.max(above, base);
+        below = Math.max(below, heightOf(index) - base);
+      }
+      return above + below;
+    };
+
     /** The height of a frame that hugs its children: the tallest column of a column, or a row's lines one under another. */
     const hugHeight = (frame: FrameNode): number => {
       const known = hugHeights.get(frame.id);
@@ -441,7 +476,9 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
                 ),
               ),
             )
-          : extent(lineSizes(rows, items, null, frame.counterAxisSpacing, frame.layoutWrap === 'WRAP'), frame.counterAxisSpacing);
+          : frame.counterAxisAlignItems === 'BASELINE'
+            ? extent(rows.map((row) => baselineRow(row, flowOf(frame), (index) => (items[index] as FlowItem).size)), frame.counterAxisSpacing)
+            : extent(lineSizes(rows, items, null, frame.counterAxisSpacing, frame.layoutWrap === 'WRAP'), frame.counterAxisSpacing);
       const { min, max } = limits(frame, 'y');
       const height = clampSize(content + frame.paddingTop + frame.paddingBottom, min, max);
       hugHeights.set(frame.id, height);
@@ -500,8 +537,9 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
           y: frame.paddingTop + top + (room.height - (heights.get(child.id) as number)) / 2,
         });
       };
-      // A child that a stretch does not reach sits at the start, across the layout.
-      const across = frame.counterAxisAlignItems === 'STRETCH' ? 'MIN' : frame.counterAxisAlignItems;
+      // A child that a stretch does not reach sits at the start, across the layout; so does one in a column aligned on the baseline.
+      const baseline = frame.counterAxisAlignItems === 'BASELINE';
+      const across: 'MIN' | 'CENTER' | 'MAX' = frame.counterAxisAlignItems === 'CENTER' || frame.counterAxisAlignItems === 'MAX' ? frame.counterAxisAlignItems : 'MIN';
       const spread = frame.layoutWrap === 'WRAP' && frame.counterAxisAlignContent === 'SPACE_BETWEEN';
       if (frame.layoutMode === 'HORIZONTAL') {
         const tops = placeAlong(own.sizes, innerHeight, frame.counterAxisSpacing, spread ? 'SPACE_BETWEEN' : across);
@@ -512,8 +550,11 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
             frame.itemSpacing,
             frame.primaryAxisAlignItems,
           );
+          // Aligned on the baseline, each item is moved down until its baseline is level with the lowest-lying one.
+          const bases = baseline ? row.map((index) => baselineOf(flow[index] as LayerNode)) : [];
+          const level = baseline ? Math.max(0, ...bases) : 0;
           row.forEach((index, k) => {
-            const down = placeAcross((rooms[index] as { height: number }).height, own.sizes[line] as number, across);
+            const down = baseline ? level - (bases[k] as number) : placeAcross((rooms[index] as { height: number }).height, own.sizes[line] as number, across);
             put(index, lefts[k] as number, (tops[line] as number) + down);
           });
         });
@@ -562,9 +603,23 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
   // Write the result, from the outside in. Sizes go through the operations that
   // keep what is inside a layer in step with its box.
   let next = doc;
+  // Plain changes of place and size are gathered and written together: writing them one by one copies the
+  // document's map each time, which in a file of thousands of layers is most of the time a layout takes.
+  // Only a box whose contents have to follow it is written at once, after what was gathered.
+  let pending: Record<NodeId, LayerPatch> = {};
+  const flush = (): void => {
+    if (Object.keys(pending).length === 0) return;
+    next = patchNodes(next, pending);
+    pending = {};
+  };
+  const current = (id: NodeId): DesignNode | undefined => {
+    const node = next.nodes[id];
+    const patch = pending[id];
+    return patch && node ? ({ ...node, ...patch } as DesignNode) : node;
+  };
   const differs = (a: number, b: number): boolean => Math.abs(a - b) >= EPSILON;
   const resize = (id: NodeId, width: number, height: number, position: { x: number; y: number } | null): void => {
-    const node = next.nodes[id];
+    const node = current(id);
     if (!isLayer(node)) return;
     const sized = differs(node.width, width) || differs(node.height, height);
     const box: LayerPatch = {};
@@ -582,12 +637,26 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
       box.y = kept.y;
     }
     if (Object.keys(box).length === 0) return;
+    const holds = getChildIds(next, id).length > 0;
+    // Its flow is placed by this pass; what it holds outside the flow follows its constraints.
+    const followers = isAutoLayout(node) ? getChildIds(next, id).some((childId) => { const child = next.nodes[childId]; return isLayer(child) && child.layoutPositioning === 'ABSOLUTE'; }) : holds;
+    if (!sized || !followers) {
+      // A vector's points are drawn where they are, so a vector given another size has them scaled to it, as setLayerBox does.
+      if (sized && node.type === 'VECTOR') {
+        const sx = node.width > 0 ? clean(width) / node.width : 1;
+        const sy = node.height > 0 ? clean(height) / node.height : 1;
+        if (node.width <= 0) delete box.width;
+        if (node.height <= 0) delete box.height;
+        if (sx !== 1 || sy !== 1) box.network = scaleNetwork(node.network, node.width > 0 ? sx : 1, node.height > 0 ? sy : 1);
+      }
+      pending[id] = { ...(pending[id] ?? {}), ...box };
+      return;
+    }
+    flush();
     if (isAutoLayout(node)) {
-      // Its flow is placed by this pass; what it holds outside the flow follows its constraints.
       next = patchNodes(next, { [id]: box });
-      if (sized) next = applyConstraints(next, id, node.width, node.height, clean(width), clean(height));
-    } else if (sized) next = setLayerBox(next, id, box);
-    else next = patchNodes(next, { [id]: box });
+      next = applyConstraints(next, id, node.width, node.height, clean(width), clean(height));
+    } else next = setLayerBox(next, id, box);
   };
   const write = (frame: FrameNode): void => {
     for (const child of flowOf(frame)) {
@@ -597,6 +666,7 @@ function layoutTree(doc: Document, rootId: NodeId, measurer: TextMeasurer): Docu
   };
   resize(rootId, widths.get(rootId) as number, heights.get(rootId) as number, null);
   write(root);
+  flush();
   return next;
 }
 

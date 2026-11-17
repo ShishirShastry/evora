@@ -34,6 +34,7 @@ import {
 } from './core';
 import { exportPdf, standardFont, winAnsiCode, writableAsPdfText } from './engine/export/pdf';
 import { exportSvg, pathData } from './engine/export/svg';
+import { strokeSideBands } from './engine/render/paint';
 import { buildVectorScene, PathRecorder } from './engine/export/vector';
 import { getRenderBounds } from './engine/render/scene';
 import { deflateRaw, deflateZlib, inflateRaw, inflateZlib } from './persistence/compression';
@@ -46,6 +47,7 @@ import { createEditorStore, type EditorStore } from './state/editorStore';
  */
 
 const RED = { r: 1, g: 0, b: 0 };
+const GREEN = { r: 0, g: 1, b: 0 };
 const BLUE = { r: 0, g: 0, b: 1 };
 const WHITE = { r: 1, g: 1, b: 1 };
 
@@ -152,6 +154,52 @@ describe('export settings', () => {
     const raw = JSON.parse(JSON.stringify(now(c.store))) as { nodes: Record<string, Record<string, unknown>> };
     raw.nodes[c.card]!.exportSettings = [{ format: 'TIFF' }, { format: 'PNG', constraint: { type: 'SCALE', value: -3 }, quality: 9, pdfContent: 'HOLOGRAM' }, 'png'];
     expect(getLayer(repairDocument(raw).doc, c.card)?.exportSettings).toEqual([{ format: 'PNG', constraint: { type: 'SCALE', value: 0.01 }, suffix: '', background: false, quality: 1, svgIds: false, pdfContent: 'VECTOR', pdfText: 'TEXT' }]);
+  });
+});
+
+describe('strokes with a weight for each side', () => {
+  it('draws only the sides that have a weight, inside the box, and exports them as filled bands', () => {
+    const c = card();
+    act(c.store, (doc) => patchNode(doc, c.box, { strokes: [solidPaint(GREEN)], strokeSides: { top: 0, right: 0, bottom: 6, left: 2 } }));
+    const box = getLayer(now(c.store), c.box)!;
+    // Inside the 50 × 30 box: the bottom six and the left two; sides of no weight are not drawn.
+    expect(strokeSideBands(box)).toEqual([
+      { x: 0, y: 24, width: 50, height: 6 },
+      { x: 0, y: 0, width: 2, height: 30 },
+    ]);
+    // Centred on the edge, they reach out half their weight.
+    expect(strokeSideBands({ ...box, strokeAlign: 'CENTER' })).toEqual([
+      { x: -1, y: 27, width: 51, height: 6 },
+      { x: -1, y: 0, width: 2, height: 33 },
+    ]);
+    // What is drawn reaches as far as the heaviest side, so an outside stroke is not cut off or left out.
+    act(c.store, (doc) => patchNode(doc, c.box, { strokeAlign: 'OUTSIDE', strokeWeight: 0 }));
+    expect(getRenderBounds(now(c.store), c.box)).toEqual({ x: 54, y: 54, width: 62, height: 42 });
+    // An ellipse has no sides: its stroke is the same all round.
+    expect(strokeSideBands({ ...box, type: 'ELLIPSE' } as typeof box)).toBeNull();
+    const { scene, bounds } = sceneOf(now(c.store), c.card);
+    const { svg } = exportSvg(scene, { width: bounds.width, height: bounds.height });
+    expect(svg).toContain('fill="#00ff00"');
+    expect(svg).not.toContain('stroke="#00ff00"');
+  });
+
+  it('opens a version 23 file, which has none, and keeps them through saving and opening', () => {
+    const c = card();
+    const current = now(c.store);
+    const v23 = JSON.parse(JSON.stringify(current)) as { nodes: Record<string, Record<string, unknown>> };
+    for (const id in v23.nodes) delete (v23.nodes[id] as Record<string, unknown>).strokeSides;
+    const parsed = parseFile({ format: 'open-design', schemaVersion: 23, meta: { createdAt: '2026-11-16T15:00:00.000Z', updatedAt: '2026-11-16T15:00:00.000Z' }, document: v23 });
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(24);
+    expect(parsed.repairs).toEqual([]);
+    expect(parsed.file.document).toEqual(current);
+    act(c.store, (doc) => patchNode(doc, c.box, { strokeSides: { top: 1, right: 2, bottom: 3, left: 4 } }));
+    const reopened = repairDocument(JSON.parse(JSON.stringify(now(c.store))));
+    expect(reopened.repairs).toEqual([]);
+    expect(reopened.doc).toEqual(now(c.store));
+    // A weight that is not a number, or less than nothing, is mended.
+    const raw = JSON.parse(JSON.stringify(now(c.store))) as { nodes: Record<string, Record<string, unknown>> };
+    raw.nodes[c.box]!.strokeSides = { top: 'thick', right: -2, bottom: 3, left: 4 };
+    expect(getLayer(repairDocument(raw).doc, c.box)?.strokeSides).toEqual({ top: 0, right: 0, bottom: 3, left: 4 });
   });
 });
 

@@ -75,6 +75,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   SET_VARIABLE: 'Set variable',
   CONDITIONAL: 'Conditional',
   INPUT: 'Type into variable',
+  OPEN_LINK: 'Open link',
 };
 const TRANSITION_LABELS: Record<TransitionType, string> = { INSTANT: 'Instant', DISSOLVE: 'Dissolve', SMART_ANIMATE: 'Smart Animate', MOVE_IN: 'Move in', MOVE_OUT: 'Move out', PUSH: 'Push', SLIDE_IN: 'Slide in', SLIDE_OUT: 'Slide out' };
 const DIRECTION_LABELS: Record<TransitionDirection, string> = { LEFT: 'To the left', RIGHT: 'To the right', TOP: 'Upwards', BOTTOM: 'Downwards' };
@@ -207,6 +208,7 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
             )}
             {action.type === 'CHANGE_TO' && choices.length === 0 && <p className="m-0 text-faint">“Change to” is for a variant, a layer of one, or an instance of one: it shows another variant of the same set.</p>}
             {TAKES_TRANSITION.includes(action.type) && <TransitionEditor label={name} value={action.transition} onChange={(transition) => set(index, { ...action, transition })} />}
+            {action.type === 'OPEN_LINK' && <CommitInput label={`${name} address`} value={action.expression} className="w-full" placeholder="https://…" onCommit={(expression) => set(index, { ...action, expression: expression.trim() })} />}
             {(action.type === 'SET_VARIABLE' || action.type === 'INPUT') && (
               <Row>
                 <Select

@@ -19,6 +19,7 @@ import {
   itemSpacingOf,
   lineSizes,
   lineSpacingOf,
+  layoutText,
   parseFile,
   patchNode,
   patchNodes,
@@ -181,6 +182,38 @@ describe('rows and columns', () => {
       [70, 30],
     ]);
     expect(size(laid, frameId)).toEqual([400, 200]);
+  });
+
+  it('lines a row up on the baseline of its text, with a box sitting on it, and hugs from the highest top to the lowest bottom', () => {
+    const { doc, frameId } = frame({ paddingTop: 10, paddingBottom: 10, itemSpacing: 8, counterAxisAlignItems: 'BASELINE', layoutSizingVertical: 'HUG' });
+    const made = fill(doc, frameId, [
+      { type: 'TEXT', characters: 'Big', fontSize: 32 } as LayerPatch & { type: LayerType },
+      { type: 'TEXT', characters: 'small', fontSize: 12 } as LayerPatch & { type: LayerType },
+      { width: 20, height: 20 },
+    ]);
+    const laid = lay(made.doc);
+    const [big, small, square] = made.ids.map((id) => getLayer(laid, id) as LayerNode);
+    const baseline = (node: LayerNode): number => node.y + (layoutText(node as TextNode, approximateMeasurer).lines[0]?.baseline as number);
+    // The two baselines are level, and the box's bottom is on them.
+    expect(baseline(small!)).toBeCloseTo(baseline(big!), 5);
+    expect(square!.y + square!.height).toBeCloseTo(baseline(big!), 5);
+    // The big text is the highest, at the top padding; the frame reaches the lowest bottom.
+    expect(big!.y).toBe(10);
+    const bottom = Math.max(...[big!, small!, square!].map((node) => node.y + node.height));
+    expect(frameOf(laid, frameId).height).toBeCloseTo(bottom + 10, 5);
+    // In a column there is no baseline to line up: the items keep to the start.
+    const column = lay(patchNode(laid, frameId, { layoutMode: 'VERTICAL' } as LayerPatch));
+    expect(made.ids.map((id) => box(column, id).x)).toEqual([0, 0, 0]);
+    // It is kept in the file.
+    expect(frameOf(repairDocument(JSON.parse(JSON.stringify(laid))).doc, frameId).counterAxisAlignItems).toBe('BASELINE');
+  });
+
+  it('stretches the points of a vector it stretches, not only its box', () => {
+    const { doc, frameId } = frame({ counterAxisAlignItems: 'STRETCH' });
+    const made = fill(doc, frameId, [{ type: 'VECTOR', width: 20, height: 20, network: { vertices: [{ x: 0, y: 0 }, { x: 20, y: 20 }], segments: [{ start: 0, end: 1, tangentStart: { x: 0, y: 0 }, tangentEnd: { x: 0, y: 0 } }] } } as LayerPatch & { type: LayerType }]);
+    const vector = getLayer(lay(made.doc), made.ids[0] as NodeId) as LayerNode & { network: { vertices: { x: number; y: number }[] } };
+    expect(vector.height).toBe(200);
+    expect(vector.network.vertices).toEqual([{ x: 0, y: 0 }, { x: 20, y: 200 }]);
   });
 
   it('places children in a column', () => {

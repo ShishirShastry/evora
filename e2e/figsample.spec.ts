@@ -11,7 +11,7 @@ import { expect, test } from '@playwright/test';
 const SAMPLE = '.tools/fig-samples/EXPATS final.fig';
 test.skip(!existsSync(SAMPLE), 'The sample Figma file is not on this machine: put "EXPATS final.fig" in .tools/fig-samples/.');
 
-test('a real Figma file opened from the file browser, with what was left out listed first', async ({ page }) => {
+test('a real Figma file opened from the file browser: everything in it converts, so it opens at once', async ({ page }) => {
   test.setTimeout(420000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -20,17 +20,12 @@ test('a real Figma file opened from the file browser, with what was left out lis
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Import file…' }).click()]);
   await chooser.setFiles({ name: 'EXPATS final.fig', mimeType: 'application/octet-stream', buffer: readFileSync(SAMPLE) });
 
-  // What could not be brought over is said before the file is opened.
-  const report = page.getByRole('dialog', { name: 'Figma file opened' });
-  await expect(report).toBeVisible({ timeout: 180000 });
-  const lines = report.getByRole('list', { name: 'Not converted' }).getByRole('listitem');
-  await expect(lines).toHaveCount(7);
-  await expect(lines.first()).toHaveText('Layers that were flipped (shown unflipped): 2');
-  await report.getByRole('button', { name: 'Open the file' }).click();
+  // Nothing was left out, so there is no list of what was: the file opens straight away.
+  const canvas = page.getByRole('application', { name: 'Design canvas' });
+  await expect(canvas).toBeVisible({ timeout: 240000 });
+  await expect(page.getByRole('dialog', { name: 'Figma file opened' })).toHaveCount(0);
 
   // The file: its pages, its components, and no repairs needed when it is opened.
-  const canvas = page.getByRole('application', { name: 'Design canvas' });
-  await expect(canvas).toBeVisible({ timeout: 120000 });
   await expect(page.getByRole('button', { name: /^File name: EXPATS final/ })).toBeVisible();
   const sidebar = page.getByRole('navigation', { name: 'Pages and layers' });
   for (const name of ['Design system', 'App screens', 'Cover & decisions']) await expect(sidebar.getByText(name, { exact: true })).toBeVisible();

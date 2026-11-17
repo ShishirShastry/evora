@@ -74,3 +74,58 @@ test('a design saved as a .fig file and opened again from it', async ({ page }) 
   await expect(field(page, 'Fill 1 colour hex')).toHaveValue('FF0000');
   expect(errors).toEqual([]);
 });
+
+test('a Figma file with something this application keeps only approximately says so before it opens', async ({ page }) => {
+  const { compileSchema, encodeBinarySchema, parseSchemaText, writeZip } = await import('../src/core');
+  const { deflateRawSync } = await import('node:zlib');
+  // A file laid out as Figma's: a page with a FigJam sticky note on it, which is kept as a frame with its text.
+  const schema = parseSchemaText(`
+    struct GUID { uint sessionID; uint localID; }
+    struct Color { float r; float g; float b; float a; }
+    struct Vector { float x; float y; }
+    struct Matrix { float m00; float m01; float m02; float m10; float m11; float m12; }
+    message ParentIndex { GUID guid = 1; string position = 2; }
+    message Paint { string type = 1; Color color = 2; float opacity = 3; bool visible = 4; }
+    message TextData { string characters = 1; }
+    message NodeChange { GUID guid = 1; ParentIndex parentIndex = 2; string type = 3; string name = 4; Vector size = 5; Matrix transform = 6; Paint[] fillPaints = 7; TextData textData = 8; float fontSize = 9; }
+    message Message { uint type = 1; NodeChange[] nodeChanges = 2; }
+  `);
+  const g = (localID: number) => ({ sessionID: 0, localID });
+  const message = compileSchema(schema).encode('Message', {
+    type: 1,
+    nodeChanges: [
+      { guid: g(0), type: 'DOCUMENT', name: 'Document' },
+      { guid: g(1), type: 'CANVAS', name: 'Board', parentIndex: { guid: g(0), position: 'a' } },
+      { guid: g(2), type: 'STICKY', name: 'Note', parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 200 }, transform: { m00: 1, m01: 0, m02: 40, m10: 0, m11: 1, m12: 40 }, fillPaints: [{ type: 'SOLID', color: { r: 1, g: 0.9, b: 0.5, a: 1 }, opacity: 1, visible: true }], textData: { characters: 'Remember this' }, fontSize: 16 },
+    ],
+  });
+  const parts = [new Uint8Array(deflateRawSync(encodeBinarySchema(schema))), new Uint8Array(deflateRawSync(message))];
+  const canvasBytes = new Uint8Array(12 + parts.reduce((sum, part) => sum + 4 + part.length, 0));
+  canvasBytes.set(new TextEncoder().encode('fig-kiwi'));
+  const view = new DataView(canvasBytes.buffer);
+  view.setUint32(8, 101, true);
+  let offset = 12;
+  for (const part of parts) {
+    view.setUint32(offset, part.length, true);
+    canvasBytes.set(part, offset + 4);
+    offset += 4 + part.length;
+  }
+  const file = writeZip([{ name: 'canvas.fig', bytes: canvasBytes }]);
+
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Import file…' }).click()]);
+  await chooser.setFiles({ name: 'Board.fig', mimeType: 'application/octet-stream', buffer: Buffer.from(file) });
+  // What was kept only approximately is listed first.
+  const report = page.getByRole('dialog', { name: 'Figma file opened' });
+  await expect(report).toBeVisible();
+  await expect(report.getByRole('list', { name: 'Not converted' }).getByRole('listitem')).toHaveText(['Layers of the kind “STICKY” (kept as frames): 1']);
+  await report.getByRole('button', { name: 'Open the file' }).click();
+  // The note is there, a frame with its words in it.
+  await expect(canvas(page)).toBeVisible();
+  await layer(page, 'Note').click();
+  await expect(field(page, 'Width')).toHaveValue('200');
+  await expect(layers(page).getByRole('treeitem', { name: 'Text', exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});

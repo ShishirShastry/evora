@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 23 (adds export settings and what developers are handed; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * OPEN DESIGN document schema, version 24 (adds a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 export const FILE_FORMAT = 'open-design';
 export const FILE_EXTENSION = '.opendesign';
 
@@ -250,8 +250,9 @@ export const PRIMARY_AXIS_ALIGNS: readonly PrimaryAxisAlign[] = ['MIN', 'CENTER'
  * or end, or (STRETCH, from version 16) made as big across it as the frame
  * has room, whatever their own sizing across says.
  */
-export type CounterAxisAlign = 'MIN' | 'CENTER' | 'MAX' | 'STRETCH';
-export const COUNTER_AXIS_ALIGNS: readonly CounterAxisAlign[] = ['MIN', 'CENTER', 'MAX', 'STRETCH'];
+/** BASELINE (version 24): a row's items lined up on the baseline of their first line of text; a column treats it as MIN. */
+export type CounterAxisAlign = 'MIN' | 'CENTER' | 'MAX' | 'STRETCH' | 'BASELINE';
+export const COUNTER_AXIS_ALIGNS: readonly CounterAxisAlign[] = ['MIN', 'CENTER', 'MAX', 'STRETCH', 'BASELINE'];
 
 /** How the lines of a wrapping row are spaced: by the frame's line spacing, or spread out from top to bottom. */
 export type CounterAxisAlignContent = 'AUTO' | 'SPACE_BETWEEN';
@@ -383,6 +384,11 @@ interface LayerBase extends NodeBase {
   boundVariables: Readonly<Record<string, string>>;
   /** The mode chosen here, for this layer and everything in it, of each variable collection that has one chosen. */
   variableModes: Readonly<Record<string, string>>;
+  /**
+   * A stroke weight for each side, in place of `strokeWeight`, for a frame or a
+   * rectangle: a line along the bottom only, say. Null for the same weight all round.
+   */
+  strokeSides: StrokeSides | null;
   /** The interactions on this layer in a prototype. */
   reactions: Reaction[];
   /** What this layer does when the frame it is in scrolls in a prototype. */
@@ -489,8 +495,17 @@ export interface Transition {
   bezier: [number, number, number, number];
 }
 
-export type ActionType = 'NAVIGATE' | 'OPEN_OVERLAY' | 'SWAP_OVERLAY' | 'CLOSE_OVERLAY' | 'SCROLL_TO' | 'BACK' | 'CHANGE_TO' | 'SET_VARIABLE' | 'CONDITIONAL' | 'INPUT';
-export const ACTION_TYPES: readonly ActionType[] = ['NAVIGATE', 'OPEN_OVERLAY', 'SWAP_OVERLAY', 'CLOSE_OVERLAY', 'SCROLL_TO', 'BACK', 'CHANGE_TO', 'SET_VARIABLE', 'CONDITIONAL', 'INPUT'];
+/** OPEN_LINK opens the web address in `expression`. */
+export type ActionType = 'NAVIGATE' | 'OPEN_OVERLAY' | 'SWAP_OVERLAY' | 'CLOSE_OVERLAY' | 'SCROLL_TO' | 'BACK' | 'CHANGE_TO' | 'SET_VARIABLE' | 'CONDITIONAL' | 'INPUT' | 'OPEN_LINK';
+export const ACTION_TYPES: readonly ActionType[] = ['NAVIGATE', 'OPEN_OVERLAY', 'SWAP_OVERLAY', 'CLOSE_OVERLAY', 'SCROLL_TO', 'BACK', 'CHANGE_TO', 'SET_VARIABLE', 'CONDITIONAL', 'INPUT', 'OPEN_LINK'];
+
+/** The weight of a stroke on each side of a box. */
+export interface StrokeSides {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
 
 /**
  * One thing an interaction does. Every action has every field; which ones

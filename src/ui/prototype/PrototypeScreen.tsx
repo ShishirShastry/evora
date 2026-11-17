@@ -174,6 +174,8 @@ function Viewer({ storage, doc, startId, onExit }: { storage: DocumentStorage; d
     const tick = (): void => {
       frame = requestAnimationFrame(tick);
       player.advance(performance.now());
+      // Links the prototype asked to open, in a tab of their own; only addresses that go somewhere, nothing that runs.
+      for (const url of player.links.splice(0)) if (/^(https?:\/\/|mailto:)/i.test(url)) window.open(url, '_blank', 'noopener,noreferrer');
       for (const pad of navigator.getGamepads?.() ?? []) {
         if (!pad) continue;
         pad.buttons.forEach((padButton, index) => {

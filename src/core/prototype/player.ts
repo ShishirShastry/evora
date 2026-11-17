@@ -95,6 +95,8 @@ export class Player {
   scene: Scene;
   /** The variable that typing goes into, while an input field has the keyboard. */
   input: string | null = null;
+  /** Web addresses that interactions asked to open, oldest first, for the viewer to open and clear. */
+  links: string[] = [];
   now = 0;
 
   private readonly measurer: TextMeasurer;
@@ -398,6 +400,9 @@ export class Player {
         }
         case 'INPUT':
           if (action.variableId !== null && this.doc.variables[action.variableId]?.type === 'STRING') this.input = action.variableId;
+          break;
+        case 'OPEN_LINK':
+          if (action.expression.trim() !== '') this.links.push(action.expression.trim());
           break;
       }
     }

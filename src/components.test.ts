@@ -551,3 +551,85 @@ describe('text in an instance that differs from its component', () => {
     expect(text(c.store, c.textId).styleRanges).toEqual([{ start: 2, end: 5, fontWeight: 700 }]);
   });
 });
+
+describe('instances at a size of their own', () => {
+  it('keeps the points of a vector scaled with its instance, after the component changes', () => {
+    const store = createEditorStore(createDocument('Icons'));
+    const pageId = (getPages(store.getState().doc)[0] as { id: NodeId }).id;
+    let iconId = '';
+    let lineId = '';
+    store.getState().apply('Build', (doc) => {
+      const frame = addLayer(doc, 'FRAME', pageId, { x: 0, y: 0, width: 24, height: 24, name: 'Icon' });
+      const line = addLayer(frame.doc, 'VECTOR', frame.id, {
+        x: 2,
+        y: 2,
+        width: 20,
+        height: 20,
+        name: 'Line',
+        constraints: { horizontal: 'SCALE', vertical: 'SCALE' },
+        network: { vertices: [{ x: 0, y: 0 }, { x: 20, y: 20 }], segments: [{ start: 0, end: 1, tangentStart: { x: 0, y: 0 }, tangentEnd: { x: 0, y: 0 } }] },
+      });
+      iconId = frame.id;
+      lineId = line.id;
+      return (createComponent(line.doc, [frame.id]) as { doc: Document }).doc;
+    });
+    const small = place(store, iconId);
+    act(store, (doc) => setLayerBox(doc, small, { width: 12, height: 12 }));
+    const check = (): void => {
+      const mirror = layer(store, mirrorId(small, lineId)) as LayerNode & { network: { vertices: { x: number; y: number }[] } };
+      expect(mirror).toMatchObject({ x: 1, y: 1, width: 10, height: 10 });
+      expect(mirror.network.vertices).toEqual([{ x: 0, y: 0 }, { x: 10, y: 10 }]);
+    };
+    check();
+    // The component changes elsewhere: the instance's line keeps its own size, and its points that size.
+    act(store, (doc) => patchNode(doc, lineId, { opacity: 0.5 }));
+    check();
+    expect(layer(store, mirrorId(small, lineId)).opacity).toBe(0.5);
+  });
+
+  it('gives an instance inside an instance the size of the component it is swapped for', () => {
+    const { store, componentId: cardId, pageId } = card();
+    let bigId = '';
+    let outerId = '';
+    let innerId = '';
+    store.getState().apply('Build', (doc) => {
+      const big = addLayer(doc, 'FRAME', pageId, { x: 0, y: 400, width: 300, height: 150, name: 'Big' });
+      const withBig = (createComponent(big.doc, [big.id]) as { doc: Document }).doc;
+      const outer = addLayer(withBig, 'FRAME', pageId, { x: 600, y: 0, width: 400, height: 300, name: 'Outer' });
+      const inner = createInstance(outer.doc, cardId, { parentId: outer.id, at: { x: 0, y: 0 } }) as { doc: Document; id: NodeId };
+      bigId = big.id;
+      outerId = outer.id;
+      innerId = inner.id;
+      return (createComponent(inner.doc, [outer.id]) as { doc: Document }).doc;
+    });
+    const placed = place(store, outerId, { x: 0, y: 800 });
+    expect(frameOf(store, mirrorId(placed, innerId))).toMatchObject({ componentId: cardId, width: 200, height: 100 });
+    act(store, (doc) => patchNode(doc, placed, { overrides: { [innerId]: { componentId: bigId } } }));
+    expect(frameOf(store, mirrorId(placed, innerId))).toMatchObject({ componentId: bigId, width: 300, height: 150 });
+    // Swapped back, or reset, it is the first component's size again.
+    act(store, (doc) => patchNode(doc, placed, { overrides: {} }));
+    expect(frameOf(store, mirrorId(placed, innerId))).toMatchObject({ componentId: cardId, width: 200, height: 100 });
+  });
+
+  it('takes its own stroke for each side from its component', () => {
+    const { store, componentId } = card({ strokes: [solidPaint(RED)], strokeSides: { top: 0, right: 0, bottom: 3, left: 0 } } as LayerPatch);
+    const a = place(store, componentId);
+    expect(frameOf(store, a).strokeSides).toEqual({ top: 0, right: 0, bottom: 3, left: 0 });
+    act(store, (doc) => patchNode(doc, componentId, { strokeSides: { top: 1, right: 1, bottom: 1, left: 1 } }));
+    expect(frameOf(store, a).strokeSides).toEqual({ top: 1, right: 1, bottom: 1, left: 1 });
+    // Its own, it keeps.
+    act(store, (doc) => patchNode(doc, a, { strokeSides: null }));
+    act(store, (doc) => patchNode(doc, componentId, { strokeSides: { top: 2, right: 2, bottom: 2, left: 2 } }));
+    expect(frameOf(store, a).strokeSides).toBeNull();
+  });
+
+  it('keeps the layout of an instance of its own size when everything is laid out again, as when fonts arrive', () => {
+    const { store, componentId, rectId } = card();
+    act(store, (doc) => patchNode(doc, rectId, { constraints: { horizontal: 'SCALE', vertical: 'SCALE' } }));
+    const a = place(store, componentId);
+    act(store, (doc) => setLayerBox(doc, a, { width: 100, height: 50 }));
+    expect(layer(store, mirrorId(a, rectId))).toMatchObject({ x: 5, y: 5, width: 30, height: 20 });
+    store.getState().refitText();
+    expect(layer(store, mirrorId(a, rectId))).toMatchObject({ x: 5, y: 5, width: 30, height: 20 });
+  });
+});

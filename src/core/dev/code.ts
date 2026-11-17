@@ -100,7 +100,7 @@ export function cssFor(doc: Document, id: NodeId): string {
     add('flex-direction', `${node.layoutMode === 'HORIZONTAL' ? 'row' : 'column'}${node.itemsReversed ? '-reverse' : ''}`);
     if (node.layoutWrap === 'WRAP') add('flex-wrap', 'wrap');
     const justify = { MIN: 'flex-start', CENTER: 'center', MAX: 'flex-end', SPACE_BETWEEN: 'space-between' }[node.primaryAxisAlignItems];
-    const align = { MIN: 'flex-start', CENTER: 'center', MAX: 'flex-end', STRETCH: 'stretch' }[node.counterAxisAlignItems];
+    const align = { MIN: 'flex-start', CENTER: 'center', MAX: 'flex-end', STRETCH: 'stretch', BASELINE: node.layoutMode === 'HORIZONTAL' ? 'baseline' : 'flex-start' }[node.counterAxisAlignItems];
     add('justify-content', justify);
     add('align-items', align);
     if (node.primaryAxisAlignItems !== 'SPACE_BETWEEN' && node.itemSpacing !== 0) {

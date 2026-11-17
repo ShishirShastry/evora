@@ -9,6 +9,16 @@ import type { DesignNode, Document, NodeId, NodePatch } from './schema';
 
 /** Adds, replaces (`node`) or removes (`null`) whole nodes. */
 export function setNodes(doc: Document, changes: Readonly<Record<NodeId, DesignNode | null>>): Document {
+  // Nothing is copied unless something changes: copying a large document's map is what costs, and many calls change nothing.
+  let any = false;
+  for (const id in changes) {
+    const value = changes[id] as DesignNode | null;
+    if (value === null ? doc.nodes[id] !== undefined : value !== doc.nodes[id]) {
+      any = true;
+      break;
+    }
+  }
+  if (!any) return doc;
   let changed = false;
   let structural = false;
   const next: Record<NodeId, DesignNode> = { ...doc.nodes };

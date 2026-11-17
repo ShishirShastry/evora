@@ -339,6 +339,17 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 23, document: { ...body, nodes: upgraded } };
   },
+  // Version 24 adds a stroke weight for each side, and links in prototypes. No older layer has either.
+  23: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type !== 'PAGE' ? { strokeSides: null, ...node } : node;
+    }
+    return { ...file, schemaVersion: 24, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**
