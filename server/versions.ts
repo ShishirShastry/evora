@@ -30,14 +30,20 @@
  * the base into main. A register changed on both sides to different values is
  * a conflict, which the person resolves (keep main / take branch). Merging
  * records "Before merging" and "Merged" versions on main, so restoring the
- * first undoes the merge, and marks the branch merged (it stays viewable).
+ * first undoes the merge, and marks the branch merged: it stays viewable but
+ * the server refuses every change to it (the store's `lockReason` hook; the
+ * live connection joins everyone to it as a viewer, HTTP routes answer 409
+ * "This branch has been merged into <main>; it can be viewed but not changed").
+ *
+ * Branches are not listed as files of their own while their main file exists:
+ * file lists give each main file its open branches (`branchFieldsOf`).
  */
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { canEdit, parseKey, type Register, type StoredRegister, type UserRef } from '../src/collab/protocol.ts';
 import type { ApiExtension, ApiKit, Ctx } from './api.ts';
-import { newId, now, type DocRow, type Store } from './store.ts';
+import { TRASH_WORKSPACE, newId, now, type BranchFields, type DocRow, type FileBranch, type Identity, type Store } from './store.ts';
 
 // ------------------------------------------------------------------ settings
 
@@ -432,21 +438,64 @@ function copyAssets(store: Store, fromId: string, toId: string): void {
 
 // ------------------------------------------------------------------ setup
 
-/** The stores already set up: the change hook is put in once per store. */
+/** The stores already set up: the hooks are put in once per store. */
 const hooked = new WeakSet<Store>();
+
+function branchRowOf(store: Store, docId: string): BranchRow | undefined {
+  return store.one<BranchRow>(`SELECT ${BRANCH_COLUMNS} FROM branches WHERE doc_id = ?`, docId);
+}
+
+/** Why a branch may not be changed: it has been merged. Null for any other document. */
+export function mergedReason(store: Store, docId: string): string | null {
+  const row = store.one<{ main_id: string; main_name: string; status: BranchStatus }>(`SELECT main_id, main_name, status FROM branches WHERE doc_id = ?`, docId);
+  if (!row || row.status !== 'merged') return null;
+  const mainName = store.docById(row.main_id)?.name ?? row.main_name;
+  return `This branch has been merged into ${mainName}; it can be viewed but not changed`;
+}
+
+/**
+ * What a file list says about branches (`BranchFields`): a branch's main
+ * file, or a main file's open branches that the person can open (not those
+ * in the trash), newest first.
+ */
+export function branchFieldsOf(store: Store, doc: DocRow, who: Identity): BranchFields {
+  const own = store.one<{ main_id: string }>(`SELECT main_id FROM branches WHERE doc_id = ?`, doc.id);
+  if (own) return { mainId: own.main_id, branches: [] };
+  const branches: FileBranch[] = [];
+  for (const row of store.all<{ doc_id: string; created_by: string }>(
+    `SELECT b.doc_id, b.created_by FROM branches b JOIN documents d ON d.id = b.doc_id
+     WHERE b.main_id = ? AND b.status = 'open' AND d.workspace_id != ? ORDER BY b.created_at DESC, b.rowid DESC`,
+    doc.id,
+    TRASH_WORKSPACE,
+  )) {
+    const branch = store.docById(row.doc_id);
+    const role = branch ? store.roleOn(branch, who) : null;
+    if (!branch || !role) continue;
+    branches.push({ id: branch.id, name: branch.name, updatedAt: branch.updated_at, createdBy: store.ref(row.created_by), role });
+  }
+  return { mainId: null, branches };
+}
+
+/** A branch is left out of file lists while its main file exists (it is listed with it); one whose main file was deleted is listed on its own. */
+export function isListedWithMain(store: Store, docId: string): boolean {
+  return !!store.one(`SELECT 1 AS x FROM branches b JOIN documents d ON d.id = b.main_id WHERE b.doc_id = ?`, docId);
+}
 
 export function setup(store: Store): void {
   store.db.exec(SCHEMA);
   if (hooked.has(store)) return;
   hooked.add(store);
-  // Every change to a document goes through `applyRegisters` (the live connection, renames over HTTP, restores and merges):
-  // an automatic version is made first when one is due, in the same transaction.
-  const apply = store.applyRegisters.bind(store);
-  store.applyRegisters = (docId: string, ops: Register[]) =>
-    store.tx(() => {
+  store.addDocHooks({
+    // Every change to a document goes through `applyRegisters` (the live connection, renames over HTTP, restores and merges):
+    // an automatic version is made first when one is due, in the same transaction.
+    beforeApply: (docId) => {
       checkpointIfDue(store, docId);
-      return apply(docId, ops);
-    });
+    },
+    // A merged branch can be viewed, not changed: the store refuses its changes, the hub joins everyone to it as a viewer.
+    lockReason: (docId) => mergedReason(store, docId),
+    hiddenInLists: (docId) => isListedWithMain(store, docId),
+    branchFields: (doc, who) => branchFieldsOf(store, doc, who),
+  });
 }
 
 // ------------------------------------------------------------------ routes
@@ -487,7 +536,7 @@ export const extension: ApiExtension = (kit) => {
   }
 
   function branchRow(docId: string): BranchRow | undefined {
-    return store.one<BranchRow>(`SELECT ${BRANCH_COLUMNS} FROM branches WHERE doc_id = ?`, docId);
+    return branchRowOf(store, docId);
   }
 
   /** A branch the person can open, its row, their role on it, and its main file (which must still exist). */
@@ -555,6 +604,7 @@ export const extension: ApiExtension = (kit) => {
     route('POST', '/api/documents/:id/versions/:versionId/restore', (ctx, params) => {
       const { doc, row, editor } = versionOf(ctx, params.id as string, params.versionId as string);
       if (!editor) throw new HttpError(403, 'Viewers cannot restore versions');
+      kit.requireChangeable(doc);
       const author = requirePerson(ctx);
       const target = contentOf(row.id);
       const label = row.name || `the version of ${new Date(row.created_at).toLocaleString('en-GB', { timeZone: 'UTC' })} UTC`;
@@ -669,7 +719,7 @@ export const extension: ApiExtension = (kit) => {
     route('POST', '/api/documents/:id/update-from-main', async (ctx, params) => {
       const { doc, role, row, main } = branchOf(ctx, params.id as string);
       if (!canEdit(role)) throw new HttpError(403, 'Only editors of the branch can update it');
-      if (row.status !== 'open') throw new HttpError(409, 'This branch has been merged');
+      kit.requireChangeable(doc);
       const resolutions = resolutionsOf(await ctx.json(), HttpError);
       // Images main has that the branch may now show.
       copyAssets(store, main.id, doc.id);
@@ -712,7 +762,7 @@ export const extension: ApiExtension = (kit) => {
       const resolutions = resolutionsOf(await ctx.json(), HttpError);
       // Images the branch added, which main will now show.
       copyAssets(store, doc.id, main.id);
-      return store.tx(() => {
+      const merged = store.tx(() => {
         const base = decode(row.base);
         const { values, unresolved } = valuesToBring(base, valuesOf(store, doc.id), valuesOf(store, main.id), 'branch', resolutions);
         if (unresolved.length > 0) throw new HttpError(409, `${unresolved.length} ${unresolved.length === 1 ? 'conflict needs' : 'conflicts need'} a choice`);
@@ -723,6 +773,9 @@ export const extension: ApiExtension = (kit) => {
         store.run(`UPDATE branches SET status = 'merged', merged_at = ?, merged_by = ? WHERE doc_id = ?`, now(), user.id, doc.id);
         return { mainSeq: result.seq, applied: values.size, before, after, branch: branchDto(store, branchRow(doc.id) as BranchRow) };
       });
+      // Whoever has the branch open is a viewer of it from now on (the app shows it read-only).
+      kit.hub.recheck([doc.id]);
+      return merged;
     }),
   ];
 };

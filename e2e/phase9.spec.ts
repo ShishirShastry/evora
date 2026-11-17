@@ -586,10 +586,10 @@ test.describe.serial('two people on the collaboration server', () => {
     await rail.getByRole('button', { name: /^Trash/ }).click();
     const trash = page.getByRole('list', { name: 'Deleted files' });
     await expect(trash).toContainText('Checkout');
-    // Ben, a member of the workspace, cannot open it while it is there.
-    expected.set(people.ben, [/status of 403/]);
+    // Ben, a member of the workspace, cannot open it while it is there: he is told it is in the trash.
+    expected.set(people.ben, [/status of 410/]);
     await people.ben.page.goto(mainUrl);
-    await expect(people.ben.page.getByText(/do not have access/i)).toBeVisible();
+    await expect(people.ben.page.getByRole('alert')).toContainText('This file is in the trash');
     await expect(canvas(people.ben.page)).toHaveCount(0);
     await trash.getByRole('button', { name: 'Restore Checkout' }).click();
     await expect(page.getByText('The trash is empty.')).toBeVisible();

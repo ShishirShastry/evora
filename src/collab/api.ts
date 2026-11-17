@@ -62,6 +62,37 @@ export interface Asset {
   bytes: ArrayBuffer;
 }
 
+/** A branch of a shared file, as listed with its main file. */
+export interface FileBranch {
+  /** The branch's own document ID: it opens at `#/doc/<id>` like any shared file. */
+  id: string;
+  name: string;
+  updatedAt: string;
+  createdBy: UserRef;
+  /** The role of the person asking on the branch. */
+  role: Role;
+}
+
+/**
+ * What every file list on the server says about branches. A branch is not
+ * listed as a file of its own while its main file exists: its main file's
+ * entry carries it in `branches` (open branches only, the ones the person can
+ * open, newest first). GET /documents/:id/branches still lists every branch.
+ *
+ * The server always sends both fields; they are optional here so that an
+ * answer from a server before them (and the app's test fixtures) still fit:
+ * read a missing `mainId` as null and missing `branches` as none.
+ */
+export interface BranchFields {
+  /** For a branch (met in an answer about one file, or listed because its main file was deleted), its main file's ID; null otherwise. */
+  mainId?: string | null;
+  /** A main file's open branches; empty for a branch and for a file without any. */
+  branches?: FileBranch[];
+}
+
+/** A document in a list (a workspace's documents, shared with me). */
+export type ListedDocument = DocInfo & BranchFields;
+
 const id = (value: string): string => encodeURIComponent(value);
 
 export function createApi(options: ApiOptions = {}) {
@@ -143,9 +174,10 @@ export function createApi(options: ApiOptions = {}) {
     createInviteLink: (workspaceId: string, role: Role) => json<{ token: string }>('POST', `/workspaces/${id(workspaceId)}/invites`, { role }),
     getInvite: (token: string) => json<InviteInfo>('GET', `/invites/${id(token)}`),
     acceptInvite: (token: string) => json<Workspace>('POST', `/invites/${id(token)}/accept`),
-    workspaceDocuments: (workspaceId: string) => json<DocInfo[]>('GET', `/workspaces/${id(workspaceId)}/documents`),
-    /** Documents shared with me directly, outside my workspaces. */
-    sharedDocuments: () => json<DocInfo[]>('GET', '/shared'),
+    /** A workspace's documents, branches listed with their main file. */
+    workspaceDocuments: (workspaceId: string) => json<ListedDocument[]>('GET', `/workspaces/${id(workspaceId)}/documents`),
+    /** Documents shared with me directly, outside my workspaces; branches listed with their main file. */
+    sharedDocuments: () => json<ListedDocument[]>('GET', '/shared'),
 
     // ------------------------------------------------------------ documents
     /** Creates a shared document, with `registers` as its starting content (e.g. a file from this device). */
@@ -153,6 +185,10 @@ export function createApi(options: ApiOptions = {}) {
       json<DocInfo>('POST', '/documents', registers ? { workspaceId, name, registers } : { workspaceId, name }),
     getDocument: (docId: string) => json<DocInfo>('GET', `/documents/${id(docId)}`),
     updateDocument: (docId: string, changes: { name?: string; linkAccess?: LinkAccess }) => json<DocInfo>('PATCH', `/documents/${id(docId)}`, changes),
+    /**
+     * Deletes a document: it goes to its workspace's trash (the same as `filesApi.trashFile`), from where it can be
+     * restored or deleted for good. Opening it meanwhile fails with status 410, "This file is in the trash".
+     */
     deleteDocument: (docId: string) => json<Record<string, never>>('DELETE', `/documents/${id(docId)}`),
     documentMembers: (docId: string) => json<MembersResult>('GET', `/documents/${id(docId)}/members`),
     addDocumentMember: (docId: string, email: string, role: Role) => json<MembersResult>('POST', `/documents/${id(docId)}/members`, { email, role }),

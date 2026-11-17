@@ -11,8 +11,9 @@ import { clearConsole, pluginRegistry, pluginsStore, refreshInstalled, toast, ty
 
 /** A rounded well pressed into the dialog, which lists sit in. */
 const WELL = 'rounded-[12px] bg-bg/50 shadow-[var(--ev-sunk)]';
-const EMPTY = 'm-0 rounded-[10px] border border-dashed border-line px-3 py-4 text-center leading-[1.5] text-faint';
-const NOTE = 'm-0 leading-[1.5] text-faint';
+// Notes in the dim colour, not the faint one: faint is for hints next to something, and too pale to read as a sentence on white.
+const EMPTY = 'm-0 rounded-[10px] border border-dashed border-line px-3 py-4 text-center leading-[1.5] text-dim';
+const NOTE = 'm-0 leading-[1.5] text-dim';
 const LIST = `m-0 flex list-none flex-col divide-y divide-line/60 px-1 py-0 ${WELL}`;
 const CHIP = 'rounded-full bg-field px-2 py-[1px] text-[10.5px] font-medium text-dim shadow-[var(--ev-sunk)]';
 
@@ -222,7 +223,7 @@ function ConsolePanel({ pluginId }: { pluginId: string }) {
           <span className="text-faint">Nothing yet. What the plugin logs with console.log, and its errors, show here.</span>
         ) : (
           lines.map((line, i) => (
-            <div key={i} className={`whitespace-pre-wrap break-words ${line.level === 'error' ? 'text-danger' : line.level === 'warn' ? 'text-[#e5a000]' : 'text-ink'}`}>
+            <div key={i} className={`whitespace-pre-wrap break-words ${line.level === 'error' ? 'text-danger' : line.level === 'warn' ? 'text-warning' : 'text-ink'}`}>
               <span className="text-faint">{new Date(line.at).toLocaleTimeString()} </span>
               {line.text}
             </div>
@@ -276,7 +277,7 @@ function InstalledRow({ record }: { record: InstalledPlugin }) {
         </button>
       </div>
       {open && (
-        <div className="ml-[46px] flex flex-col gap-3 pb-1">
+        <div className="ml-[46px] flex flex-col gap-3 pb-1 max-sm:ml-0">
           {manifest.description && <p className="m-0 leading-[1.5] text-dim">{manifest.description}</p>}
           <div className="flex flex-wrap gap-1" aria-label="Permissions">
             {manifest.permissions.length === 0 ? <span className={CHIP}>No permissions</span> : manifest.permissions.map((permission) => <span key={permission} className={CHIP} title={PERMISSION_LABELS[permission]}>{permission}</span>)}
@@ -326,7 +327,7 @@ function InstalledTab() {
   };
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 max-sm:flex-col max-sm:items-stretch">
         <p className={NOTE}>Installed plugins and widgets are available in every file on this device.</p>
         <button type="button" className="ev-button ev-button-primary flex-none !px-3" onClick={fromFile}>
           Install from file…
@@ -390,9 +391,9 @@ function BrowseTab() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex gap-2">
-        <input className="ev-field min-w-0 flex-1" type="search" placeholder="Search plugins and widgets" aria-label="Search plugins and widgets" value={query} onChange={(event) => setQuery(event.target.value)} data-autofocus />
-        <div role="tablist" aria-label="Kind" className="ev-segmented w-[210px] flex-none">
+      <div className="flex flex-wrap gap-2">
+        <input className="ev-field min-w-[160px] flex-1" type="search" placeholder="Search plugins and widgets" aria-label="Search plugins and widgets" value={query} onChange={(event) => setQuery(event.target.value)} data-autofocus />
+        <div role="tablist" aria-label="Kind" className="ev-segmented w-[210px] flex-none max-sm:w-full">
           {(
             [
               ['', 'All'],
@@ -535,7 +536,7 @@ function DevelopmentTab() {
   return (
     <div className="flex flex-col gap-4">
       <section aria-label="Plugins in development" className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 max-sm:flex-col max-sm:items-stretch">
           <p className={NOTE}>Load a plugin from its files (manifest.json, its code and its window’s HTML) while you write it, and reload it after each change. The format and the API are in plugins/PLUGINS.md.</p>
           <button type="button" className="ev-button ev-button-primary flex-none !px-3" onClick={choose}>
             Load from files…

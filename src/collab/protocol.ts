@@ -334,12 +334,12 @@ export type ServerMessage =
  * - POST   /api/workspaces/:id/invites {role}                        -> {token}            (an invite link: /#/invite/<token>)
  * - GET    /api/invites/:token                                       -> {workspace: {id, name}, role, from: UserRef}
  * - POST   /api/invites/:token/accept                                -> Workspace
- * - GET    /api/workspaces/:id/documents                             -> DocInfo[]
- * - GET    /api/shared                                               -> DocInfo[]  (documents shared with me directly)
+ * - GET    /api/workspaces/:id/documents                             -> (DocInfo & {mainId, branches})[]  (a branch is listed with its main file, not on its own)
+ * - GET    /api/shared                                               -> (DocInfo & {mainId, branches})[]  (documents shared with me directly; branches likewise)
  * - POST   /api/documents              {workspaceId, name, registers?} -> DocInfo (201)   (registers: the starting content, e.g. a local file)
- * - GET    /api/documents/:id                                        -> DocInfo
+ * - GET    /api/documents/:id                                        -> DocInfo            (410 "This file is in the trash" to someone who could open it before)
  * - PATCH  /api/documents/:id          {name?, linkAccess?}          -> DocInfo            (owner, editor)
- * - DELETE /api/documents/:id                                        -> {}                 (owner)
+ * - DELETE /api/documents/:id                                        -> {}                 (owner; moves it to its workspace's trash, as POST /api/documents/:id/trash)
  * - GET    /api/documents/:id/members                                -> {members, pending}
  * - POST   /api/documents/:id/members  {email, role}                 -> {members, pending} (owner, editor)
  * - PATCH  /api/documents/:id/members/:userId {role}                -> {members, pending}

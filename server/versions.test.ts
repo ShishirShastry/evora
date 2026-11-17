@@ -206,7 +206,9 @@ describe('versions', () => {
     const doc = await newDoc(server, owner.token, 'Precious');
     await edit(doc.id, owner.token, { 'n:p:@': true, 'n:p:type': 'RECTANGLE', 'n:p:x': 7 }, 'ownerclient');
     await call(server, 'POST', `/api/documents/${doc.id}/versions`, { token: owner.token, body: { name: 'Kept' } });
+    // Deleting moves it to the trash; deleting it from there removes it, and its versions stay.
     expect((await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: owner.token })).status).toBe(200);
+    expect((await call(server, 'DELETE', `/api/trash/${doc.id}`, { token: owner.token })).status).toBe(200);
     const workspaceId = await personalWorkspace(server, owner.token);
 
     const deleted = await call(server, 'GET', `/api/workspaces/${workspaceId}/deleted-documents`, { token: owner.token });
@@ -326,5 +328,96 @@ describe('branches', () => {
     expect(rolled.status).toBe(200);
     const after = await valuesOf(doc.id, owner.token);
     expect(after).toMatchObject({ 'n:rect:x': 1, 'n:rect:y': 20, 'n:star:@': false });
+  });
+
+  it('refuse every change once merged: live changes, renames, restores, images and updates from main', async () => {
+    const { owner, editor, doc, branch } = await branchOf('Locked');
+    await edit(branch.id, editor.token, { 'n:rect:x': 77 });
+    const saved = await call(server, 'POST', `/api/documents/${branch.id}/versions`, { token: editor.token, body: { name: 'On the branch' } });
+    // Someone who may change the branch (its maker owns it) has it open while it is merged.
+    const open = await TestSocket.join(server, branch.id, { token: editor.token }, 'lockedclient');
+    expect(open.welcome.you.role).toBe('owner');
+    expect((await call(server, 'POST', `/api/documents/${branch.id}/merge`, { token: owner.token, body: {} })).status).toBe(200);
+    const message = 'This branch has been merged into Locked file; it can be viewed but not changed';
+
+    // The open connection becomes read-only rather than failing on each change.
+    expect(await open.socket.next('access')).toMatchObject({ role: 'viewer' });
+    open.socket.send({ t: 'ops', id: 'late', ops: [{ k: 'n:rect:x', v: 1, c: next('lockedclient') }] });
+    expect(await open.socket.next('rejected')).toEqual({ t: 'rejected', id: 'late', reason: message });
+    await open.socket.close();
+    // Joining again: as a viewer, also for its owner.
+    const again = await TestSocket.join(server, branch.id, { token: owner.token }, 'lockedowner');
+    expect(again.welcome.you.role).toBe('viewer');
+    expect(again.welcome.doc.role).toBe('viewer');
+    again.socket.send({ t: 'ops', id: 'o1', ops: [{ k: 'n:rect:y', v: 5, c: next('lockedowner') }] });
+    expect((await again.socket.next('rejected')).reason).toBe(message);
+    await again.socket.close();
+
+    expect(await call(server, 'PATCH', `/api/documents/${branch.id}`, { token: editor.token, body: { name: 'Renamed' } })).toEqual({ status: 409, body: { error: message } });
+    expect((await call(server, 'POST', `/api/documents/${branch.id}/versions/${saved.body.id}/restore`, { token: editor.token })).body).toEqual({ error: message });
+    expect((await call(server, 'POST', `/api/documents/${branch.id}/update-from-main`, { token: editor.token, body: {} })).body).toEqual({ error: message });
+    const image = new Uint8Array([1, 2, 3]);
+    const { createHash } = await import('node:crypto');
+    const hash = createHash('sha256').update(image).digest('hex');
+    expect((await call(server, 'PUT', `/api/documents/${branch.id}/assets/${hash}`, { token: editor.token, body: image })).status).toBe(409);
+    // Nothing changed, and the branch can still be viewed; main is not locked.
+    expect(await valuesOf(branch.id, editor.token)).toMatchObject({ 'd:name': 'Locked idea', 'n:rect:x': 77 });
+    expect((await call(server, 'GET', `/api/documents/${branch.id}`, { token: editor.token })).status).toBe(200);
+    await edit(doc.id, editor.token, { 'n:rect:y': 1 });
+  });
+
+  it('are listed with their main file, not as files of their own, and still open by their link', async () => {
+    const { owner, editor, viewer, doc, branch } = await branchOf('Listed');
+    const outsider = await signUp(server, 'ListedOutsider');
+    const workspaceId = await personalWorkspace(server, owner.token);
+    const ids = (list: { id: string }[]) => list.map((file) => file.id);
+
+    const files = await call(server, 'GET', `/api/workspaces/${workspaceId}/files`, { token: owner.token });
+    expect(ids(files.body)).toContain(doc.id);
+    expect(ids(files.body)).not.toContain(branch.id);
+    const main = files.body.find((file: { id: string }) => file.id === doc.id);
+    expect(main).toMatchObject({
+      mainId: null,
+      branches: [{ id: branch.id, name: 'Listed idea', updatedAt: expect.any(String), createdBy: { id: editor.user.id }, role: 'owner' }],
+    });
+    const documents = await call(server, 'GET', `/api/workspaces/${workspaceId}/documents`, { token: owner.token });
+    expect(ids(documents.body)).not.toContain(branch.id);
+    expect(documents.body.find((file: { id: string }) => file.id === doc.id).branches.map((b: { id: string }) => b.id)).toEqual([branch.id]);
+    // Shared with me: the viewer has main and its branch, and sees the branch under main, with their role on it.
+    const shared = await call(server, 'GET', '/api/shared', { token: viewer.token });
+    expect(ids(shared.body)).toContain(doc.id);
+    expect(ids(shared.body)).not.toContain(branch.id);
+    expect(shared.body.find((file: { id: string }) => file.id === doc.id).branches).toEqual([expect.objectContaining({ id: branch.id, role: 'viewer' })]);
+    // Search, favourites and recents.
+    expect(ids((await call(server, 'GET', '/api/files/search?q=listed', { token: owner.token })).body)).toEqual([doc.id]);
+    await call(server, 'PUT', `/api/favorites/${branch.id}`, { token: owner.token });
+    await call(server, 'PUT', `/api/favorites/${doc.id}`, { token: owner.token });
+    await call(server, 'POST', `/api/recents/${branch.id}`, { token: owner.token });
+    await call(server, 'POST', `/api/recents/${doc.id}`, { token: owner.token });
+    expect(ids((await call(server, 'GET', '/api/favorites', { token: owner.token })).body)).toEqual([doc.id]);
+    expect(ids((await call(server, 'GET', '/api/recents', { token: owner.token })).body)).toEqual([doc.id]);
+
+    // The branch opens by its link, and the main file's list of branches has it.
+    expect((await call(server, 'GET', `/api/documents/${branch.id}`, { token: viewer.token })).status).toBe(200);
+    expect((await TestSocket.join(server, branch.id, { token: viewer.token }, 'listedviewer')).welcome.doc.id).toBe(branch.id);
+    expect(ids((await call(server, 'GET', `/api/documents/${doc.id}/branches`, { token: owner.token })).body)).toEqual([branch.id]);
+    // Someone who cannot open the branch is not shown it.
+    expect((await call(server, 'GET', `/api/files/search?q=listed`, { token: outsider.token })).body).toEqual([]);
+    // Moved or answered about on its own, a branch says which file it is a branch of.
+    const moved = await call(server, 'POST', `/api/documents/${branch.id}/move`, { token: owner.token, body: { projectId: null } });
+    expect(moved.body).toMatchObject({ id: branch.id, mainId: doc.id, branches: [] });
+
+    // A merged branch is no longer among the main file's open branches (it is still in GET …/branches).
+    expect((await call(server, 'POST', `/api/documents/${branch.id}/merge`, { token: owner.token, body: {} })).status).toBe(200);
+    const after = await call(server, 'GET', `/api/workspaces/${workspaceId}/files`, { token: owner.token });
+    expect(after.body.find((file: { id: string }) => file.id === doc.id).branches).toEqual([]);
+    expect(ids(after.body)).not.toContain(branch.id);
+    expect((await call(server, 'GET', `/api/documents/${doc.id}/branches`, { token: owner.token })).body).toEqual([expect.objectContaining({ id: branch.id, status: 'merged' })]);
+
+    // A branch whose main file was deleted for good is listed on its own, so it is not lost.
+    await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: owner.token });
+    await call(server, 'DELETE', `/api/trash/${doc.id}`, { token: owner.token });
+    const orphaned = await call(server, 'GET', `/api/workspaces/${workspaceId}/files`, { token: owner.token });
+    expect(orphaned.body.find((file: { id: string }) => file.id === branch.id)).toMatchObject({ mainId: doc.id });
   });
 });

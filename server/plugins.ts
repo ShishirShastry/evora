@@ -15,10 +15,18 @@
  * - GET    /api/plugins/directory/:id                      -> DirectoryEntry & {versions, permissions, commands, widgets}  (anyone)
  * - GET    /api/plugins/directory/:id/versions/:version    -> {bundle}  (anyone)
  * - POST   /api/plugins/directory/:id/install  {version?}  -> {bundle, installs}  (anyone; counted once per person or address)
+ *
+ * Installs are counted once per account (or guest) and, for someone with
+ * neither, once per client address, which is kept only as a keyed hash
+ * (`kit.countedAs`). The address is the connection's own (the server does not
+ * read X-Forwarded-For): behind a reverse proxy every such caller has the
+ * proxy's address and they are counted once together. Someone with many
+ * accounts or addresses can still be counted more than once. The route is
+ * limited per address (Limits.counted, 429 beyond it).
  * - DELETE /api/plugins/directory/:id                      -> {}  (the publisher)
  */
 import type { ApiExtension } from './api.ts';
-import { now, personId, type Store } from './store.ts';
+import { now, type Store } from './store.ts';
 import { PluginFormatError, compareVersions, parseBundle, type PluginBundle } from '../src/plugins/manifest.ts';
 
 /** A plugin or widget in the directory, as listed. */
@@ -75,6 +83,25 @@ export function setup(store: Store): void {
       PRIMARY KEY (plugin_id, who)
     );
   `);
+  hashOldAddresses(store);
+}
+
+/**
+ * Installs counted before addresses were hashed kept the address itself
+ * (`address:<ip>`): each becomes `address:<keyed hash>` (an address already
+ * counted under its hash is not counted twice), so no address is kept.
+ */
+function hashOldAddresses(store: Store): void {
+  const old = store.all<{ plugin_id: string; who: string; installed_at: string }>(`SELECT plugin_id, who, installed_at FROM plugin_installs WHERE who LIKE 'address:%'`);
+  const hashed = /^address:[0-9a-f]{64}$/;
+  store.tx(() => {
+    for (const row of old) {
+      if (hashed.test(row.who)) continue;
+      const address = row.who.slice('address:'.length);
+      store.run(`INSERT OR IGNORE INTO plugin_installs (plugin_id, who, installed_at) VALUES (?, ?, ?)`, row.plugin_id, `address:${store.hashAddress(address)}`, row.installed_at);
+      store.run(`DELETE FROM plugin_installs WHERE plugin_id = ? AND who = ?`, row.plugin_id, row.who);
+    }
+  });
 }
 
 const SELECT = `
@@ -203,8 +230,8 @@ export const extension: ApiExtension = (kit) => {
       const body = await ctx.json();
       const version = body.version === undefined ? row.latest_version : kit.text(body, 'version', 20);
       const bundle = bundleOf(row.id, version);
-      // Counted once for each person (or, for someone not signed in, each address), however often they install it.
-      const who = personId(ctx.who) ?? `address:${ctx.ip}`;
+      // Counted once for each person (an account or a guest) or, for someone with neither, each address (kept as a keyed hash), however often they install it.
+      const who = kit.countedAs(ctx);
       store.run(`INSERT OR IGNORE INTO plugin_installs (plugin_id, who, installed_at) VALUES (?, ?, ?)`, row.id, who, now());
       return { bundle, installs: dto(entry(row.id)).installs };
     }),

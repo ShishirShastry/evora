@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
 import { currentAuth } from '../../collab/account';
 import { api, ApiError, errorMessage } from '../../collab/api';
+import { filesApi } from '../../collab/files';
 import { cloudAssetLoader, loadSharedDocument, openLiveDocument } from '../../collab/live';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
@@ -133,8 +134,48 @@ function LocalEditorScreen({ storage, fileId, onExit }: { storage: DocumentStora
 type SharedLoadState =
   | { status: 'identify' }
   | { status: 'loading' }
-  | { status: 'error'; message: string; denied: boolean }
+  | { status: 'error'; message: string; denied: boolean; trashed: boolean }
   | { status: 'ready'; store: EditorStore; seq: number };
+
+/**
+ * Where a file in the trash can be restored from: the trash of the first of the person's workspaces (where they
+ * may restore, that is not a viewer) that holds it. Null when there is none, or for a guest.
+ */
+async function trashHolding(docId: string): Promise<string | null> {
+  if (!currentAuth().token) return null;
+  const workspaces = await api.listWorkspaces().catch(() => []);
+  for (const workspace of workspaces) {
+    if (workspace.role === 'viewer') continue;
+    const items = await filesApi.trash(workspace.id).catch(() => []);
+    if (items.some((item) => item.id === docId)) return workspace.id;
+  }
+  return null;
+}
+
+/** "This file is in the trash", and, for someone who can restore it, the way to its workspace's trash. */
+function TrashedNotice({ docId, message }: { docId: string; message: string }) {
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void trashHolding(docId).then((id) => live && setWorkspaceId(id));
+    return () => {
+      live = false;
+    };
+  }, [docId]);
+  return (
+    <div role="alert" className="flex max-w-md flex-col items-center gap-1.5">
+      <p className="m-0 font-semibold text-ink">{message || 'This file is in the trash'}</p>
+      <p className="m-0 text-dim">
+        {workspaceId ? 'It can be restored from its workspace’s trash for 30 days after it was deleted.' : 'Nobody can open it until someone who can edit its workspace restores it.'}
+      </p>
+      {workspaceId && (
+        <a className="ev-button ev-button-primary mt-1.5 no-underline" href={`#/workspace/${workspaceId}/trash`}>
+          Go to the trash
+        </a>
+      )}
+    </div>
+  );
+}
 
 /**
  * A shared document (`#/doc/<id>`): read from the collaboration server (or,
@@ -168,7 +209,7 @@ function SharedEditorScreen({ storage, docId, threadId, onExit }: { storage: Doc
       .catch((error: unknown) => {
         if (cancelled) return;
         const status = error instanceof ApiError ? error.status : (error as { status?: unknown })?.status;
-        setLoad({ status: 'error', message: errorMessage(error), denied: status === 401 || status === 403 || status === 404 });
+        setLoad({ status: 'error', message: errorMessage(error), denied: status === 401 || status === 403 || status === 404, trashed: status === 410 });
       });
     return () => {
       cancelled = true;
@@ -183,7 +224,8 @@ function SharedEditorScreen({ storage, docId, threadId, onExit }: { storage: Doc
     <main className="flex h-full flex-col items-center justify-center gap-4 text-center">
       <Logo size={40} />
       {load.status === 'loading' && <p className="m-0 text-dim">Opening shared file…</p>}
-      {load.status === 'error' && (
+      {load.status === 'error' && load.trashed && <TrashedNotice docId={docId} message={load.message} />}
+      {load.status === 'error' && !load.trashed && (
         <div role="alert" className="flex max-w-md flex-col gap-1.5">
           <p className="m-0 text-danger">{load.denied ? 'This file cannot be opened with your account.' : 'The shared file could not be opened.'}</p>
           <p className="m-0 text-dim">{load.message}</p>

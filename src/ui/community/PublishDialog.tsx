@@ -197,11 +197,11 @@ export function PublishDialog({ source, storage, onClose, onNavigate, api = defa
   return (
     <Dialog title={existing ? 'Publish a new version' : 'Publish to Community'} onClose={onClose} width={560}>
       <form className="flex flex-col gap-3" onSubmit={submit}>
-        <div className="flex gap-3">
+        <div className="flex gap-3 max-sm:flex-col">
           <div
             aria-label="Cover"
             role="img"
-            className="flex aspect-[16/10] w-[200px] flex-none items-center justify-center overflow-hidden rounded-[9px] bg-field text-center text-[11px] text-faint shadow-[var(--ev-sunk)]"
+            className="flex aspect-[16/10] w-[200px] flex-none items-center justify-center overflow-hidden rounded-[9px] bg-field text-center text-[11px] text-dim shadow-[var(--ev-sunk)] max-sm:w-full"
           >
             {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover" /> : loaded ? 'No cover: the first page is empty' : 'Drawing the cover…'}
           </div>

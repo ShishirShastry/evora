@@ -10,6 +10,11 @@ import type { VersionEntry } from './source';
  * only has to say what to open.
  */
 
+/** Why a merged branch is view-only, in the server's words (`mergedReason` in server/versions.ts). */
+export function mergedBranchReason(branch: Pick<BranchInfo, 'mainName'>): string {
+  return `This branch has been merged into ${branch.mainName}; it can be viewed but not changed`;
+}
+
 /** A side of a comparison: a version's ID, or the file as it is now. */
 export const CURRENT = 'current';
 

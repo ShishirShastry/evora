@@ -161,6 +161,43 @@ describe('the plugin directory', () => {
     expect((await call<DirectoryEntry>(server, 'GET', `/api/plugins/directory/${id}`)).body.installs).toBe(2);
   });
 
+  it('counts repeated installs by the same person or address once, two people twice, and keeps no address', async () => {
+    const maker = await signUp(server, 'Repeated');
+    const plugin = bundle();
+    const id = plugin.manifest.id;
+    await call(server, 'POST', '/api/plugins/directory', { token: maker.token, body: { bundle: plugin } });
+    const installs = async (options: { token?: string; guest?: string; headers?: Record<string, string> } = {}) =>
+      (await call<{ installs: number }>(server, 'POST', `/api/plugins/directory/${id}/install`, options)).body.installs;
+
+    for (let i = 0; i < 3; i++) expect(await installs()).toBe(1);
+    // A forwarded-for header does not make another address: the connection's own is used.
+    expect(await installs({ headers: { 'X-Forwarded-For': '198.51.100.7' } })).toBe(1);
+    const guestA = (await call(server, 'POST', '/api/guests', { body: { name: 'A' } })).body.guestToken as string;
+    const guestB = (await call(server, 'POST', '/api/guests', { body: { name: 'B' } })).body.guestToken as string;
+    expect(await installs({ guest: guestA })).toBe(2);
+    expect(await installs({ guest: guestA })).toBe(2);
+    expect(await installs({ guest: guestB })).toBe(3);
+    expect(await installs({ token: maker.token })).toBe(4);
+    expect(await installs({ token: maker.token })).toBe(4);
+    const kept = server.store.all<{ who: string }>(`SELECT who FROM plugin_installs WHERE plugin_id = ? AND who LIKE 'address:%'`, id);
+    expect(kept.map((row) => row.who)).toEqual([expect.stringMatching(/^address:[0-9a-f]{64}$/)]);
+  });
+
+  it('limits how often one address may install', async () => {
+    const limited = await testServer({ limits: { counted: 2 } });
+    try {
+      const maker = await signUp(limited, 'Limited');
+      const plugin = bundle();
+      await call(limited, 'POST', '/api/plugins/directory', { token: maker.token, body: { bundle: plugin } });
+      const path = `/api/plugins/directory/${plugin.manifest.id}/install`;
+      expect((await call(limited, 'POST', path)).status).toBe(200);
+      expect((await call(limited, 'POST', path, { token: maker.token })).status).toBe(200);
+      expect(await call(limited, 'POST', path)).toEqual({ status: 429, body: { error: 'Too many requests from here: try again later' } });
+    } finally {
+      await limited.stop();
+    }
+  }, 30_000);
+
   it('is removed from the directory by its publisher only', async () => {
     const maker = await signUp(server, 'Remover');
     const other = await signUp(server, 'NotTheMaker');
@@ -202,4 +239,29 @@ describe('the directory tables', () => {
     expect(listed.body.version).toBe('1.0.0');
     await second.stop();
   });
+
+  it('replace addresses kept before they were hashed, without counting anyone twice', async () => {
+    const dataDir = tempDir();
+    const first = await testServer({ dataDir });
+    const maker = await signUp(first, 'Old counts');
+    const plugin = bundle();
+    const id = plugin.manifest.id;
+    await call(first, 'POST', '/api/plugins/directory', { token: maker.token, body: { bundle: plugin } });
+    await first.close();
+    // As an earlier server kept them: the addresses themselves, one of them this test's own.
+    const db = new DatabaseSync(join(dataDir, 'evora.db'));
+    for (const who of ['address:127.0.0.1', 'address:::ffff:127.0.0.1', 'address:192.0.2.1'])
+      db.prepare(`INSERT INTO plugin_installs (plugin_id, who, installed_at) VALUES (?, ?, ?)`).run(id, who, new Date().toISOString());
+    db.close();
+    const second = await testServer({ dataDir });
+    try {
+      const rows = second.store.all<{ who: string }>(`SELECT who FROM plugin_installs WHERE plugin_id = ?`, id);
+      expect(rows).toHaveLength(3);
+      for (const row of rows) expect(row.who).toMatch(/^address:[0-9a-f]{64}$/);
+      // Installing again from this address is not counted again.
+      expect((await call(second, 'POST', `/api/plugins/directory/${id}/install`)).body.installs).toBe(3);
+    } finally {
+      await second.stop();
+    }
+  }, 30_000);
 });

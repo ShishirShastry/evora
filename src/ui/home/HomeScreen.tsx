@@ -208,7 +208,7 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
           <Wordmark size={24} />
         </h1>
         <div className="flex-1" />
-        <label className="ev-input-shell hidden h-8 w-[220px] items-center gap-2 px-2.5 text-dim md:flex">
+        <label className="ev-input-shell hidden h-8 w-[220px] items-center gap-2 px-2.5 text-dim max-md:!hidden md:flex">
           <Glyph name="search" size={14} />
           <input
             type="search"
@@ -231,15 +231,17 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
         <button type="button" className="ev-button" onClick={() => void importFile()}>
           Import file…
         </button>
-        <button type="button" className="ev-button ev-button-primary" onClick={() => void create()}>
+        <button type="button" className="ev-button ev-button-primary max-sm:!px-2" onClick={() => void create()}>
           <Icon name="plus" size={14} />
-          New design file
+          {/* Only the plus on a phone; the words stay its name. */}
+          <span className="max-sm:sr-only">New design file</span>
         </button>
         {account && <NotificationsBell onOpen={onNavigate} />}
         <AccountMenu />
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-1.5">
+      {/* On a phone the rail is above the files rather than beside them. */}
+      <div className="flex min-h-0 flex-1 gap-1.5 max-md:flex-col">
       {account && (
         <HomeRail
           view={shown}

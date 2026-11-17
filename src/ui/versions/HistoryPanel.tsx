@@ -124,7 +124,8 @@ export function HistoryPanel({ source, canEdit, revision, viewingId, onView, onC
   };
 
   return (
-    <aside aria-label="Version history" className="ev-panel fixed bottom-1.5 right-1.5 top-1.5 z-40 flex flex-col overflow-hidden" style={{ width: PANEL_WIDTH }}>
+    // 288 px (PANEL_WIDTH) beside the canvas; the whole width on a phone.
+    <aside aria-label="Version history" className="ev-panel fixed bottom-1.5 right-1.5 top-1.5 z-40 flex w-[288px] flex-col overflow-hidden max-sm:left-1.5 max-sm:w-auto">
       <header className="flex h-11 flex-none items-center justify-between border-b border-line pl-3.5 pr-1.5">
         <h2 className="ev-section-title text-[12.5px]">Version history</h2>
         <div className="flex items-center gap-0.5">
@@ -348,8 +349,8 @@ export function VersionViewer({
     <section
       role="dialog"
       aria-label={`Viewing ${versionLabel(entry)}`}
-      className="ev-panel fixed bottom-1.5 left-1.5 top-1.5 z-40 flex flex-col overflow-hidden"
-      style={{ right: PANEL_WIDTH + 12 }}
+      // Beside the history panel (PANEL_WIDTH + 12); over it, the whole screen, on a phone, where "Back to current" returns to the list.
+      className="ev-panel fixed bottom-1.5 left-1.5 right-[300px] top-1.5 z-40 flex flex-col overflow-hidden max-sm:right-1.5 max-sm:z-[45]"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation();
@@ -357,9 +358,9 @@ export function VersionViewer({
         }
       }}
     >
-      <div className="flex h-11 flex-none items-center gap-3 border-b border-line bg-elevated px-3.5">
+      <div className="flex min-h-11 flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line bg-elevated px-3.5 py-1.5">
         <span aria-hidden className="size-2 flex-none rounded-full bg-accent" />
-        <p className="m-0 min-w-0 flex-1 truncate">
+        <p className="m-0 min-w-[200px] flex-1 truncate">
           Viewing <strong>{versionLabel(entry)}</strong>
           <span className="text-dim"> — {versionTime(entry.createdAt)}. Read-only: the file is not changed until you restore.</span>
         </p>

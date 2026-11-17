@@ -21,7 +21,7 @@ type Mode = 'side' | 'overlay';
 export function DiffListView({ diffs, focused, onFocus, empty }: { diffs: readonly LayerDiff[]; focused?: NodeId | null; onFocus?: (diff: LayerDiff) => void; empty?: string }) {
   const counts = diffCounts(diffs);
   if (diffs.length === 0) return <p className="m-0 px-3 py-2 text-dim">{empty ?? 'No differences.'}</p>;
-  const tone = { added: 'text-success', removed: 'text-danger', changed: 'text-[#ffa629]' } as const;
+  const tone = { added: 'text-success', removed: 'text-danger', changed: 'text-warning' } as const;
   const word = { added: 'Added', removed: 'Removed', changed: 'Changed' } as const;
   return (
     <div className="flex flex-col">
@@ -187,7 +187,7 @@ export function CompareView({ source, current, images, initial, onClose }: Compa
         <h2 className="ev-section-title mr-1 text-[12.5px]">Compare versions</h2>
         <label className="flex items-center gap-1.5">
           <span className="text-dim">From</span>
-          <select aria-label="Older side" className="ev-field h-7 max-w-64 px-2" value={a ?? ''} onChange={(event) => setA(event.target.value)}>
+          <select aria-label="Older side" className="ev-field h-7 max-w-64 px-2 max-sm:max-w-56" value={a ?? ''} onChange={(event) => setA(event.target.value)}>
             {options}
           </select>
         </label>
@@ -204,7 +204,7 @@ export function CompareView({ source, current, images, initial, onClose }: Compa
         </button>
         <label className="flex items-center gap-1.5">
           <span className="text-dim">To</span>
-          <select aria-label="Newer side" className="ev-field h-7 max-w-64 px-2" value={b} onChange={(event) => setB(event.target.value)}>
+          <select aria-label="Newer side" className="ev-field h-7 max-w-64 px-2 max-sm:max-w-56" value={b} onChange={(event) => setB(event.target.value)}>
             {options}
           </select>
         </label>
@@ -239,9 +239,10 @@ export function CompareView({ source, current, images, initial, onClose }: Compa
           {error}
         </p>
       )}
-      <div className="flex min-h-0 flex-1 gap-1.5">
+      {/* On a phone the list of changes goes under the canvases, which are stacked. */}
+      <div className="flex min-h-0 flex-1 gap-1.5 max-md:flex-col">
         {mode === 'side' ? (
-          <div className="grid min-w-0 flex-1 grid-cols-2 gap-1.5">
+          <div className="grid min-h-0 min-w-0 flex-1 grid-cols-2 gap-1.5 max-md:grid-cols-1 max-md:grid-rows-2">
             <section aria-label={`Older: ${label(a)}`} className="ev-panel flex min-h-0 flex-col overflow-hidden">
               <p className="m-0 flex-none truncate border-b border-line px-3 py-1.5 text-dim">{label(a)}</p>
               {canvas(before, 'before', { className: 'flex-1 bg-bg' })}
@@ -252,11 +253,11 @@ export function CompareView({ source, current, images, initial, onClose }: Compa
             </section>
           </div>
         ) : (
-          <section aria-label="Overlay" className="ev-panel flex min-w-0 flex-1 flex-col overflow-hidden">
+          <section aria-label="Overlay" className="ev-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <div className="flex flex-none items-center gap-3 border-b border-line px-3 py-1.5">
-              <span className="truncate text-dim">{label(a)}</span>
-              <input type="range" aria-label="Show the newer side" min={0} max={100} value={mix} className="w-48" onChange={(event) => setMix(Number(event.target.value))} />
-              <span className="truncate text-dim">{label(b)}</span>
+              <span className="min-w-0 truncate text-dim">{label(a)}</span>
+              <input type="range" aria-label="Show the newer side" min={0} max={100} value={mix} className="w-48 flex-none max-sm:w-24" onChange={(event) => setMix(Number(event.target.value))} />
+              <span className="min-w-0 truncate text-dim">{label(b)}</span>
             </div>
             <div className="relative min-h-0 flex-1 bg-bg">
               <div className="absolute inset-0 flex">{canvas(before, 'before', { className: 'flex-1' })}</div>
@@ -264,7 +265,7 @@ export function CompareView({ source, current, images, initial, onClose }: Compa
             </div>
           </section>
         )}
-        <aside aria-label="Changes" className="ev-panel flex w-72 flex-none flex-col overflow-hidden">
+        <aside aria-label="Changes" className="ev-panel flex w-72 flex-none flex-col overflow-hidden max-md:h-[34%] max-md:w-auto">
           <h3 className="ev-section-title flex-none border-b border-line px-3 py-2.5">Changes</h3>
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             {before && after ? <DiffListView diffs={diffs} focused={focused} onFocus={focus} empty="These two are the same." /> : <p className="m-0 px-3 py-2 text-dim">Reading…</p>}

@@ -28,6 +28,15 @@
  * - GET    /api/community/resources/:id/versions/:number   -> VersionContent          (anyone)
  * - POST   /api/community/resources/:id/copies {version?}  -> VersionContent          (anyone: a copy to keep on one's device; counted)
  * - POST   /api/community/resources/:id/duplicate {workspaceId, version?, projectId?} -> FileInfo (201) (an editor of the workspace; counted)
+ *
+ * `duplicates` counts each taker once, whether they take a copy or duplicate
+ * it, however often: an account (or a guest) by its ID, someone with neither
+ * by a keyed hash of their address (`kit.countedAs`; the address itself is
+ * not kept). It is the number of distinct takers in `community_takers` plus
+ * the counter kept before takers were recorded (the `duplicates` column,
+ * no longer changed), so a number shown before never drops. Someone with
+ * many accounts or addresses can still be counted more than once. The two
+ * routes are limited per address (Limits.counted).
  * - GET    /api/community/mine                             -> ResourceSummary[] with sourceKey (an account)
  * - GET    /api/community/tags                             -> {tag, count}[]          (anyone)
  *
@@ -35,10 +44,17 @@
  *
  * Projects are folders inside a workspace; a file is in at most one, or at the
  * workspace's root. Favourites and recents are per person. Deleting a file
- * this way moves it to its workspace's trash: it keeps everything, but nobody
- * can open it (its members, invitations and link access are put aside and it
- * belongs to no workspace) until it is restored; after 30 days it is deleted
- * for good. `DELETE /api/documents/:id` still deletes at once, as before.
+ * (`DELETE /api/documents/:id` or `POST /api/documents/:id/trash`, both in
+ * api.ts, `store.trashDoc`) moves it to its workspace's trash: it keeps
+ * everything, but nobody can open it (its members, invitations and link
+ * access are put aside and it belongs to no workspace; opening it answers 410
+ * "This file is in the trash") until it is restored; after 30 days it is
+ * deleted for good.
+ *
+ * Branches are not listed as files: every list here leaves them out and gives
+ * each main file its open branches (`FileInfo.branches`, and `mainId` for a
+ * branch met some other way, e.g. after moving it). A branch still opens by
+ * its link, and GET /api/documents/:id/branches lists all of a file's branches.
  *
  * - GET    /api/workspaces/:id/projects            -> Project[]          (members)
  * - POST   /api/workspaces/:id/projects {name}     -> Project (201)      (editors)
@@ -47,7 +63,7 @@
  * - GET    /api/workspaces/:id/files               -> FileInfo[]         (members)
  * - POST   /api/documents/:id/move {workspaceId?, projectId?: string|null} -> FileInfo (editors of the file and of both workspaces)
  * - POST   /api/documents/:id/duplicate {workspaceId?, projectId?, name?}  -> FileInfo (201) (anyone who can open it, into a workspace they edit in)
- * - POST   /api/documents/:id/trash                -> {}                 (owners of the file)
+ * - POST   /api/documents/:id/trash                -> {}                 (owners of the file; in api.ts, the same as DELETE /api/documents/:id)
  * - GET    /api/workspaces/:id/trash               -> TrashedFile[]      (members)
  * - POST   /api/trash/:docId/restore               -> FileInfo           (editors of its workspace)
  * - DELETE /api/trash/:docId                       -> {}                 (a workspace owner, whoever deleted it, or the file's owner)
@@ -63,7 +79,7 @@ import { copyFileSync, createReadStream, existsSync, mkdirSync, renameSync, rmSy
 import { join } from 'node:path';
 import type { ApiExtension, ApiKit, Ctx } from './api.ts';
 import { readBody } from './http.ts';
-import { invalidRegisters, newId, now, type DocRow, type Identity, type Store, type UserRow } from './store.ts';
+import { TRASH_WORKSPACE, invalidRegisters, newId, now, type BranchFields, type DocRow, type Identity, type Store, type TrashRow, type UserRow } from './store.ts';
 import { canEdit, type DocInfo, type Register, type Role, type UserRef } from '../src/collab/protocol.ts';
 
 // ------------------------------------------------------------------ what is answered
@@ -118,7 +134,7 @@ export interface Project {
   fileCount: number;
 }
 
-export interface FileInfo extends DocInfo {
+export interface FileInfo extends DocInfo, BranchFields {
   projectId: string | null;
   projectName: string | null;
   /** The workspace's name, when the person asking is one of its members. */
@@ -153,7 +169,10 @@ interface ResourceRow {
   tags: string;
   cover_type: string | null;
   cover_at: string | null;
+  /** The count kept before each taker was recorded (no longer changed); `duplicates` in answers adds the distinct takers. */
   duplicates: number;
+  /** Selected with the row in lists: the distinct takers in community_takers. */
+  takers?: number;
   created_at: string;
   updated_at: string;
 }
@@ -168,15 +187,6 @@ interface VersionRow {
   created_at: string;
 }
 
-interface TrashRow {
-  doc_id: string;
-  workspace_id: string;
-  link_access: string;
-  members: string;
-  trashed_by: string;
-  trashed_at: number;
-}
-
 interface ProjectRow {
   id: string;
   workspace_id: string;
@@ -185,8 +195,8 @@ interface ProjectRow {
   created_at: string;
 }
 
-/** The workspace a file in the trash belongs to: one with no members, so that nobody can open it. */
-export const TRASH_WORKSPACE = 'trash';
+/** The workspace a file in the trash belongs to (kept in store.ts, with the trash itself). */
+export { TRASH_WORKSPACE };
 /** How long a file stays in the trash. */
 export const TRASH_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -269,13 +279,11 @@ CREATE TABLE IF NOT EXISTS file_recents (
   PRIMARY KEY (user_id, doc_id)
 );
 
-CREATE TABLE IF NOT EXISTS file_trash (
-  doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
-  workspace_id TEXT NOT NULL,
-  link_access TEXT NOT NULL,
-  members TEXT NOT NULL,
-  trashed_by TEXT NOT NULL,
-  trashed_at INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS community_takers (
+  resource_id TEXT NOT NULL REFERENCES community_resources(id) ON DELETE CASCADE,
+  who TEXT NOT NULL,
+  taken_at TEXT NOT NULL,
+  PRIMARY KEY (resource_id, who)
 );
 `;
 
@@ -283,8 +291,8 @@ CREATE TABLE IF NOT EXISTS file_trash (
 const purgeTimers = new WeakMap<Store, ReturnType<typeof setInterval>>();
 
 export function setup(store: Store): void {
+  // The file_trash table and the trash workspace are the store's own (store.ts).
   store.db.exec(SCHEMA);
-  store.run(`INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, 'Trash', ?)`, TRASH_WORKSPACE, now());
   purgeTrash(store);
   if (!purgeTimers.has(store)) {
     const timer = setInterval(() => {
@@ -364,6 +372,16 @@ export const extension: ApiExtension = (kit: ApiKit) => {
 
   // -------------------------------------------------------------- resources
 
+  function takerCount(resourceId: string): number {
+    const row = store.one<{ n: number }>(`SELECT COUNT(*) AS n FROM community_takers WHERE resource_id = ?`, resourceId);
+    return row ? Number(row.n) : 0;
+  }
+
+  /** Counts someone (`kit.countedAs`) as a taker of a resource: once, however often they take it. */
+  function countTaker(resourceId: string, who: string): void {
+    store.run(`INSERT OR IGNORE INTO community_takers (resource_id, who, taken_at) VALUES (?, ?, ?)`, resourceId, who, now());
+  }
+
   function resourceOf(id: string): ResourceRow {
     const row = store.one<ResourceRow>(`SELECT * FROM community_resources WHERE id = ?`, id);
     if (!row) throw new HttpError(404, 'There is no such resource: it may have been unpublished');
@@ -393,7 +411,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
       author: { id: author.id, name: author.name, color: author.color },
       coverAt: row.cover_type ? row.cover_at : null,
       version: latestNumber(row.id),
-      duplicates: Number(row.duplicates),
+      duplicates: Number(row.duplicates) + (row.takers === undefined ? takerCount(row.id) : Number(row.takers)),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -516,12 +534,18 @@ export const extension: ApiExtension = (kit: ApiKit) => {
       workspaceName: workspaceName(doc.workspace_id, who),
       favorite,
       openedAt: opened?.opened_at ?? null,
+      ...store.branchFields(doc, who),
     };
   }
 
-  /** Only the files the person can open, and none in the trash. */
+  /** Only the files the person can open, none in the trash, and no branches (they are listed with their main file). */
   function openable(docs: DocRow[], who: Identity): DocRow[] {
-    return docs.filter((doc) => doc.workspace_id !== TRASH_WORKSPACE && store.roleOn(doc, who) !== null);
+    return docs.filter((doc) => doc.workspace_id !== TRASH_WORKSPACE && store.roleOn(doc, who) !== null && !store.hiddenInLists(doc.id));
+  }
+
+  /** A list of files: no branches (they are listed with their main file). */
+  function listed(docs: DocRow[], who: Identity): FileInfo[] {
+    return docs.filter((doc) => !store.hiddenInLists(doc.id)).map((doc) => fileInfo(doc, who));
   }
 
   function projectOf(ctx: Ctx, id: string, least: Role = 'viewer'): { project: ProjectRow; role: Role; user: UserRow } {
@@ -609,12 +633,17 @@ export const extension: ApiExtension = (kit: ApiKit) => {
         );
         args.push(like, like, like, like);
       }
-      const order = params.get('sort') === 'popular' ? 'r.duplicates DESC, r.updated_at DESC, r.rowid DESC' : 'r.updated_at DESC, r.rowid DESC';
+      const order = params.get('sort') === 'popular' ? '(r.duplicates + takers) DESC, r.updated_at DESC, r.rowid DESC' : 'r.updated_at DESC, r.rowid DESC';
       const limit = Math.min(100, Math.max(1, Number(params.get('limit')) || 48));
       const offset = Math.max(0, Number(params.get('offset')) || 0);
       const from = `FROM community_resources r JOIN users u ON u.id = r.author_id${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`;
       const total = store.one<{ n: number }>(`SELECT COUNT(*) AS n ${from}`, ...args);
-      const rows = store.all<ResourceRow>(`SELECT r.* ${from} ORDER BY ${order} LIMIT ? OFFSET ?`, ...args, limit, offset);
+      const rows = store.all<ResourceRow>(
+        `SELECT r.*, (SELECT COUNT(*) FROM community_takers k WHERE k.resource_id = r.id) AS takers ${from} ORDER BY ${order} LIMIT ? OFFSET ?`,
+        ...args,
+        limit,
+        offset,
+      );
       return { items: rows.map((row) => summary(row, ctx.who)), total: total ? Number(total.n) : 0 };
     }),
 
@@ -783,7 +812,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
     route('POST', '/api/community/resources/:id/copies', async (ctx, params) => {
       const resource = resourceOf(params.id as string);
       const version = versionOf(resource.id, versionNumber((await ctx.json()).version));
-      store.run(`UPDATE community_resources SET duplicates = duplicates + 1 WHERE id = ?`, resource.id);
+      countTaker(resource.id, kit.countedAs(ctx));
       return content(version);
     }),
 
@@ -794,6 +823,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
       const { workspace, user } = workspaceOf(ctx, body.workspaceId, 'editor');
       const version = versionOf(resource.id, versionNumber(body.version));
       const projectId = projectIn(workspace.id, body.projectId);
+      const taker = kit.countedAs(ctx);
       const registers = JSON.parse(version.registers) as Register[];
       const doc = store.createDoc(workspace.id, version.name || resource.title, user.id, registers);
       const wanted = new Set(JSON.parse(version.assets) as string[]);
@@ -803,7 +833,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
       copyAssetsBetween((hash) => join(communityDir(store, resource.id), hash), rows, doc.id);
       store.tx(() => {
         placeInProject(doc.id, projectId);
-        store.run(`UPDATE community_resources SET duplicates = duplicates + 1 WHERE id = ?`, resource.id);
+        countTaker(resource.id, taker);
       });
       return new Reply(201, fileInfo(store.docById(doc.id) as DocRow, ctx.who));
     }),
@@ -841,7 +871,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
 
     route('GET', '/api/workspaces/:id/files', (ctx, params) => {
       const { workspace } = workspaceOf(ctx, params.id as string);
-      return store.docsInWorkspace(workspace.id).map((doc) => fileInfo(doc, ctx.who));
+      return listed(store.docsInWorkspace(workspace.id), ctx.who);
     }),
 
     route('POST', '/api/documents/:id/move', async (ctx, params) => {
@@ -885,33 +915,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
 
     // ---- the trash
 
-    route('POST', '/api/documents/:id/trash', (ctx, params) => {
-      const { doc, role } = docOf(ctx, params.id as string);
-      const user = requireUser(ctx);
-      if (role !== 'owner') throw new HttpError(403, 'Only an owner can delete the document');
-      store.tx(() => {
-        const members = store.all<{ user_id: string; role: Role; created_at: string }>(`SELECT user_id, role, created_at FROM document_members WHERE doc_id = ?`, doc.id);
-        const invites = store.all<{ email: string; role: Role; invited_by: string; created_at: string }>(
-          `SELECT email, role, invited_by, created_at FROM document_invites WHERE doc_id = ?`,
-          doc.id,
-        );
-        store.run(
-          `INSERT INTO file_trash (doc_id, workspace_id, link_access, members, trashed_by, trashed_at) VALUES (?, ?, ?, ?, ?, ?)`,
-          doc.id,
-          doc.workspace_id,
-          doc.link_access,
-          JSON.stringify({ members, invites }),
-          user.id,
-          Date.now(),
-        );
-        // Nobody can open it while it is in the trash: no members, no invitations, no link, no workspace.
-        store.run(`DELETE FROM document_members WHERE doc_id = ?`, doc.id);
-        store.run(`DELETE FROM document_invites WHERE doc_id = ?`, doc.id);
-        store.run(`UPDATE documents SET workspace_id = ?, link_access = 'none' WHERE id = ?`, TRASH_WORKSPACE, doc.id);
-      });
-      hub.recheck([doc.id]);
-      return {};
-    }),
+    // Moving a file to the trash is in api.ts (POST /api/documents/:id/trash and DELETE /api/documents/:id).
 
     route('GET', '/api/workspaces/:id/trash', (ctx, params) => {
       const { workspace, role, user } = workspaceOf(ctx, params.id as string);
@@ -1038,7 +1042,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
         user.id,
         user.id,
       );
-      return docs.map((doc) => fileInfo(doc, ctx.who));
+      return listed(docs, ctx.who);
     }),
   ];
 };

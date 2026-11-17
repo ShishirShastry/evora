@@ -1,5 +1,7 @@
 import { currentAuth } from './account';
-import { ApiError, type ApiOptions } from './api';
+import { ApiError, type ApiOptions, type BranchFields } from './api';
+
+export type { BranchFields, FileBranch } from './api';
 import { API_BASE, type DocInfo, type UserRef } from './protocol';
 
 /**
@@ -18,8 +20,12 @@ export interface Project {
   fileCount: number;
 }
 
-/** A shared file, with where it is filed and what it is to the person asking. */
-export interface FileInfo extends DocInfo {
+/**
+ * A shared file, with where it is filed and what it is to the person asking.
+ * Lists leave branches out: a main file carries its open branches in
+ * `branches` (see `BranchFields` in api.ts).
+ */
+export interface FileInfo extends DocInfo, BranchFields {
   projectId: string | null;
   projectName: string | null;
   /** The workspace's name, when the person asking is one of its members. */
@@ -108,7 +114,10 @@ export function createFilesApi(options: ApiOptions = {}) {
     duplicateFile: (docId: string, to: { workspaceId?: string; projectId?: string | null; name?: string } = {}) => json<FileInfo>('POST', `/documents/${id(docId)}/duplicate`, to),
 
     // ------------------------------------------------------------ trash
-    /** Moves a file to its workspace's trash: nobody can open it until it is restored; it is deleted for good after 30 days. */
+    /**
+     * Moves a file to its workspace's trash (the same as DELETE /documents/:id): nobody can open it until it is restored
+     * (opening it fails with status 410, "This file is in the trash"); it is deleted for good after 30 days.
+     */
     trashFile: (docId: string) => json<Record<string, never>>('POST', `/documents/${id(docId)}/trash`),
     trash: (workspaceId: string) => json<TrashedFile[]>('GET', `/workspaces/${id(workspaceId)}/trash`),
     restoreFile: (docId: string) => json<FileInfo>('POST', `/trash/${id(docId)}/restore`),

@@ -250,7 +250,7 @@ export function PluginsMount() {
             <div
               key={item.id}
               role={item.error ? 'alert' : 'status'}
-              className={`ev-popover pointer-events-auto max-w-[520px] !rounded-full px-4 py-2 text-[12px] ${item.error ? 'text-danger' : 'text-ink'}`}
+              className={`ev-popover pointer-events-auto w-max max-w-[min(520px,calc(100vw-24px))] !rounded-full px-4 py-2 text-[12px] ${item.error ? 'text-danger' : 'text-ink'}`}
             >
               {item.message}
             </div>

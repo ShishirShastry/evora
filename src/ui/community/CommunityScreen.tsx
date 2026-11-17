@@ -71,7 +71,8 @@ type Tab = 'resources' | 'plugins' | 'mine';
 
 function TabButton({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
   return (
-    <button type="button" role="tab" aria-selected={selected} className="ev-segment !flex-none !px-3 text-[12px]" onClick={onClick}>
+    // On a phone the tabs share the width, so all three stay in view.
+    <button type="button" role="tab" aria-selected={selected} className="ev-segment whitespace-nowrap !px-3 text-[12px] max-sm:!flex-auto max-sm:!px-1.5 max-sm:text-[11.5px] sm:!flex-none" onClick={onClick}>
       {children}
     </button>
   );
@@ -89,7 +90,7 @@ export function BrowsePage({ community, onNavigate }: { community: CommunityApi;
           <p className="m-0 mt-1 text-dim">Design files, templates, UI kits, components, icons, plugins and widgets, free for everyone.</p>
         </div>
       </div>
-      <div role="tablist" aria-label="Community sections" className="ev-segmented my-5 inline-flex">
+      <div role="tablist" aria-label="Community sections" className="ev-segmented my-5 flex w-full sm:inline-flex sm:w-auto">
         <TabButton selected={shown === 'resources'} onClick={() => setTab('resources')}>
           Files & templates
         </TabButton>
@@ -202,10 +203,11 @@ function ResourcesTab({ community, onNavigate }: { community: CommunityApi; onNa
               key={entry.tag}
               type="button"
               aria-pressed={tag === entry.tag}
-              className={`h-6 rounded-[6px] border-0 px-2 text-[11.5px] ${tag === entry.tag ? 'bg-accent text-accent-ink' : 'bg-transparent text-dim hover:bg-hover hover:text-ink'}`}
+              className={`group h-6 rounded-[6px] border-0 px-2 text-[11.5px] ${tag === entry.tag ? 'bg-accent' : 'bg-transparent hover:bg-hover'}`}
               onClick={() => setTag(tag === entry.tag ? null : entry.tag)}
             >
-              #{entry.tag}
+              {/* The colour on a span, as above: white on the accent when chosen. */}
+              <span className={tag === entry.tag ? 'text-accent-ink' : 'text-dim group-hover:text-ink'}>#{entry.tag}</span>
             </button>
           ))}
         </div>
@@ -388,7 +390,7 @@ function MineTab({ community, onNavigate }: { community: CommunityApi; onNavigat
           community={community}
           onOpen={(resource) => onNavigate(`#/community/${resource.id}`)}
           extra={(resource) => (
-            <button type="button" className="ev-button !h-7 text-danger" onClick={() => setUnpublishing(resource)}>
+            <button type="button" className="ev-button ev-button-danger !h-7" onClick={() => setUnpublishing(resource)}>
               Unpublish…
             </button>
           )}
@@ -558,7 +560,7 @@ export function ResourcePage({ id, storage, onNavigate, api, community, files }:
             )}
             <p className="m-0 text-[11px] leading-relaxed text-dim">Free to use. Duplicate it into a workspace to edit with others, or keep a copy on this device without an account.</p>
             {mine && (
-              <button type="button" className="ev-button text-danger" onClick={() => setUnpublishing(true)}>
+              <button type="button" className="ev-button ev-button-danger" onClick={() => setUnpublishing(true)}>
                 Unpublish…
               </button>
             )}
@@ -599,11 +601,13 @@ export function ResourcePage({ id, storage, onNavigate, api, community, files }:
 
 function BackLink({ onNavigate }: { onNavigate: (hash: string) => void }) {
   return (
-    <button type="button" className="mb-5 flex items-center gap-1 border-0 bg-transparent p-0 text-dim hover:text-ink" onClick={() => onNavigate('#/community')}>
-      <span className="inline-flex rotate-180">
-        <Icon name="chevronRight" size={14} />
+    <button type="button" className="group mb-5 flex items-center gap-1 border-0 bg-transparent p-0" onClick={() => onNavigate('#/community')}>
+      <span className="flex items-center gap-1 text-dim group-hover:text-ink">
+        <span className="inline-flex rotate-180">
+          <Icon name="chevronRight" size={14} />
+        </span>
+        Community
       </span>
-      Community
     </button>
   );
 }

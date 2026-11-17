@@ -10,7 +10,7 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import {
   PEOPLE_COLORS,
   mentionsIn,
@@ -101,6 +101,64 @@ export type Identity =
   | { kind: 'user'; user: UserRow; sessionHash: string }
   | { kind: 'guest'; guest: GuestRow }
   | { kind: 'anonymous' };
+
+/**
+ * A change to a document that may not be changed now (a branch that has been
+ * merged): `applyRegisters` throws it, the API answers it with 409 and the
+ * live connection rejects the change with its message.
+ */
+export class DocumentLockedError extends Error {}
+
+/** A branch of a file, as listed with its main file. */
+export interface FileBranch {
+  /** The branch's own document ID (it opens at #/doc/<id> like any file). */
+  id: string;
+  name: string;
+  updatedAt: string;
+  createdBy: UserRef;
+  /** The role of the person asking on the branch. */
+  role: Role;
+}
+
+/** What a file list says about branches: whether the file is a branch, and the open branches of a main file. */
+export interface BranchFields {
+  /** For a branch, its main file's ID; null for any other file. */
+  mainId: string | null;
+  /** A main file's open branches that the person asking can open, newest first; empty for a branch. */
+  branches: FileBranch[];
+}
+
+/**
+ * What a part of the server built on the store (versions.ts) adds to how
+ * documents behave. Every hook is optional.
+ */
+export interface DocHooks {
+  /** Runs inside the transaction of every change to a document, before the change is merged. */
+  beforeApply?(docId: string): void;
+  /** Why the document may not be changed now, or null when it may. */
+  lockReason?(docId: string): string | null;
+  /** Whether the document is left out of file lists (a branch, which is listed with its main file). */
+  hiddenInLists?(docId: string): boolean;
+  /** The branch fields of a file in a list. */
+  branchFields?(doc: DocRow, who: Identity): BranchFields;
+}
+
+/** A file in the trash, as kept beside it: where it was and who could open it. */
+export interface TrashRow {
+  doc_id: string;
+  workspace_id: string;
+  link_access: string;
+  /** JSON: {members: {user_id, role, created_at}[], invites: {email, role, invited_by, created_at}[]}. */
+  members: string;
+  trashed_by: string;
+  trashed_at: number;
+}
+
+/** The workspace a file in the trash belongs to: one with no members, so that nobody can open it. */
+export const TRASH_WORKSPACE = 'trash';
+
+/** What the API (with 410) and the live connection answer about a file in the trash, to someone who could open it before. */
+export const IN_TRASH_MESSAGE = 'This file is in the trash';
 
 /** The ID of the person asking, or null for nobody in particular. */
 export function personId(who: Identity): string | null {
@@ -331,6 +389,15 @@ CREATE TABLE IF NOT EXISTS google_tickets (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS file_trash (
+  doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL,
+  link_access TEXT NOT NULL,
+  members TEXT NOT NULL,
+  trashed_by TEXT NOT NULL,
+  trashed_at INTEGER NOT NULL
+);
 `;
 
 /**
@@ -364,6 +431,54 @@ export class Store {
     this.db.exec(SCHEMA);
     this.migrate();
     this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    this.run(`INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, 'Trash', ?)`, TRASH_WORKSPACE, now());
+  }
+
+  // -------------------------------------------------------------- hooks of the parts built on the store
+
+  private hooks: DocHooks[] = [];
+
+  addDocHooks(hooks: DocHooks): void {
+    this.hooks.push(hooks);
+  }
+
+  /** Why a document may not be changed now (a merged branch), or null. */
+  lockReason(docId: string): string | null {
+    for (const hook of this.hooks) {
+      const reason = hook.lockReason?.(docId);
+      if (reason) return reason;
+    }
+    return null;
+  }
+
+  /** Whether a document is left out of file lists (a branch: it is listed with its main file). */
+  hiddenInLists(docId: string): boolean {
+    return this.hooks.some((hook) => hook.hiddenInLists?.(docId) === true);
+  }
+
+  /** The branch fields of a file in a list. */
+  branchFields(doc: DocRow, who: Identity): BranchFields {
+    for (const hook of this.hooks) if (hook.branchFields) return hook.branchFields(doc, who);
+    return { mainId: null, branches: [] };
+  }
+
+  // -------------------------------------------------------------- client addresses
+
+  private addressSecret: string | null = null;
+
+  /**
+   * A keyed hash of a client's address, for counting someone without an
+   * account once: the address itself is never kept. The key is made once per
+   * database and kept in it, so the same address gives the same hash after a
+   * restart, and the hashes cannot be reversed by trying every address
+   * without it.
+   */
+  hashAddress(address: string): string {
+    if (!this.addressSecret) {
+      this.run(`INSERT OR IGNORE INTO meta (key, value) VALUES ('address_secret', ?)`, randomBytes(32).toString('hex'));
+      this.addressSecret = (this.one<{ value: string }>(`SELECT value FROM meta WHERE key = 'address_secret'`) as { value: string }).value;
+    }
+    return createHmac('sha256', this.addressSecret).update(address).digest('hex');
   }
 
   /** Brings a database made by an earlier version up to this one, keeping everything in it. */
@@ -662,6 +777,56 @@ export class Store {
     this.removeAssetFiles(docId);
   }
 
+  // -------------------------------------------------------------- the trash
+
+  trashRow(docId: string): TrashRow | undefined {
+    return this.one<TrashRow>(`SELECT * FROM file_trash WHERE doc_id = ?`, docId);
+  }
+
+  /**
+   * Moves a document to the trash: it keeps everything, but its members,
+   * invitations and link access are put aside and it belongs to the trash
+   * workspace (which has no members), so nobody can open it until it is
+   * restored. Whoever has it open must then be disconnected (`hub.recheck`).
+   */
+  trashDoc(doc: DocRow, byUserId: string, atMs: number = Date.now()): void {
+    this.tx(() => {
+      const members = this.all<{ user_id: string; role: Role; created_at: string }>(`SELECT user_id, role, created_at FROM document_members WHERE doc_id = ?`, doc.id);
+      const invites = this.all<{ email: string; role: Role; invited_by: string; created_at: string }>(
+        `SELECT email, role, invited_by, created_at FROM document_invites WHERE doc_id = ?`,
+        doc.id,
+      );
+      this.run(
+        `INSERT INTO file_trash (doc_id, workspace_id, link_access, members, trashed_by, trashed_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        doc.id,
+        doc.workspace_id,
+        doc.link_access,
+        JSON.stringify({ members, invites }),
+        byUserId,
+        atMs,
+      );
+      this.run(`DELETE FROM document_members WHERE doc_id = ?`, doc.id);
+      this.run(`DELETE FROM document_invites WHERE doc_id = ?`, doc.id);
+      this.run(`UPDATE documents SET workspace_id = ?, link_access = 'none' WHERE id = ?`, TRASH_WORKSPACE, doc.id);
+    });
+  }
+
+  /**
+   * Whether a document is in the trash and the person could open it before
+   * it was put there (by its link, as one of its members, or in its
+   * workspace): they are told it is in the trash; anyone else is not.
+   */
+  trashedFor(doc: DocRow, who: Identity): boolean {
+    if (doc.workspace_id !== TRASH_WORKSPACE) return false;
+    const row = this.trashRow(doc.id);
+    if (!row) return false;
+    if (linkRole(row.link_access as LinkAccess) !== null) return true;
+    if (who.kind !== 'user') return false;
+    if (this.workspaceRole(row.workspace_id, who.user.id)) return true;
+    const stashed = JSON.parse(row.members) as { members?: { user_id: string }[] };
+    return (stashed.members ?? []).some((member) => member.user_id === who.user.id);
+  }
+
   /** Removes a workspace with its documents and everything in them. Returns the IDs of the documents removed. */
   deleteWorkspace(workspaceId: string): string[] {
     const docIds = this.docsInWorkspace(workspaceId).map((doc) => doc.id);
@@ -710,13 +875,20 @@ export class Store {
   /**
    * Merges changes into a document by their clocks: each one that is later
    * than what is held is kept with the next sequence number. All in one
-   * transaction. Returns the changes that were kept (the last for each key)
-   * and the document's sequence number afterwards.
+   * transaction, after the `beforeApply` hooks; a document that may not be
+   * changed now (`lockReason`) throws `DocumentLockedError`. Returns the
+   * changes that were kept (the last for each key) and the document's
+   * sequence number afterwards.
    */
   applyRegisters(docId: string, ops: Register[]): { seq: number; kept: StoredRegister[] } {
     return this.tx(() => {
-      const doc = this.one<{ seq: number }>(`SELECT seq FROM documents WHERE id = ?`, docId);
-      if (!doc) throw new Error(`No document ${docId}`);
+      const found = this.one<{ seq: number }>(`SELECT seq FROM documents WHERE id = ?`, docId);
+      if (!found) throw new Error(`No document ${docId}`);
+      const locked = this.lockReason(docId);
+      if (locked) throw new DocumentLockedError(locked);
+      for (const hook of this.hooks) hook.beforeApply?.(docId);
+      // Read again: a hook may have changed the document (not its sequence number, but to be sure).
+      const doc = this.one<{ seq: number }>(`SELECT seq FROM documents WHERE id = ?`, docId) as { seq: number };
       let seq = Number(doc.seq);
       const kept = new Map<string, StoredRegister>();
       for (const op of ops) {

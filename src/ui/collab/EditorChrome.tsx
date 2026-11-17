@@ -3,6 +3,7 @@ import type { Peer } from '../../collab/protocol';
 import type { DocumentStorage } from '../../persistence/storage';
 import type { EditorState } from '../../state/editorStore';
 import { useEditor, useEditorContext } from '../editor/EditorContext';
+import { mergedBranchReason, useVersionsUi } from '../versions/state';
 import { Dialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { PopupMenu } from '../components/Menu';
@@ -112,9 +113,12 @@ export function ShareButton() {
 /** "View only", shown in the file header to someone who may look and comment but not change the design. */
 export function ViewOnlyBadge() {
   const readOnly = useReadOnly();
+  // A merged branch is view-only for everyone, whatever their role: the badge says why.
+  const branch = useVersionsUi((state) => state.context.branch);
   if (!readOnly) return null;
+  const reason = branch?.status === 'merged' ? mergedBranchReason(branch) : 'You can look and comment, but not change the design';
   return (
-    <span className="flex-none rounded-full bg-field px-2 py-0.5 text-[10.5px] font-semibold text-dim shadow-[var(--ev-sunk)]" title="You can look and comment, but not change the design">
+    <span className="flex-none rounded-full bg-field px-2 py-0.5 text-[10.5px] font-semibold text-dim shadow-[var(--ev-sunk)]" title={reason} aria-description={reason}>
       View only
     </span>
   );

@@ -164,7 +164,7 @@ describe('documents', () => {
     expect((await call(server, 'POST', '/api/documents', { token: owner.token, body: { workspaceId, name: 'Bad', registers: [{ k: 'n:a:x', v: 1, c: 'yesterday' }] } })).status).toBe(400);
   });
 
-  it('renames a document (editors) and deletes it (owners only)', async () => {
+  it('renames a document (editors) and deletes it to the trash (owners only)', async () => {
     const owner = await signUp(server, 'Renamer');
     const editor = await signUp(server, 'Helper');
     const doc = await newDoc(server, owner.token, 'Old name');
@@ -178,6 +178,10 @@ describe('documents', () => {
 
     expect((await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: editor.token })).status).toBe(403);
     expect((await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: owner.token })).status).toBe(200);
+    // Deleting moves it to the trash: whoever could open it is told so.
+    expect(await call(server, 'GET', `/api/documents/${doc.id}`, { token: owner.token })).toEqual({ status: 410, body: { error: 'This file is in the trash' } });
+    expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: editor.token })).status).toBe(410);
+    expect((await call(server, 'DELETE', `/api/trash/${doc.id}`, { token: owner.token })).status).toBe(200);
     expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: owner.token })).status).toBe(404);
   });
 

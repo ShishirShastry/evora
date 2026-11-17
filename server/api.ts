@@ -5,6 +5,15 @@
  *
  * Who may do what in a document is the strongest of their own role in it,
  * their role in its workspace, and what its link gives anyone (guests too).
+ *
+ * Deleting a document (`DELETE /api/documents/:id`, or `POST
+ * /api/documents/:id/trash`, the same) moves it to the trash; it is deleted
+ * for good only from there (`DELETE /api/trash/:docId`, server/community.ts)
+ * or after 30 days. Opening a file in the trash answers 410 "This file is in
+ * the trash" to whoever could open it before, and 403/401 to anyone else.
+ * A change to a merged branch is refused with 409 and the reason. Lists of
+ * documents leave branches out and give each main file its open branches
+ * (`ListedDoc`: `mainId` and `branches`).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -23,6 +32,8 @@ import {
 import { HttpError, clientAddress, match, readBody, readJson, route, sendError, sendJson, type Route } from './http.ts';
 import { RateLimiter, decoyHash, hashPassword, hashToken, newToken, verifyPassword } from './auth.ts';
 import {
+  DocumentLockedError,
+  IN_TRASH_MESSAGE,
   invalidRegisters,
   isLinkAccess,
   isRole,
@@ -30,6 +41,7 @@ import {
   normalizeEmail,
   now,
   personId,
+  type BranchFields,
   type DocRow,
   type Identity,
   type Store,
@@ -61,10 +73,15 @@ export interface Limits {
   signups: number;
   /** Guests that may be made from one address in a window. */
   guests: number;
+  /** Requests to the routes that count something (plugin installs, Community copies) from one address in a window. */
+  counted: number;
   windowMs: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { loginFailures: 10, signups: 100, guests: 200, windowMs: 15 * 60 * 1000 };
+export const DEFAULT_LIMITS: Limits = { loginFailures: 10, signups: 100, guests: 200, counted: 300, windowMs: 15 * 60 * 1000 };
+
+/** A document in a list: its info, and its branches (a branch is listed only with its main file). */
+export type ListedDoc = DocInfo & BranchFields;
 
 export interface ApiOptions {
   version: string;
@@ -100,6 +117,15 @@ export interface ApiKit {
   workspaceOf(ctx: Ctx, id: string, least?: Role): { workspace: WorkspaceRow; role: Role; user: UserRow };
   docOf(ctx: Ctx, id: string): { doc: DocRow; role: Role };
   info(doc: DocRow, who: Identity): DocInfo;
+  /** Refuses (409, with the reason) a change to a document that may not be changed now: a merged branch. */
+  requireChangeable(doc: DocRow): void;
+  /**
+   * Who to count once, for a route that counts takers (plugin installs,
+   * Community copies): the account, or the guest, or for someone with
+   * neither a keyed hash of their address (never the address itself).
+   * Also limits how often one address may call such a route (429).
+   */
+  countedAs(ctx: Ctx): string;
   text(body: Record<string, unknown>, key: string, max: number): string;
   optionalText(body: Record<string, unknown>, key: string, max: number): string | undefined;
   maxUploadBytes: number;
@@ -192,6 +218,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
   const loginFailures = new RateLimiter(options.limits.loginFailures, options.limits.windowMs);
   const signups = new RateLimiter(options.limits.signups, options.limits.windowMs);
   const guests = new RateLimiter(options.limits.guests, options.limits.windowMs);
+  const counted = new RateLimiter(options.limits.counted, options.limits.windowMs);
 
   // -------------------------------------------------------------- who is asking
 
@@ -241,6 +268,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
     if (ctx.stale) throw new HttpError(401, ctx.stale);
     const held = store.roleOn(doc, ctx.who);
     if (held) return held;
+    // Someone who could open it before it went to the trash is told so; anyone else learns nothing more.
+    if (store.trashedFor(doc, ctx.who)) throw new HttpError(410, IN_TRASH_MESSAGE);
     if (ctx.who.kind === 'anonymous') throw new HttpError(401, 'Sign in, or join as a guest, to open this document');
     throw new HttpError(403, 'You do not have access to this document');
   }
@@ -253,6 +282,36 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
 
   function info(doc: DocRow, who: Identity): DocInfo {
     return store.docDto(doc, store.roleOn(doc, who));
+  }
+
+  /** Documents as a list shows them: without branches, which come with their main file. */
+  function listed(docs: DocRow[], who: Identity): ListedDoc[] {
+    return docs.filter((doc) => !store.hiddenInLists(doc.id)).map((doc) => ({ ...info(doc, who), ...store.branchFields(doc, who) }));
+  }
+
+  function requireChangeable(doc: DocRow): void {
+    const reason = store.lockReason(doc.id);
+    if (reason) throw new HttpError(409, reason);
+  }
+
+  function countedAs(ctx: Ctx): string {
+    if (!counted.allowed(ctx.ip)) throw new HttpError(429, 'Too many requests from here: try again later');
+    counted.hit(ctx.ip);
+    return personId(ctx.who) ?? `address:${store.hashAddress(ctx.ip)}`;
+  }
+
+  /**
+   * Deleting a file moves it to the trash (`store.trashDoc`): only an owner
+   * may, and whoever has it open is disconnected. It is deleted for good
+   * from the trash (DELETE /api/trash/:docId) or after 30 days.
+   */
+  function trash(ctx: Ctx, id: string): Record<string, never> {
+    const { doc, role: held } = docOf(ctx, id);
+    const user = requireUser(ctx);
+    if (held !== 'owner') throw new HttpError(403, 'Only an owner can delete the document');
+    store.trashDoc(doc, user.id);
+    hub.recheck([doc.id]);
+    return {};
   }
 
   function workspaceDocIds(workspaceId: string): string[] {
@@ -684,18 +743,19 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
 
     route('GET', '/api/workspaces/:id/documents', (ctx, params) => {
       const { workspace } = workspaceOf(ctx, params.id as string);
-      return store.docsInWorkspace(workspace.id).map((doc) => info(doc, ctx.who));
+      return listed(store.docsInWorkspace(workspace.id), ctx.who);
     }),
 
     route('GET', '/api/shared', (ctx) => {
       const user = requireUser(ctx);
-      return store
-        .all<DocRow>(
+      return listed(
+        store.all<DocRow>(
           `SELECT d.* FROM documents d JOIN document_members m ON m.doc_id = d.id WHERE m.user_id = ? AND d.owner_id != ? ORDER BY d.updated_at DESC, d.rowid DESC`,
           user.id,
           user.id,
-        )
-        .map((doc) => info(doc, ctx.who));
+        ),
+        ctx.who,
+      );
     }),
 
     route('POST', '/api/documents', async (ctx) => {
@@ -726,6 +786,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         requireAccountToShare(ctx);
       }
       if (name !== undefined && name !== doc.name) {
+        requireChangeable(doc);
         // The name is a register of the document too, so open copies are renamed with everything else.
         const current = store.register(doc.id, 'd:name');
         const result = store.applyRegisters(doc.id, [{ k: 'd:name', v: name, c: store.serverClock(current?.c) }]);
@@ -738,13 +799,9 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       return info(store.docById(doc.id) as DocRow, ctx.who);
     }),
 
-    route('DELETE', '/api/documents/:id', (ctx, params) => {
-      const { doc, role: held } = docOf(ctx, params.id as string);
-      if (held !== 'owner') throw new HttpError(403, 'Only an owner can delete the document');
-      store.deleteDoc(doc.id);
-      hub.recheck([doc.id]);
-      return {};
-    }),
+    // Both move the file to the trash (see `trash`); no API call deletes a file at once.
+    route('DELETE', '/api/documents/:id', (ctx, params) => trash(ctx, params.id as string)),
+    route('POST', '/api/documents/:id/trash', (ctx, params) => trash(ctx, params.id as string)),
 
     route('GET', '/api/documents/:id/members', (ctx, params) => {
       const { doc } = docOf(ctx, params.id as string);
@@ -815,6 +872,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
     route('PUT', '/api/documents/:id/assets/:hash', async (ctx, params) => {
       const { doc, role: held } = docOf(ctx, params.id as string);
       if (!canEdit(held)) throw new HttpError(403, 'Viewers cannot add images');
+      requireChangeable(doc);
       const hash = params.hash as string;
       if (!ASSET_HASH.test(hash)) throw new HttpError(400, 'An image is named by the SHA-256 of its bytes, in lowercase hex');
       const bytes = await readBody(ctx.req, options.maxUploadBytes);
@@ -975,6 +1033,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
     workspaceOf,
     docOf,
     info,
+    requireChangeable,
+    countedAs,
     text,
     optionalText,
     maxUploadBytes: options.maxUploadBytes,
@@ -1005,6 +1065,9 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         // A body too large is not read to its end: the connection is closed after the answer.
         if (error.status === 413) res.setHeader('Connection', 'close');
         sendError(res, error.status, error.message);
+      } else if (error instanceof DocumentLockedError) {
+        // A change that reached a document that may not be changed (a merged branch).
+        sendError(res, 409, error.message);
       } else {
         console.error(error);
         sendError(res, 500, 'Something went wrong on the server');

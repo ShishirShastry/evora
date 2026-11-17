@@ -85,7 +85,7 @@ Every change is checked by more than eleven hundred unit tests (Vitest) and more
 
 ### Community and file management
 - Publish a file as a design file, template, UI kit, component library or icon library, with versions; browse, search, and duplicate what others published.
-- Projects, moving files, favourites, recents, search across all your files, sorting, grid and list views, and a trash that keeps deleted files for 30 days.
+- Projects, moving files, favourites, recents, search across all your files, sorting, grid and list views, and a trash that keeps deleted files for 30 days (deleting a shared file always goes to the trash first).
 
 ## Getting started
 

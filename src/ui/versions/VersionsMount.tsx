@@ -10,7 +10,7 @@ import { CompareView } from './CompareView';
 import { HistoryPanel, VersionInfoDialog, VersionViewer } from './HistoryPanel';
 import { BranchIcon } from './icons';
 import { localSource, sharedSource, type VersionEntry } from './source';
-import { useVersionsUi, versionsActions, versionsUi } from './state';
+import { mergedBranchReason, useVersionsUi, versionsActions, versionsUi } from './state';
 
 /**
  * Phase 9: version history and branching in the editor (panels, dialogs). Mounted once by EditorScreen.
@@ -44,7 +44,8 @@ export function VersionsMount({ api = versionsApi, local = localVersions() }: { 
   }, [shared, docId, readOnly, account]);
   useEffect(() => () => versionsActions.reset(), []);
 
-  // Whether a shared file is a branch, for its badge and the branch menu items.
+  // Whether a shared file is a branch, for its badge and the branch menu items. Read again when what one may do
+  // changes: a branch merged by someone else turns read-only for everyone who has it open (the server says so).
   useEffect(() => {
     if (!docId) {
       versionsActions.setContext({ branch: null });
@@ -52,13 +53,18 @@ export function VersionsMount({ api = versionsApi, local = localVersions() }: { 
     }
     let live = true;
     api.branchInfo(docId).then(
-      (branch) => live && versionsActions.setContext({ branch }),
+      (branch) => {
+        if (!live) return;
+        const before = versionsUi.getState().context.branch;
+        versionsActions.setContext({ branch });
+        if (branch && branch.status === 'merged' && before?.id === branch.id && before.status === 'open') say(`${mergedBranchReason(branch)}.`);
+      },
       () => live && versionsActions.setContext({ branch: null }),
     );
     return () => {
       live = false;
     };
-  }, [api, docId, ui.revision]);
+  }, [api, docId, ui.revision, readOnly]);
 
   const source = useMemo(
     () => (docId ? sharedSource(docId, api, () => store.getState().doc.name) : localSource(store, local)),
@@ -203,26 +209,27 @@ export function VersionsMount({ api = versionsApi, local = localVersions() }: { 
       )}
 
       {branch && (
-        <div role="region" aria-label="Branch" className="ev-dock fixed left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-2 !py-1 pl-2.5 pr-1">
-          <span className="text-accent">
+        // Over the top of the canvas; on narrower screens, where the top is the file's header, above the tool dock instead.
+        <div role="region" aria-label="Branch" className="ev-dock fixed bottom-[72px] left-1/2 z-30 flex max-w-[calc(100vw-12px)] -translate-x-1/2 items-center gap-2 !py-1 pl-2.5 pr-1 min-[1100px]:bottom-auto min-[1100px]:top-3">
+          <span className="flex-none text-accent">
             <BranchIcon />
           </span>
-          <span className="max-w-72 truncate">
+          <span className="min-w-0 max-w-72 truncate">
             Branch of <strong>{branch.mainName}</strong>
-            {branch.status === 'merged' ? <span className="text-dim"> · merged, archived</span> : null}
+            {branch.status === 'merged' ? <span className="text-dim" title={mergedBranchReason(branch)}> · merged, view only</span> : null}
           </span>
           {branch.status === 'open' && !readOnly && (
             <>
-              <button type="button" className="ev-button h-7" onClick={() => versionsActions.openBranchDialog('update')}>
+              <button type="button" className="ev-button h-7 flex-none" onClick={() => versionsActions.openBranchDialog('update')}>
                 Update from main
               </button>
-              <button type="button" className="ev-button ev-button-primary h-7" onClick={() => versionsActions.openBranchDialog('merge')}>
+              <button type="button" className="ev-button ev-button-primary h-7 flex-none" onClick={() => versionsActions.openBranchDialog('merge')}>
                 Merge into main
               </button>
             </>
           )}
           {branch.status === 'merged' && (
-            <a className="ev-button h-7 no-underline" href={`#/doc/${branch.mainId}`}>
+            <a className="ev-button h-7 flex-none no-underline" href={`#/doc/${branch.mainId}`}>
               Open main file
             </a>
           )}
@@ -230,7 +237,7 @@ export function VersionsMount({ api = versionsApi, local = localVersions() }: { 
       )}
 
       {toast && (
-        <div role="status" className="ev-popover fixed bottom-20 left-1/2 z-50 max-w-[520px] -translate-x-1/2 px-3.5 py-2.5">
+        <div role="status" className="ev-popover fixed bottom-20 left-1/2 z-50 w-max max-w-[min(520px,calc(100vw-24px))] -translate-x-1/2 px-3.5 py-2.5">
           {toast}
         </div>
       )}

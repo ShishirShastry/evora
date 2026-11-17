@@ -7,7 +7,7 @@ import { PublishDialog } from '../community/PublishDialog';
 import { Dialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { PopupMenu, type MenuItem } from '../components/Menu';
-import { locationOf, MoveDialog, NameDialog } from '../files/FilePages';
+import { branchRows, locationOf, MoveDialog, NameDialog } from '../files/FilePages';
 import { FileTable, FileToolbar, Glyph, useFilesStore, useListPrefs } from '../files/parts';
 import { useFocusSoon } from './AccountDialog';
 import { DocGrid } from './DocCard';
@@ -125,7 +125,7 @@ export function HomeRail({ view, onView, workspaces, error, onNewWorkspace, onCo
     </button>
   );
   return (
-    <nav aria-label="Workspaces" className="ev-panel flex w-[232px] flex-none flex-col gap-0.5 overflow-y-auto p-2">
+    <nav aria-label="Workspaces" className="ev-panel flex w-[232px] flex-none flex-col gap-0.5 overflow-y-auto p-2 max-md:max-h-[36%] max-md:w-auto max-md:*:flex-none">
       {item(view.kind === 'recents', 'Recents', <Glyph name="clock" size={15} />, () => onView({ kind: 'recents' }))}
       {item(view.kind === 'favorites', 'Favorites', <Icon name="star" size={15} />, () => onView({ kind: 'favorites' }))}
       {item(view.kind === 'local', 'Files on this device', <Icon name="device" size={15} />, () => onView({ kind: 'local' }))}
@@ -350,10 +350,18 @@ function SharedFiles({
             shared: true,
             onOpen: () => onOpen(doc),
             menu: () => menuFor(doc, null),
+            branches: branchRows(doc, onOpen),
           }))}
         />
       ) : (
-        <DocGrid label={label} docs={shown} onOpen={onOpen} menuFor={(doc, rename) => menuFor(doc, rename)} onRename={onRename} />
+        <DocGrid
+          label={label}
+          docs={shown}
+          onOpen={onOpen}
+          menuFor={(doc, rename) => menuFor(doc, rename)}
+          onRename={onRename}
+          branchesOf={(doc) => branchRows(doc as FileInfo, onOpen)}
+        />
       )}
     </>
   );

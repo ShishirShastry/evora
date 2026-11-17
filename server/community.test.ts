@@ -97,8 +97,9 @@ describe('the community', () => {
     expect(chosen.body.name).toBe('Icons v1');
     const registers = await call(server, 'GET', `/api/documents/${chosen.body.id}/registers`, { token: cleo.token });
     expect(valueOf(registers.body.registers, 'n:rect1:name')).toBe('Box');
+    // Counted once per person, however often they duplicate it.
     const after = await call(server, 'GET', `/api/community/resources/${first.body.resource.id}`);
-    expect(after.body.duplicates).toBe(2);
+    expect(after.body.duplicates).toBe(1);
     expect((await call(server, 'POST', `/api/community/resources/${first.body.resource.id}/duplicate`, { token: cleo.token, body: { workspaceId, version: 9 } })).status).toBe(404);
   });
 
@@ -184,7 +185,7 @@ describe('the community', () => {
     const ivy = await signUp(server, 'Ivy');
     const workspaceId = await personalWorkspace(server, ivy.token);
     await call(server, 'POST', `/api/community/resources/${zebra}/duplicate`, { token: ivy.token, body: { workspaceId } });
-    await call(server, 'POST', `/api/community/resources/${zebra}/duplicate`, { token: ivy.token, body: { workspaceId } });
+    await call(server, 'POST', `/api/community/resources/${zebra}/duplicate`, { token: hal.token, body: { workspaceId: await personalWorkspace(server, hal.token) } });
     await call(server, 'POST', `/api/community/resources/${quokka}/copies`, {});
     const popular = await call(server, 'GET', '/api/community/resources?tag=zz-test&sort=popular');
     expect(popular.body.items.map((item: { id: string; duplicates: number }) => [item.id, item.duplicates])).toEqual([
@@ -358,9 +359,10 @@ describe('file management', () => {
     expect((await call(server, 'POST', `/api/documents/${doc.id}/trash`, { token: vic.token })).status).toBe(403);
     expect((await call(server, 'POST', `/api/documents/${doc.id}/trash`, { token: uma.token })).status).toBe(200);
 
-    expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: uma.token })).status).toBe(403);
-    expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: vic.token })).status).toBe(403);
-    expect((await call(server, 'GET', `/api/documents/${doc.id}`)).status).toBe(401);
+    // Whoever could open it before (its owner, a member, anyone by its link) is told it is in the trash; nobody can open it.
+    expect(await call(server, 'GET', `/api/documents/${doc.id}`, { token: uma.token })).toEqual({ status: 410, body: { error: 'This file is in the trash' } });
+    expect((await call(server, 'GET', `/api/documents/${doc.id}/registers`, { token: vic.token })).status).toBe(410);
+    expect((await call(server, 'GET', `/api/documents/${doc.id}`)).status).toBe(410);
     expect((await call(server, 'GET', `/api/workspaces/${workspaceId}/documents`, { token: uma.token })).body.map((d: { id: string }) => d.id)).not.toContain(doc.id);
     expect((await call(server, 'GET', '/api/favorites', { token: uma.token })).body).toEqual([]);
     expect((await call(server, 'GET', '/api/files/search?q=trashable', { token: uma.token })).body).toEqual([]);
@@ -421,10 +423,122 @@ describe('file management', () => {
     expect((await socket.closed).code).toBe(4403);
   });
 
-  it('keeps the old immediate delete working', async () => {
+  it('moves a file to the trash with DELETE /api/documents/:id too, where it can be restored', async () => {
     const yan = await signUp(server, 'Yan');
-    const doc = await newDoc(server, yan.token, 'Immediate');
+    const ola = await signUp(server, 'Ola');
+    const outsider = await signUp(server, 'Outsider of Yan');
+    const workspaceId = await personalWorkspace(server, yan.token);
+    const doc = await newDoc(server, yan.token, 'Not at once', content('Not at once'));
+    await call(server, 'POST', `/api/documents/${doc.id}/members`, { token: yan.token, body: { email: ola.user.email, role: 'editor' } });
+    const { socket } = await TestSocket.join(server, doc.id, { token: ola.token }, 'olaclient1');
+
+    // Only an owner may delete it.
+    expect((await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: ola.token })).status).toBe(403);
     expect((await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: yan.token })).status).toBe(200);
-    expect(server.store.docById(doc.id)).toBeUndefined();
+    // Nothing is lost: the file is kept, in the trash, and whoever had it open is disconnected.
+    expect(server.store.docById(doc.id)).toBeDefined();
+    expect(await socket.next('access')).toMatchObject({ role: null });
+    expect((await socket.closed).code).toBe(4403);
+    const trash = await call(server, 'GET', `/api/workspaces/${workspaceId}/trash`, { token: yan.token });
+    expect(trash.body).toEqual([expect.objectContaining({ id: doc.id, name: 'Not at once', trashedBy: expect.objectContaining({ id: yan.user.id }) })]);
+
+    // Opening it says it is in the trash, to those who could open it before; others are just refused.
+    expect(await call(server, 'GET', `/api/documents/${doc.id}`, { token: ola.token })).toEqual({ status: 410, body: { error: 'This file is in the trash' } });
+    expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: outsider.token })).status).toBe(403);
+    const late = await TestSocket.open(server);
+    late.send({ t: 'hello', docId: doc.id, since: 0, clientId: 'olaclient2', token: ola.token });
+    expect(await late.next('error')).toEqual({ t: 'error', code: 'not-found', message: 'This file is in the trash' });
+    expect((await late.closed).code).toBe(4404);
+    const stranger = await TestSocket.open(server);
+    stranger.send({ t: 'hello', docId: doc.id, since: 0, clientId: 'strangerclient', token: outsider.token });
+    expect(await stranger.next('error')).toMatchObject({ code: 'forbidden', message: 'You do not have access to this document' });
+    // Deleting it again is answered the same way.
+    expect((await call(server, 'DELETE', `/api/documents/${doc.id}`, { token: yan.token })).status).toBe(410);
+
+    const restored = await call(server, 'POST', `/api/trash/${doc.id}/restore`, { token: yan.token });
+    expect(restored.status).toBe(200);
+    expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: ola.token })).body.role).toBe('editor');
+    const registers = await call(server, 'GET', `/api/documents/${doc.id}/registers`, { token: ola.token });
+    expect(valueOf(registers.body.registers, 'n:rect1:name')).toBe('Box');
   });
+});
+
+describe('counting takers', () => {
+  async function publishedBy(name: string) {
+    const author = await signUp(server, name);
+    const doc = await newDoc(server, author.token, `${name} kit`, content(`${name} kit`));
+    const made = await call(server, 'POST', '/api/community/resources', { token: author.token, body: { docId: doc.id, kind: 'ui-kit', title: `${name} kit` } });
+    return made.body.resource.id as string;
+  }
+  const duplicatesOf = async (id: string): Promise<number> => (await call(server, 'GET', `/api/community/resources/${id}`)).body.duplicates;
+
+  it('counts each person once, whether they copy or duplicate, and two people twice', async () => {
+    const id = await publishedBy('Counted');
+    const pia = await signUp(server, 'Pia');
+    const quinn = await signUp(server, 'Quinn');
+    const piaSpace = await personalWorkspace(server, pia.token);
+    for (let i = 0; i < 3; i++) {
+      expect((await call(server, 'POST', `/api/community/resources/${id}/duplicate`, { token: pia.token, body: { workspaceId: piaSpace } })).status).toBe(201);
+      expect((await call(server, 'POST', `/api/community/resources/${id}/copies`, { token: pia.token, body: {} })).status).toBe(200);
+    }
+    expect(await duplicatesOf(id)).toBe(1);
+    await call(server, 'POST', `/api/community/resources/${id}/copies`, { token: quinn.token, body: {} });
+    await call(server, 'POST', `/api/community/resources/${id}/copies`, { token: quinn.token, body: {} });
+    expect(await duplicatesOf(id)).toBe(2);
+    // A guest is a person too.
+    const guest = (await call(server, 'POST', '/api/guests', { body: { name: 'Visitor' } })).body.guestToken as string;
+    await call(server, 'POST', `/api/community/resources/${id}/copies`, { guest, body: {} });
+    await call(server, 'POST', `/api/community/resources/${id}/copies`, { guest, body: {} });
+    expect(await duplicatesOf(id)).toBe(3);
+  });
+
+  it('counts someone without an account once per address, keeping only a hash of it', async () => {
+    const id = await publishedBy('Anonymous');
+    for (let i = 0; i < 4; i++) expect((await call(server, 'POST', `/api/community/resources/${id}/copies`, { body: {} })).status).toBe(200);
+    expect(await duplicatesOf(id)).toBe(1);
+    const kept = server.store.all<{ who: string }>(`SELECT who FROM community_takers WHERE resource_id = ?`, id);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.who).toMatch(/^address:[0-9a-f]{64}$/);
+    expect(kept[0]?.who).not.toContain('127.0.0.1');
+    // The client cannot pick its address with a header: X-Forwarded-For is not read.
+    await call(server, 'POST', `/api/community/resources/${id}/copies`, { body: {}, headers: { 'X-Forwarded-For': '203.0.113.9' } });
+    expect(await duplicatesOf(id)).toBe(1);
+  });
+
+  it('keeps the count made before takers were recorded as a floor, and sorts by the total', async () => {
+    const older = await publishedBy('Legacy');
+    const newer = await publishedBy('Newcomer');
+    // A resource from before: its counter said 5.
+    server.store.run(`UPDATE community_resources SET duplicates = 5 WHERE id = ?`, older);
+    expect(await duplicatesOf(older)).toBe(5);
+    const rex = await signUp(server, 'Rex');
+    await call(server, 'POST', `/api/community/resources/${older}/copies`, { token: rex.token, body: {} });
+    await call(server, 'POST', `/api/community/resources/${older}/copies`, { token: rex.token, body: {} });
+    expect(await duplicatesOf(older)).toBe(6);
+    await call(server, 'POST', `/api/community/resources/${newer}/copies`, { token: rex.token, body: {} });
+    const listed = await call(server, 'GET', '/api/community/resources?q=legacy');
+    expect(listed.body.items[0]).toMatchObject({ id: older, duplicates: 6 });
+    const popular = await call(server, 'GET', '/api/community/resources?sort=popular&limit=100');
+    const order = popular.body.items.map((item: { id: string }) => item.id);
+    expect(order.indexOf(older)).toBeLessThan(order.indexOf(newer));
+  });
+});
+
+describe('limits on counting routes', () => {
+  it('refuses an address that calls them too often', async () => {
+    const limited = await testServer({ limits: { counted: 3 } });
+    try {
+      const author = await signUp(limited, 'Busy');
+      const doc = await newDoc(limited, author.token, 'Busy kit', content('Busy kit'));
+      const id = (await call(limited, 'POST', '/api/community/resources', { token: author.token, body: { docId: doc.id, kind: 'file', title: 'Busy kit' } })).body.resource.id as string;
+      for (let i = 0; i < 3; i++) expect((await call(limited, 'POST', `/api/community/resources/${id}/copies`, { body: {} })).status).toBe(200);
+      const refused = await call(limited, 'POST', `/api/community/resources/${id}/copies`, { body: {} });
+      expect(refused).toEqual({ status: 429, body: { error: 'Too many requests from here: try again later' } });
+      // Signed in, the same address is limited too: the limit is per address, whoever is asking.
+      expect((await call(limited, 'POST', `/api/community/resources/${id}/copies`, { token: author.token, body: {} })).status).toBe(429);
+      expect((await call(limited, 'GET', `/api/community/resources/${id}`)).body.duplicates).toBe(1);
+    } finally {
+      await limited.stop();
+    }
+  }, 30_000);
 });

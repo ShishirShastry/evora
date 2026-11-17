@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { DocInfo } from '../../collab/protocol';
+import { BranchList, BranchToggle, useOpenBranches, type BranchRow } from '../files/parts';
 import { TextEdit } from '../components/Fields';
 import { Icon } from '../components/Icon';
 import { PopupMenu, type MenuItem } from '../components/Menu';
@@ -22,12 +23,20 @@ interface DocGridProps {
   menuFor: (doc: DocInfo, rename: () => void) => MenuItem[];
   onRename: (doc: DocInfo, name: string) => void;
   label: string;
+  /** A main file's open branches, listed on its card (a branch is not listed as a file of its own). */
+  branchesOf?: (doc: DocInfo) => BranchRow[];
+}
+
+/** Without a way to open them, a card lists no branches. */
+function defaultBranches(): BranchRow[] {
+  return [];
 }
 
 /** Shared documents as cards, like the files on this device, with the owner's avatar on each. */
-export function DocGrid({ docs, onOpen, menuFor, onRename, label }: DocGridProps) {
+export function DocGrid({ docs, onOpen, menuFor, onRename, label, branchesOf = defaultBranches }: DocGridProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [isOpen, toggle, prefix] = useOpenBranches();
   const now = Date.now();
   const openMenu = (doc: DocInfo, x: number, y: number): void => setMenu({ x, y, items: menuFor(doc, () => setRenaming(doc.id)) });
 
@@ -37,6 +46,9 @@ export function DocGrid({ docs, onOpen, menuFor, onRename, label }: DocGridProps
         {docs.map((doc) => {
           const hue = hueOf(doc.id);
           const initial = Array.from(doc.name.trim())[0]?.toUpperCase() ?? '';
+          const branches = branchesOf(doc);
+          const listId = `${prefix}-branches-${doc.id}`;
+          const expanded = branches.length > 0 && isOpen(doc.id);
           return (
             <li
               key={doc.id}
@@ -109,6 +121,12 @@ export function DocGrid({ docs, onOpen, menuFor, onRename, label }: DocGridProps
                   <Icon name="more" />
                 </button>
               </div>
+              {branches.length > 0 && (
+                <div className="flex flex-col gap-1 px-2 pb-2">
+                  <BranchToggle className="self-start" fileName={doc.name} count={branches.length} open={expanded} controls={listId} onToggle={() => toggle(doc.id)} />
+                  {expanded && <BranchList id={listId} fileName={doc.name} branches={branches} />}
+                </div>
+              )}
             </li>
           );
         })}

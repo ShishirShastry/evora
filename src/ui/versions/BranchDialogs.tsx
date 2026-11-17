@@ -180,13 +180,13 @@ export function ConflictChoices({ groups, choices, onChoose }: { groups: readonl
   return (
     <ul aria-label="Conflicts" className="m-0 flex list-none flex-col gap-1.5 p-0">
       {groups.map((group) => (
-        <li key={group.id} className="flex items-center gap-2.5 rounded-lg bg-field px-2.5 py-2">
+        <li key={group.id} className="flex flex-wrap items-center gap-2.5 rounded-lg bg-field px-2.5 py-2">
           <ConflictIcon />
           <span className="min-w-0 flex-1">
             <span className="block truncate font-semibold">{group.label}</span>
             <span className="block truncate text-[11px] text-dim">{group.props.join(', ')}</span>
           </span>
-          <div role="radiogroup" aria-label={`Keep for ${group.label}`} className="ev-segmented w-48 flex-none">
+          <div role="radiogroup" aria-label={`Keep for ${group.label}`} className="ev-segmented w-48 flex-none max-sm:w-full">
             {(
               [
                 ['main', 'Keep main'],

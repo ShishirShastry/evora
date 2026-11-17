@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { errorMessage, type EvoraApi } from '../../collab/api';
-import { filterFiles, localFavorites, localRecents, setLocalFavorite, sortFiles, type FileInfo, type FilesApi, type Project, type TrashedFile } from '../../collab/files';
-import type { Workspace } from '../../collab/protocol';
+import { filterFiles, localFavorites, localRecents, setLocalFavorite, sortFiles, type BranchFields, type FileInfo, type FilesApi, type Project, type TrashedFile } from '../../collab/files';
+import type { DocInfo, Workspace } from '../../collab/protocol';
 import { listFiles } from '../../persistence/files';
 import type { DocumentStorage, FileSummary } from '../../persistence/storage';
 import { Avatar } from '../collab/Avatar';
 import { timeAgo } from '../collab/hooks';
 import { Dialog } from '../components/Dialog';
 import { PopupMenu, type MenuItem } from '../components/Menu';
-import { Confirm, ErrorNote, FileTable, FileToolbar, Glyph, useListPrefs, useLocalFileMarks, type FileRow } from './parts';
+import { BranchList, BranchToggle, Confirm, ErrorNote, FileTable, FileToolbar, Glyph, useListPrefs, useLocalFileMarks, useOpenBranches, type BranchRow, type FileRow } from './parts';
 
 /**
  * The file browser's pages for advanced file management: Recents,
@@ -29,12 +29,16 @@ function hueOf(id: string): number {
 /** Files as cards, as elsewhere in the file browser: for lists that mix files on this device and shared files. */
 export function FileCards({ rows, label }: { rows: FileRow[]; label: string }) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [isOpen, toggle, prefix] = useOpenBranches();
   const now = Date.now();
   return (
     <>
       <ul aria-label={label} className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(212px,1fr))] gap-4 p-0">
         {rows.map((row) => {
           const hue = hueOf(row.id);
+          const branches = row.branches ?? [];
+          const listId = `${prefix}-branches-${row.id}`;
+          const expanded = branches.length > 0 && isOpen(row.id);
           return (
             <li
               key={row.id}
@@ -59,7 +63,7 @@ export function FileCards({ rows, label }: { rows: FileRow[]; label: string }) {
                   {Array.from(row.name.trim())[0]?.toUpperCase() ?? ''}
                 </span>
                 {row.favorite && (
-                  <span className="absolute left-2 top-2 text-[#ffc21a]">
+                  <span className="absolute left-2 top-2 text-favorite">
                     <Glyph name="starFilled" size={14} />
                   </span>
                 )}
@@ -96,6 +100,12 @@ export function FileCards({ rows, label }: { rows: FileRow[]; label: string }) {
                   </svg>
                 </button>
               </div>
+              {branches.length > 0 && (
+                <div className="flex flex-col gap-1 px-2 pb-2">
+                  <BranchToggle className="self-start" fileName={row.name} count={branches.length} open={expanded} controls={listId} onToggle={() => toggle(row.id)} />
+                  {expanded && <BranchList id={listId} fileName={row.name} branches={branches} />}
+                </div>
+              )}
             </li>
           );
         })}
@@ -103,6 +113,20 @@ export function FileCards({ rows, label }: { rows: FileRow[]; label: string }) {
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="File menu" onClose={() => setMenu(null)} />}
     </>
   );
+}
+
+/**
+ * A main file's open branches as rows under it (the server lists a branch
+ * with its main file, not on its own). Opening one passes the branch, with
+ * the main file's place, to `open`.
+ */
+export function branchRows<T extends DocInfo>(file: T & BranchFields, open: (branch: T) => void): BranchRow[] {
+  return (file.branches ?? []).map((branch) => ({
+    id: branch.id,
+    name: branch.name,
+    updatedAt: branch.updatedAt,
+    onOpen: () => open({ ...file, id: branch.id, name: branch.name, updatedAt: branch.updatedAt, role: branch.role, branches: [], mainId: file.id }),
+  }));
 }
 
 /** Where a shared file is, in words: its workspace and project. */
@@ -191,6 +215,7 @@ export function QuickPage({ kind, query = '', storage, files, signedIn, onOpenLo
     favorite: file.favorite,
     shared: true,
     at: file.openedAt ?? file.updatedAt,
+    branches: branchRows(file, (branch) => onOpenDoc(branch)),
     onOpen: () => onOpenDoc(file),
     menu: () => [
       { label: 'Open', onSelect: () => onOpenDoc(file) },
@@ -287,9 +312,9 @@ export function TrashPage({ files, workspace, onChanged }: TrashPageProps) {
       {items !== null && items.length > 0 && (
         <ul aria-label="Deleted files" className="m-0 flex list-none flex-col overflow-hidden rounded-[12px] bg-panel p-0 shadow-[var(--ev-shadow-panel)]">
           {items.map((item) => (
-            <li key={item.id} className="flex items-center gap-3 border-b border-line/60 px-3 py-2 last:border-b-0">
+            <li key={item.id} className="flex flex-wrap items-center gap-3 border-b border-line/60 px-3 py-2 last:border-b-0">
               <Avatar name={item.owner.name} color={item.owner.color} size={22} />
-              <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex min-w-[160px] flex-1 flex-col">
                 <span className="truncate text-[12.5px] font-medium text-ink">{item.name}</span>
                 <span className="truncate text-[11px] text-dim">
                   Deleted by {item.trashedBy.name} {timeAgo(item.trashedAt, now)} · gone for good in {Math.max(0, Math.ceil((Date.parse(item.purgeAt) - now) / 86_400_000))} days
@@ -315,7 +340,7 @@ export function TrashPage({ files, workspace, onChanged }: TrashPageProps) {
                 </button>
               )}
               {item.canDelete && (
-                <button type="button" className="ev-button !h-7 text-danger" aria-label={`Delete ${item.name} forever`} onClick={() => setDeleting(item)}>
+                <button type="button" className="ev-button ev-button-danger !h-7" aria-label={`Delete ${item.name} forever`} onClick={() => setDeleting(item)}>
                   Delete forever…
                 </button>
               )}

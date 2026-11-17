@@ -8,9 +8,15 @@
  * acknowledged and passed on to the others in the room; presence is passed
  * on and never kept. The HTTP API tells the hub when comments or who may do
  * what change, and the hub tells the rooms.
+ *
+ * A document that may not be changed now (a merged branch, `store.lockReason`)
+ * is joined as a viewer whatever one's role (so the app shows it read-only),
+ * and changes sent to it are rejected with the reason. Someone who could open
+ * a file before it went to the trash is refused with "This file is in the
+ * trash" (code `not-found`, close 4404); anyone else with "no access".
  */
 import type { Store, Identity, DocRow, UserRow } from './store.ts';
-import { invalidRegisters, personId } from './store.ts';
+import { DocumentLockedError, IN_TRASH_MESSAGE, invalidRegisters, personId } from './store.ts';
 import { hashToken } from './auth.ts';
 import { CLOSE_GOING_AWAY, type WebSocketConnection } from './websocket.ts';
 import {
@@ -149,6 +155,16 @@ export class Hub {
     client.conn.close(closeCode, message);
   }
 
+  /**
+   * What someone may do in a document over the live connection: their role,
+   * but no more than a viewer's while the document may not be changed (a
+   * merged branch), so the app shows it read-only and sends no changes.
+   */
+  private effectiveRole(doc: DocRow, identity: Identity): Role | null {
+    const role = this.store.roleOn(doc, identity);
+    return role && canEdit(role) && this.store.lockReason(doc.id) ? 'viewer' : role;
+  }
+
   private peer(client: Client): Peer {
     return { clientId: client.clientId, user: client.ref, role: client.role as Role, presence: client.presence };
   }
@@ -218,9 +234,10 @@ export class Hub {
       this.refuse(client, 'not-found', 'There is no such document', CLOSE_NOT_FOUND);
       return;
     }
-    const role = this.store.roleOn(doc, identity);
+    const role = this.effectiveRole(doc, identity);
     if (!role) {
-      this.refuse(client, 'forbidden', 'You do not have access to this document', CLOSE_FORBIDDEN);
+      if (this.store.trashedFor(doc, identity)) this.refuse(client, 'not-found', IN_TRASH_MESSAGE, CLOSE_NOT_FOUND);
+      else this.refuse(client, 'forbidden', 'You do not have access to this document', CLOSE_FORBIDDEN);
       return;
     }
     let room = this.rooms.get(doc.id);
@@ -264,7 +281,8 @@ export class Hub {
   private ops(client: Client, message: Extract<ClientMessage, { t: 'ops' }>): void {
     const id = typeof message.id === 'string' ? message.id : '';
     if (!canEdit(client.role)) {
-      this.send(client, { t: 'rejected', id, reason: 'You can view and comment on this document, not change it' });
+      const reason = this.store.lockReason(client.docId as string) ?? 'You can view and comment on this document, not change it';
+      this.send(client, { t: 'rejected', id, reason });
       return;
     }
     const invalid = invalidRegisters(message.ops, Date.now());
@@ -276,8 +294,12 @@ export class Hub {
     let result: { seq: number; kept: StoredRegister[] };
     try {
       result = this.store.applyRegisters(docId, message.ops as Register[]);
-    } catch {
-      this.send(client, { t: 'rejected', id, reason: 'The document no longer exists' });
+    } catch (error) {
+      if (error instanceof DocumentLockedError) {
+        // Locked since this connection was told its role: it is read-only from now on.
+        this.send(client, { t: 'rejected', id, reason: error.message });
+        this.recheck([docId]);
+      } else this.send(client, { t: 'rejected', id, reason: 'The document no longer exists' });
       return;
     }
     this.send(client, { t: 'ack', id, seq: result.seq });
@@ -340,7 +362,7 @@ export class Hub {
       if (!room) continue;
       const doc: DocRow | undefined = this.store.docById(docId);
       for (const client of [...room.values()]) {
-        const role = doc ? this.store.roleOn(doc, client.identity) : null;
+        const role = doc ? this.effectiveRole(doc, client.identity) : null;
         const linkAccess: LinkAccess = doc ? doc.link_access : 'none';
         if (role === client.role && linkAccess === client.linkAccess) continue;
         const roleChanged = role !== client.role;

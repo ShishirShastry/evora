@@ -28,7 +28,7 @@ interface PluginWindowProps {
  */
 export function PluginWindow({ title, width, height, html, handle, onClose }: PluginWindowProps) {
   const theme = useEditor((s) => s.theme);
-  const [place, setPlace] = useState(() => ({ x: Math.max(16, window.innerWidth - width - 280), y: 72 }));
+  const [place, setPlace] = useState(() => ({ x: Math.max(0, Math.min(Math.max(16, window.innerWidth - width - 280), window.innerWidth - width)), y: 72 }));
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   // The document is made once: a new theme or HTML would reload the window and lose what is in it.
   const [srcDoc] = useState(() => uiDocument(html, theme));
@@ -61,7 +61,7 @@ export function PluginWindow({ title, width, height, html, handle, onClose }: Pl
     // A region, not a dialog: the canvas and its shortcuts keep working while a plugin's window is open, as in Figma.
     <section
       aria-label={title}
-      className="ev-popover fixed z-40 flex flex-col overflow-hidden !rounded-[12px]"
+      className="ev-popover fixed z-40 flex max-h-[calc(100vh-8px)] max-w-[calc(100vw-8px)] flex-col overflow-hidden !rounded-[12px]"
       style={{ left: place.x, top: place.y, width }}
       onKeyDown={(event) => {
         // Keys pressed in the window are for the window, not for the canvas behind it.
@@ -89,7 +89,7 @@ export function PluginWindow({ title, width, height, html, handle, onClose }: Pl
         title={title}
         sandbox={UI_SANDBOX_FLAGS}
         srcDoc={srcDoc}
-        className="block flex-none border-0 bg-transparent"
+        className="block max-w-full flex-none border-0 bg-transparent"
         style={{ width, height }}
         onLoad={(event) => {
           handle.loaded = true;
