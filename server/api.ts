@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
+  GOOGLE_RETURN_ROUTE,
   canEdit,
   mentionsIn,
   type AuthResult,
@@ -37,6 +38,21 @@ import {
   type WorkspaceRow,
 } from './store.ts';
 import type { Hub } from './hub.ts';
+import {
+  CALLBACK_PATH,
+  GoogleError,
+  STATE_COOKIE,
+  STATE_TTL_MS,
+  TICKET_TTL_MS,
+  allowedOrigin,
+  asOrigin,
+  consentUrl,
+  cookieValue,
+  fetchProfile,
+  pkce,
+  type GoogleConfig,
+  type GoogleProfile,
+} from './google.ts';
 
 export interface Limits {
   /** Wrong passwords allowed per address and email in a window. */
@@ -57,6 +73,10 @@ export interface ApiOptions {
   /** The largest body for a new document's content and for an image. */
   maxUploadBytes: number;
   limits: Limits;
+  /** Signing in with Google; off when not given. */
+  google?: GoogleConfig | null;
+  /** The app's public origin (EVORA_PUBLIC_URL), where Google sends people back to; otherwise only this computer's addresses are accepted. */
+  publicUrl?: string | null;
 }
 
 interface Ctx {
@@ -246,6 +266,24 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
     store.run(`DELETE FROM document_invites WHERE email = ?`, user.email);
   }
 
+  /** Makes an account with its own workspace, and takes up the invitations waiting for its email. Run inside a transaction. */
+  function createUser(address: string, name: string, hashed: string, googleSub: string | null): UserRow {
+    const user: UserRow = { id: newId(), email: address, name, color: store.nextColor(), password: hashed, created_at: now(), google_sub: googleSub };
+    store.run(
+      `INSERT INTO users (id, email, name, color, password, created_at, google_sub) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      user.id,
+      user.email,
+      user.name,
+      user.color,
+      user.password,
+      user.created_at,
+      googleSub,
+    );
+    store.createWorkspace(`${name}'s workspace`, user.id);
+    takeUpInvites(user);
+    return user;
+  }
+
   function startSession(user: UserRow): AuthResult {
     const token = newToken();
     store.createSession(user.id, token, hashToken(token));
@@ -289,19 +327,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const hashed = await hashPassword(secret);
       const result = store.tx(() => {
         if (store.userByEmail(address)) throw new HttpError(409, 'There is already an account with this email');
-        const user: UserRow = { id: newId(), email: address, name, color: store.nextColor(), password: hashed, created_at: now() };
-        store.run(
-          `INSERT INTO users (id, email, name, color, password, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-          user.id,
-          user.email,
-          user.name,
-          user.color,
-          user.password,
-          user.created_at,
-        );
-        store.createWorkspace(`${name}'s workspace`, user.id);
-        takeUpInvites(user);
-        return startSession(user);
+        return startSession(createUser(address, name, hashed, null));
       });
       return new Reply(201, result);
     }),
@@ -313,8 +339,9 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const key = `${ctx.ip}|${address}`;
       if (!loginFailures.allowed(key)) throw new HttpError(429, 'Too many wrong attempts: try again later');
       const user = store.userByEmail(address);
-      // An unknown email is checked against a decoy, so it takes as long as a wrong password.
-      const ok = (await verifyPassword(secret, user ? user.password : await decoyHash())) && !!user;
+      // An unknown email, or an account made with Google that has no password, is checked against a decoy,
+      // so it takes as long as a wrong password and gets the same answer.
+      const ok = (await verifyPassword(secret, user?.password ? user.password : await decoyHash())) && !!user?.password;
       if (!ok || !user) {
         loginFailures.hit(key);
         throw new HttpError(401, 'Wrong email or password');
@@ -329,6 +356,149 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         hub.endSession(ctx.who.sessionHash);
       }
       return {};
+    }),
+
+    // ---- signing in with Google (the flow is described in server/google.ts)
+
+    route('GET', '/api/auth/providers', () => ({ google: !!options.google })),
+
+    route('GET', '/api/auth/google/start', (ctx) => {
+      const google = options.google;
+      if (!google) throw new HttpError(404, 'Signing in with Google is not set up on this server');
+      const query = new URL(ctx.req.url ?? '/', 'http://localhost').searchParams;
+      const origin = allowedOrigin(query.get('origin'), options.publicUrl);
+      if (!origin) throw new HttpError(400, 'origin must be the address of the app: its public URL, or localhost');
+      const mode = query.get('mode') === 'signup' ? 'signup' : 'login';
+      const invite = query.get('invite');
+      const state = newToken();
+      const { verifier, challenge } = pkce();
+      const nowMs = Date.now();
+      store.tx(() => {
+        // A state is kept until it expires, a used one too, so that a second use is still answered on the right site.
+        store.run(`DELETE FROM google_states WHERE expires_at <= ?`, nowMs - STATE_TTL_MS);
+        store.run(
+          `INSERT INTO google_states (state_hash, verifier, origin, mode, invite, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          hashToken(state),
+          verifier,
+          origin,
+          mode,
+          invite && invite.length <= 200 ? invite : null,
+          nowMs + STATE_TTL_MS,
+        );
+      });
+      const secure = origin.startsWith('https:') ? '; Secure' : '';
+      ctx.res.writeHead(302, {
+        Location: consentUrl(google, `${origin}${CALLBACK_PATH}`, state, challenge),
+        'Cache-Control': 'no-store',
+        // Ties the sign-in to this browser: a callback brought from elsewhere (with someone else's code) is refused.
+        'Set-Cookie': `${STATE_COOKIE}=${state}; Path=/api/auth/google; Max-Age=${STATE_TTL_MS / 1000}; HttpOnly; SameSite=Lax${secure}`,
+        'Content-Length': 0,
+      });
+      ctx.res.end();
+      return HANDLED;
+    }),
+
+    route('GET', CALLBACK_PATH, async (ctx) => {
+      const query = new URL(ctx.req.url ?? '/', 'http://localhost').searchParams;
+      const state = query.get('state') ?? '';
+      const stateHash = hashToken(state);
+      const found = state
+        ? store.one<{ verifier: string; origin: string; invite: string | null; expires_at: number; used: number }>(
+            `SELECT verifier, origin, invite, expires_at, used FROM google_states WHERE state_hash = ?`,
+            stateHash,
+          )
+        : undefined;
+      const back = (origin: string, params: Record<string, string>): typeof HANDLED => {
+        ctx.res.writeHead(302, {
+          Location: `${origin}/${GOOGLE_RETURN_ROUTE}?${new URLSearchParams(params).toString()}`,
+          'Cache-Control': 'no-store',
+          'Set-Cookie': `${STATE_COOKIE}=; Path=/api/auth/google; Max-Age=0; HttpOnly; SameSite=Lax`,
+          'Content-Length': 0,
+        });
+        ctx.res.end();
+        return HANDLED;
+      };
+      if (!found) {
+        // Without a state given out here there is no telling which site to go back to: the public one, if it is known.
+        const fallback = asOrigin(options.publicUrl);
+        if (fallback) return back(fallback, { error: 'This sign-in link is not valid: try again' });
+        throw new HttpError(400, 'This sign-in link is not valid: go back to Evora and try again');
+      }
+      const fail = (message: string): typeof HANDLED => back(found.origin, { error: message });
+      // Used once only, whatever happens next.
+      if (found.used || store.run(`UPDATE google_states SET used = 1 WHERE state_hash = ? AND used = 0`, stateHash) === 0)
+        return fail('This sign-in was already used: try again');
+      if (found.expires_at <= Date.now()) return fail('The sign-in took too long: try again');
+      if (cookieValue(ctx.req.headers.cookie, STATE_COOKIE) !== state) return fail('The sign-in was started in another browser: try again');
+      const google = options.google;
+      if (!google) return fail('Signing in with Google is not set up on this server');
+      const refused = query.get('error');
+      if (refused) return fail(refused === 'access_denied' ? 'Signing in with Google was cancelled' : 'Google did not complete the sign-in');
+      const code = query.get('code');
+      if (!code) return fail('Google did not complete the sign-in');
+
+      let profile: GoogleProfile;
+      try {
+        profile = await fetchProfile(google, code, found.verifier, `${found.origin}${CALLBACK_PATH}`);
+      } catch (error) {
+        if (error instanceof GoogleError) return fail(error.message);
+        throw error;
+      }
+      if (!profile.emailVerified) return fail('Google has not verified this email address');
+      const address = normalizeEmail(profile.email);
+      if (!EMAIL.test(address) || address.length > 254) return fail('Google gave an email address that cannot be used');
+
+      let user: UserRow;
+      try {
+        user = store.tx(() => {
+          const bySub = store.userByGoogle(profile.sub);
+          if (bySub) return bySub;
+          const byEmail = store.userByEmail(address);
+          if (byEmail) {
+            if (byEmail.google_sub) throw new HttpError(409, 'The account with this email is linked to another Google account');
+            // Google has verified that the address is theirs: the account is linked to this Google account.
+            store.run(`UPDATE users SET google_sub = ? WHERE id = ?`, profile.sub, byEmail.id);
+            return { ...byEmail, google_sub: profile.sub };
+          }
+          if (!signups.allowed(ctx.ip)) throw new HttpError(429, 'Too many accounts made from here: try again later');
+          signups.hit(ctx.ip);
+          // No password: one can be set later (PATCH /api/me); until then signing in with a password fails as a wrong one does.
+          return createUser(address, profile.name, '', profile.sub);
+        });
+      } catch (error) {
+        if (error instanceof HttpError) return fail(error.message);
+        throw error;
+      }
+
+      // Started from an invite link: joined at once, as accepting it does.
+      if (found.invite) {
+        const link = store.one<{ workspace_id: string; role: Role }>(`SELECT workspace_id, role FROM invite_links WHERE token_hash = ?`, hashToken(found.invite));
+        if (link && store.workspaceById(link.workspace_id)) {
+          store.addWorkspaceMember(link.workspace_id, user.id, link.role);
+          hub.recheck(workspaceDocIds(link.workspace_id));
+        }
+      }
+
+      const ticket = newToken();
+      const nowMs = Date.now();
+      store.tx(() => {
+        store.run(`DELETE FROM google_tickets WHERE expires_at <= ?`, nowMs);
+        store.run(`INSERT INTO google_tickets (ticket_hash, user_id, expires_at) VALUES (?, ?, ?)`, hashToken(ticket), user.id, nowMs + TICKET_TTL_MS);
+      });
+      return back(found.origin, { ticket });
+    }),
+
+    route('POST', '/api/auth/google/redeem', async (ctx) => {
+      const hash = hashToken(text(await ctx.json(), 'ticket', 200));
+      return store.tx(() => {
+        const held = store.one<{ user_id: string; expires_at: number }>(`SELECT user_id, expires_at FROM google_tickets WHERE ticket_hash = ?`, hash);
+        // Once only.
+        store.run(`DELETE FROM google_tickets WHERE ticket_hash = ?`, hash);
+        const user = held && held.expires_at > Date.now() ? store.userById(held.user_id) : undefined;
+        if (!user) throw new HttpError(401, 'This sign-in has expired or was already used: try again');
+        // The session starts here, so its token is only ever in this answer, never in a URL.
+        return startSession(user);
+      });
     }),
 
     route('POST', '/api/guests', async (ctx) => {

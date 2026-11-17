@@ -13,6 +13,7 @@ import { DEFAULT_LIMITS, createApi, type Limits } from './api.ts';
 import { MB } from './http.ts';
 import { WebSocketConnection, handshake } from './websocket.ts';
 import { serveStatic } from './static.ts';
+import type { GoogleConfig } from './google.ts';
 
 export interface ServerOptions {
   /** The port to listen on; 0 for any free port. */
@@ -29,6 +30,10 @@ export interface ServerOptions {
   maxMessageBytes?: number;
   /** Limits on repeated attempts (wrong passwords, accounts and guests made from one address). */
   limits?: Partial<Limits>;
+  /** "Continue with Google": a Google OAuth client (see server/google.ts); off when not given. */
+  google?: GoogleConfig | null;
+  /** The app's public origin, e.g. https://evora.example.com (EVORA_PUBLIC_URL): where Google may send people back to, besides localhost. */
+  publicUrl?: string | null;
 }
 
 export interface RunningServer {
@@ -58,6 +63,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     maxJsonBytes: 2 * MB,
     maxUploadBytes: maxMessageBytes,
     limits: { ...DEFAULT_LIMITS, ...options.limits },
+    google: options.google ?? null,
+    publicUrl: options.publicUrl ?? null,
   });
 
   const server: Server = createServer((req, res) => {

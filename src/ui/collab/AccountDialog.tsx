@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'rea
 import { setAccount, updateAccountUser } from '../../collab/account';
 import { api as defaultApi, errorMessage, type EvoraApi } from '../../collab/api';
 import { Dialog } from '../components/Dialog';
+import { GoogleButton, useGoogleAvailable } from './google';
 import { FREE_NOTE } from './hooks';
 
 export type AccountMode = 'signin' | 'signup';
@@ -14,10 +15,17 @@ interface AccountDialogProps {
   /** Why an account is asked for, shown above the form. */
   reason?: string;
   api?: EvoraApi;
+  /** The invite link being followed, kept when continuing with Google. */
+  invite?: string;
+  /** How "Continue with Google" sends the window to Google (tests give their own). */
+  navigate?: (url: string) => void;
 }
 
-/** Signing in, or creating an account: free, with no plans and no limits. */
-export function AccountDialog({ mode: initialMode = 'signin', onClose, onDone, reason, api = defaultApi }: AccountDialogProps) {
+/**
+ * Signing in, or creating an account: free, with no plans and no limits. When
+ * the server has Google set up, "Continue with Google" comes first, in both.
+ */
+export function AccountDialog({ mode: initialMode = 'signin', onClose, onDone, reason, api = defaultApi, invite, navigate }: AccountDialogProps) {
   const [mode, setMode] = useState<AccountMode>(initialMode);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -26,6 +34,7 @@ export function AccountDialog({ mode: initialMode = 'signin', onClose, onDone, r
   const [busy, setBusy] = useState(false);
   const first = useRef<HTMLInputElement>(null);
   useFocusSoon(first, mode);
+  const google = useGoogleAvailable(api);
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -61,6 +70,7 @@ export function AccountDialog({ mode: initialMode = 'signin', onClose, onDone, r
             Create account
           </button>
         </div>
+        {google && <GoogleButton mode={mode} invite={invite} disabled={busy} navigate={navigate} />}
         {mode === 'signup' && (
           <label className="flex flex-col gap-1">
             <span className="text-dim">Name</span>

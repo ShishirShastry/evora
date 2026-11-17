@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { setGuest } from '../../collab/account';
+import { setAccount, setGuest } from '../../collab/account';
 import { api as defaultApi, errorMessage, type EvoraApi, type InviteInfo } from '../../collab/api';
-import type { Workspace } from '../../collab/protocol';
+import type { AuthResult, Workspace } from '../../collab/protocol';
 import { Logo } from '../components/Icon';
 import { AccountDialog, useFocusSoon, type AccountMode } from './AccountDialog';
 import { Avatar } from './Avatar';
+import { forgetGoogleReturn, readGoogleReturn } from './google';
 import { FREE_NOTE, ROLE_LABELS, useAccount } from './hooks';
 
 /** A card in the middle of the window, for the screens that come before a file or the file browser. */
@@ -93,7 +94,16 @@ export function InviteScreen({ token, api = defaultApi, onAccepted, onHome }: In
       <button type="button" className="ev-button" onClick={onHome}>
         Back to files
       </button>
-      {dialog && <AccountDialog mode={dialog} reason="Sign in or create an account to join the workspace." onClose={() => setDialog(null)} onDone={accept} api={api} />}
+      {dialog && (
+        <AccountDialog
+          mode={dialog}
+          reason="Sign in or create an account to join the workspace."
+          onClose={() => setDialog(null)}
+          onDone={accept}
+          api={api}
+          invite={token}
+        />
+      )}
     </Card>
   );
 }
@@ -162,6 +172,81 @@ export function GuestPrompt({ api = defaultApi, onReady, onBack }: GuestPromptPr
         Back to files
       </button>
       {dialog && <AccountDialog mode={dialog} onClose={() => setDialog(null)} onDone={onReady} api={api} />}
+    </Card>
+  );
+}
+
+/** Redemptions under way, by ticket: a ticket works once, and React may start the same screen twice. */
+const redeeming = new Map<string, Promise<AuthResult>>();
+
+interface GoogleReturnScreenProps {
+  /** The query of `#/auth/google?…`: a `ticket`, or an `error`. */
+  query: string;
+  api?: EvoraApi;
+  /** Goes to a place in the app, in place of the return (so the ticket is not left in the history). */
+  onDone: (hash: string) => void;
+}
+
+/**
+ * `#/auth/google`: back from Google. The one-time ticket is traded for a
+ * session, kept like any sign-in, and the person goes back to where they were
+ * (into the workspace when they came from an invite link). A failure is said,
+ * with a way back.
+ */
+export function GoogleReturnScreen({ query, api = defaultApi, onDone }: GoogleReturnScreenProps) {
+  const params = new URLSearchParams(query);
+  const ticket = params.get('ticket');
+  const [error, setError] = useState<string | null>(() => params.get('error') ?? (ticket ? null : 'Signing in with Google did not finish: try again.'));
+  const [back] = useState(() => readGoogleReturn());
+  const finish = (hash: string): void => {
+    forgetGoogleReturn();
+    onDone(hash);
+  };
+
+  useEffect(() => {
+    if (!ticket) return undefined;
+    let current = true;
+    let pending = redeeming.get(ticket);
+    if (!pending) {
+      pending = api.redeemGoogle(ticket);
+      redeeming.set(ticket, pending);
+    }
+    pending
+      .then(async (result) => {
+        if (!current) return;
+        setAccount(result);
+        if (back.invite) {
+          const workspace = await api.acceptInvite(back.invite).catch(() => null);
+          if (!current) return;
+          if (workspace) {
+            finish(`#/workspace/${workspace.id}`);
+            return;
+          }
+        }
+        finish(back.hash);
+      })
+      .catch((cause: unknown) => current && setError(errorMessage(cause)));
+    return () => {
+      current = false;
+    };
+    // The ticket is redeemed once, whatever else changes.
+  }, [api, ticket]);
+
+  return (
+    <Card label="Continue with Google">
+      {error ? (
+        <>
+          <h1 className="m-0 text-[16px] font-semibold">Could not sign in with Google</h1>
+          <p role="alert" className="m-0 text-danger">
+            {error}
+          </p>
+          <button type="button" className="ev-button" onClick={() => finish(back.hash)}>
+            Go back
+          </button>
+        </>
+      ) : (
+        <p className="m-0 text-dim">Signing in with Google…</p>
+      )}
     </Card>
   );
 }

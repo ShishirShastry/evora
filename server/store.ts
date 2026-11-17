@@ -43,8 +43,11 @@ export interface UserRow {
   email: string;
   name: string;
   color: string;
+  /** A scrypt hash, or '' for an account made with Google that has no password (signing in with one then fails). */
   password: string;
   created_at: string;
+  /** The Google account's ID (its `sub`), once the account signs in with Google. */
+  google_sub?: string | null;
 }
 
 export interface GuestRow {
@@ -312,9 +315,29 @@ CREATE TABLE IF NOT EXISTS notifications (
   read INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS notifications_recipient ON notifications(recipient_id);
+
+CREATE TABLE IF NOT EXISTS google_states (
+  state_hash TEXT PRIMARY KEY,
+  verifier TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  invite TEXT,
+  expires_at INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS google_tickets (
+  ticket_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL
+);
 `;
 
-const SCHEMA_VERSION = 1;
+/**
+ * 1: the first schema (Phase 8).
+ * 2: users.google_sub (signing in with Google), google_states and google_tickets; a password may be ''.
+ */
+const SCHEMA_VERSION = 2;
 
 /** A session ends when it has not been used for this long. */
 export const SESSION_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -339,7 +362,16 @@ export class Store {
     this.db = new DatabaseSync(join(dataDir, 'evora.db'), { enableForeignKeyConstraints: true, timeout: 5000 });
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
     this.db.exec(SCHEMA);
+    this.migrate();
     this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  }
+
+  /** Brings a database made by an earlier version up to this one, keeping everything in it. */
+  private migrate(): void {
+    const columns = (this.db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[]).map((column) => column.name);
+    if (!columns.includes('google_sub')) this.db.exec(`ALTER TABLE users ADD COLUMN google_sub TEXT`);
+    // Unique, but any number of accounts may have none (NULLs are distinct in SQLite).
+    this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)`);
   }
 
   close(): void {
@@ -403,6 +435,10 @@ export class Store {
 
   userByEmail(email: string): UserRow | undefined {
     return this.one<UserRow>(`SELECT * FROM users WHERE email = ?`, normalizeEmail(email));
+  }
+
+  userByGoogle(sub: string): UserRow | undefined {
+    return this.one<UserRow>(`SELECT * FROM users WHERE google_sub = ?`, sub);
   }
 
   guestById(id: string): GuestRow | undefined {

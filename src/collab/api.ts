@@ -1,6 +1,7 @@
 import { currentAuth, type Auth } from './account';
 import {
   API_BASE,
+  type AuthProviders,
   type AuthResult,
   type DocInfo,
   type GuestResult,
@@ -122,6 +123,10 @@ export function createApi(options: ApiOptions = {}) {
     createGuest: (name: string) => json<GuestResult>('POST', '/guests', { name }),
     me: () => json<{ user: User; workspaces: Workspace[] }>('GET', '/me'),
     updateMe: (changes: { name?: string; password?: string; color?: string }) => json<User>('PATCH', '/me', changes),
+    /** The other ways of signing in the server offers (Google, when it is set up there). */
+    authProviders: () => json<AuthProviders>('GET', '/auth/providers'),
+    /** Trades the one-time ticket from coming back from Google for a session. */
+    redeemGoogle: (ticket: string) => json<AuthResult>('POST', '/auth/google/redeem', { ticket }),
 
     // ------------------------------------------------------------ workspaces
     listWorkspaces: () => json<Workspace[]>('GET', '/workspaces'),
@@ -200,6 +205,16 @@ export function documentLink(docId: string, origin: string = typeof location ===
 /** A link that invites whoever follows it into a workspace. */
 export function inviteLink(token: string, origin: string = typeof location === 'undefined' ? '' : `${location.origin}${location.pathname}`): string {
   return `${origin}#/invite/${token}`;
+}
+
+/**
+ * Where the window goes to sign in or up with Google: the server sends it on
+ * to Google, and Google back to `origin` (the app's own address).
+ */
+export function googleStartUrl(origin: string, mode: 'login' | 'signup', invite?: string | null, base: string = API_BASE): string {
+  const query = new URLSearchParams({ origin, mode });
+  if (invite) query.set('invite', invite);
+  return `${base}/auth/google/start?${query.toString()}`;
 }
 
 /** The message to show for something that failed. */

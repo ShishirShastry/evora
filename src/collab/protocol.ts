@@ -357,11 +357,27 @@ export type ServerMessage =
  * - GET    /api/notifications                                        -> Notification[]
  * - POST   /api/notifications/read     {ids}                         -> {}
  * - GET    /api/health                                               -> {ok: true, version}
+ *
+ * Signing in and up with Google (added later; on only when the server has a Google OAuth client):
+ * - GET    /api/auth/providers                                       -> AuthProviders
+ * - GET    /api/auth/google/start?origin=<app origin>&mode=login|signup&invite=<invite token?>
+ *                                                                    -> 302 to Google's consent page
+ * - GET    /api/auth/google/callback?code&state                      -> 302 to <origin>/#/auth/google?ticket=<one-time ticket>
+ *                                                                       or <origin>/#/auth/google?error=<message>
+ * - POST   /api/auth/google/redeem     {ticket}                      -> AuthResult (the ticket works once, for two minutes)
  */
 export interface AuthResult {
   token: string;
   user: User;
 }
+
+/** The other ways of signing in that the server offers. */
+export interface AuthProviders {
+  google: boolean;
+}
+
+/** Where the app's Google sign-in comes back to, with `?ticket=` or `?error=`. */
+export const GOOGLE_RETURN_ROUTE = '#/auth/google';
 
 export interface GuestResult {
   guestToken: string;
