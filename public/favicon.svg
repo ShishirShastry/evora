@@ -1,5 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#101314"/>
-  <path d="M16 6a10 10 0 1 0 10 10" fill="none" stroke="#19c2b3" stroke-width="3.5" stroke-linecap="round"/>
-  <rect x="17" y="7" width="8" height="8" rx="1.5" fill="#f2f5f5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-21.5 -7 328 328">
+  <defs>
+    <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="2" y1="115" x2="283" y2="38">
+      <stop offset="0" stop-color="#5b34ff"/>
+      <stop offset="0.42" stop-color="#a63cff"/>
+      <stop offset="0.74" stop-color="#ef67a8"/>
+      <stop offset="1" stop-color="#ff9d5c"/>
+    </linearGradient>
+    <linearGradient id="bottom" gradientUnits="userSpaceOnUse" x1="2" y1="191" x2="283" y2="276">
+      <stop offset="0" stop-color="#3a1cf0"/>
+      <stop offset="0.5" stop-color="#2a62ff"/>
+      <stop offset="1" stop-color="#00e4ff"/>
+    </linearGradient>
+    <linearGradient id="fold" gradientUnits="userSpaceOnUse" x1="0" y1="115" x2="0" y2="191">
+      <stop offset="0" stop-color="#7a3dff"/>
+      <stop offset="1" stop-color="#3a1cf0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="115" width="38" height="76" fill="url(#fold)"/>
+  <line x1="40" y1="115" x2="245" y2="38" stroke="url(#top)" stroke-width="76" stroke-linecap="round"/>
+  <line x1="40" y1="191" x2="245" y2="276" stroke="url(#bottom)" stroke-width="76" stroke-linecap="round"/>
 </svg>

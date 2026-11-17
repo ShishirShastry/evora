@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   addAnnotation,
+  approximateMeasurer,
   addDevResource,
   annotationsOn,
   codeConnectFor,
@@ -10,6 +11,7 @@ import {
   DEV_STATUSES,
   devStatusList,
   exportTargetsOf,
+  getWorldMatrix,
   inspectLayer,
   isFrame,
   isLayer,
@@ -22,10 +24,16 @@ import {
   swiftFor,
   updateAnnotation,
   type DevStatus,
+  type Document,
   type ExportTarget,
   type LayerNode,
   type NodeId,
 } from '../../core';
+import { distanceToFrame } from '../../core/dev/inspect';
+import { composeScreenFor, hasScreenCode, htmlPageFor, swiftScreenFor } from '../../core/dev/screen';
+import { exportSvg } from '../../engine/export/svg';
+import { buildVectorScene } from '../../engine/export/vector';
+import { getBrowserMeasurer } from '../../engine/text/measure';
 import { Icon } from '../components/Icon';
 import { useEditor, useEditorContext } from '../editor/EditorContext';
 import { exportEnvironment, runExport } from '../editor/exporting';
@@ -42,6 +50,43 @@ import { CommitInput } from './TokenSections';
 const STATUS_LABELS: Record<DevStatus, string> = { NONE: 'Not marked', READY: 'Ready for development', COMPLETED: 'Completed' };
 type Language = 'CSS' | 'SWIFT' | 'COMPOSE';
 const LANGUAGE_LABELS: Record<Language, string> = { CSS: 'CSS', SWIFT: 'iOS (SwiftUI)', COMPOSE: 'Android (Compose)' };
+/** What the code is written for: the selected layer alone, or it with everything in it. */
+type Scope = 'LAYER' | 'FRAME';
+const SCOPE_LABELS: Record<Scope, string> = { LAYER: 'This layer', FRAME: 'Whole frame' };
+const SCREEN_LABELS: Record<Language, string> = { CSS: 'HTML and CSS', SWIFT: 'iOS (SwiftUI)', COMPOSE: 'Android (Compose)' };
+
+/** A layer drawn by the export engine as an SVG element in its own box: how a whole frame's HTML shows vectors and other drawings. */
+function svgOfLayer(doc: Document, id: NodeId): string | null {
+  const node = doc.nodes[id];
+  if (!isLayer(node)) return null;
+  const at = getWorldMatrix(doc, id);
+  const scene = buildVectorScene(doc, [id], { measurer: getBrowserMeasurer() ?? approximateMeasurer, origin: { x: at[4], y: at[5] } });
+  return exportSvg(scene, { width: node.width, height: node.height }).svg;
+}
+
+/** The code for a layer with everything in it, in one language. */
+function screenCode(doc: Document, id: NodeId, language: Language): string {
+  if (language === 'CSS') return htmlPageFor(doc, id, { svgFor: (layerId) => svgOfLayer(doc, layerId) });
+  return language === 'SWIFT' ? swiftScreenFor(doc, id) : composeScreenFor(doc, id);
+}
+
+/** How far a layer is from each edge of its frame, drawn as Dev Mode draws it: the four distances round a box. */
+function FrameDistances({ distances }: { distances: { frameName: string; left: number; top: number; right: number; bottom: number } }) {
+  const value = (label: string, amount: number) => (
+    <span aria-label={`${label}: ${amount}px`} className="select-text tabular-nums text-ink">
+      {amount}
+    </span>
+  );
+  return (
+    <div role="group" aria-label={`Distance to the edges of ${distances.frameName}`} className={`grid grid-cols-[1fr_auto_1fr] grid-rows-[auto_auto_auto] items-center justify-items-center gap-1 px-3 py-2.5 ${WELL}`}>
+      <span className="col-start-2 row-start-1">{value('Top', distances.top)}</span>
+      <span className="col-start-1 row-start-2 justify-self-end">{value('Left', distances.left)}</span>
+      <span aria-hidden="true" className="col-start-2 row-start-2 h-6 w-16 rounded-[4px] border border-accent bg-selected" />
+      <span className="col-start-3 row-start-2 justify-self-start">{value('Right', distances.right)}</span>
+      <span className="col-start-2 row-start-3">{value('Bottom', distances.bottom)}</span>
+    </div>
+  );
+}
 
 /** A rounded well pressed into the panel: what code and measurements sit in. */
 const WELL = 'rounded-[10px] bg-bg/50 shadow-[var(--ev-sunk)]';
@@ -91,11 +136,17 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
   const { store, storage, images } = useEditorContext();
   const doc = useEditor((s) => s.doc);
   const [language, setLanguage] = useState<Language>('CSS');
+  const [scope, setScope] = useState<Scope>('LAYER');
   const [note, setNote] = useState('');
   const [link, setLink] = useState({ name: '', url: '' });
   const [exported, setExported] = useState('');
   const sections = useMemo(() => inspectLayer(doc, layer.id), [doc, layer.id]);
-  const code = language === 'CSS' ? cssFor(doc, layer.id) : language === 'SWIFT' ? swiftFor(doc, layer.id) : composeFor(doc, layer.id);
+  const whole = scope === 'FRAME' && hasScreenCode(doc, layer.id);
+  const code = useMemo(
+    () => (whole ? screenCode(doc, layer.id, language) : language === 'CSS' ? cssFor(doc, layer.id) : language === 'SWIFT' ? swiftFor(doc, layer.id) : composeFor(doc, layer.id)),
+    [doc, layer.id, language, whole],
+  );
+  const toFrame = useMemo(() => distanceToFrame(doc, layer.id), [doc, layer.id]);
   const mapped = codeConnectFor(doc, layer.id);
   const isComponent = isFrame(layer) && (layer.kind === 'COMPONENT' || layer.kind === 'COMPONENT_SET');
   const connect = layer.codeConnect ?? { component: '', source: '', snippet: '' };
@@ -139,7 +190,30 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
           </dl>
         </Section>
       ))}
+      {toFrame && toFrame.frameId !== layer.parentId && (
+        // When the layer is in a group, the edges of the frame round it are not those of its parent.
+        <Section title="Distance to the frame's edges">
+          <FrameDistances distances={toFrame} />
+          <p className={NOTE}>To the edges of {toFrame.frameName}.</p>
+        </Section>
+      )}
       <Section title="Code">
+        {hasScreenCode(doc, layer.id) && (
+          <div role="radiogroup" aria-label="Code for" className="ev-segmented">
+            {(Object.keys(SCOPE_LABELS) as Scope[]).map((entry) => (
+              <button
+                key={entry}
+                type="button"
+                role="radio"
+                aria-checked={scope === entry}
+                className={`h-6 min-w-0 flex-1 cursor-pointer rounded-[7px] border-0 font-medium transition-[color,background-color,box-shadow] duration-150 ${scope === entry ? 'bg-[image:var(--ev-button)] text-ink shadow-[var(--ev-raise)]' : 'bg-transparent text-dim hover:text-ink'}`}
+                onClick={() => setScope(entry)}
+              >
+                {SCOPE_LABELS[entry]}
+              </button>
+            ))}
+          </div>
+        )}
         <select aria-label="Code language" className="ev-field" value={language} onChange={(event) => setLanguage(event.currentTarget.value as Language)}>
           {(Object.keys(LANGUAGE_LABELS) as Language[]).map((entry) => (
             <option key={entry} value={entry}>
@@ -147,8 +221,12 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
             </option>
           ))}
         </select>
-        <CodeBlock label={`${LANGUAGE_LABELS[language]} code`} code={code} />
-        {language !== 'CSS' && <p className={NOTE}>A starting point written from this layer’s properties: the nearest view and modifiers, not a finished screen.</p>}
+        <CodeBlock label={whole ? `${SCREEN_LABELS[language]} code for the whole frame` : `${LANGUAGE_LABELS[language]} code`} code={code} />
+        {whole ? (
+          <p className={NOTE}>{language === 'CSS' ? 'Every layer in it as an element with a class named after it: Auto Layout as flexbox, other layers placed absolutely, vectors as inline SVG, images by their file name.' : 'Every layer in it, nested as it is in the design: Auto Layout as stacks with their spacing and padding, other layers moved to their places. Vectors and images are named as assets to export.'}</p>
+        ) : (
+          language !== 'CSS' && <p className={NOTE}>A starting point written from this layer’s properties: the nearest view and modifiers, not a finished screen.</p>
+        )}
       </Section>
       {(mapped || isComponent) && (
         <Section title="Component in code">

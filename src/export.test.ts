@@ -287,9 +287,11 @@ describe('SVG', () => {
     expect(out.svg).toContain('<image id="image');
     expect(out.svg).toContain('href="data:image/png;base64,AAAA"');
     expect(out.svg).toContain('<svg x="-5" y="0" width="60" height="30" viewBox="0 0 20 10" preserveAspectRatio="none" overflow="hidden">');
-    expect(out.svg).toContain('<feDropShadow in="SourceGraphic" dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.25"');
+    expect(out.svg).toContain('<feOffset in="SourceAlpha" dx="0" dy="4" result="shadow1offset"/><feGaussianBlur in="shadow1offset" stdDeviation="4" result="shadow1blur"/><feFlood flood-color="#000000" flood-opacity="0.25"');
     expect(out.svg).toContain('A &lt; B &amp; &quot;C&quot;');
-    expect(out.warnings).toEqual(['An angular gradient was written as a radial one: SVG has no such gradient.']);
+    // The angular gradient is a fan of wedges, the first red; nothing had to be left out.
+    expect(out.svg).toContain('fill="#fe0001"');
+    expect(out.warnings).toEqual([]);
     // Without the image's bytes the box is grey, and it is said.
     const missing = exportSvg(scene, { width: bounds.width, height: bounds.height });
     expect(missing.warnings).toContain('An image could not be found on this device and was left as a grey box.');
@@ -368,13 +370,14 @@ describe('PDF', () => {
     act(c.store, (doc) => patchNode(doc, c.ring, { fills: [gradientPaint('GRADIENT_DIAMOND', RED, BLUE, 0)], effects: [{ type: 'LAYER_BLUR', radius: 4, visible: true }] } as LayerPatch));
     const { bounds, scene } = sceneOf(now(c.store), c.card);
     const packed = await exportPdf([{ width: bounds.width, height: bounds.height, scene, background: BLUE }], { measurer: approximateMeasurer, deflate: deflateZlib });
-    expect(packed.warnings.sort()).toEqual(['A diamond gradient was written as a radial one: PDF has no such gradient.', 'Shadows and blurs are not written to a vector PDF. Choose “As a picture” for the PDF’s content to keep them.']);
+    expect(packed.warnings).toEqual(['Shadows and blurs are not written to a vector PDF. Choose “As a picture” for the PDF’s content to keep them.']);
     const parts = objects(packed.bytes);
     const page = parts.find((part) => part.includes('/Filter /FlateDecode') && !part.includes('/Subtype')) as string;
     const stream = packed.bytes.subarray(text(packed.bytes).indexOf(page) + page.indexOf('stream\n') + 7, text(packed.bytes).indexOf(page) + page.lastIndexOf('\nendstream'));
     const content = text(await inflateZlib(stream));
     expect(content.startsWith('1 0 0 -1 0 100 cm\n0 0 1 rg 0 0 200 100 re f\n')).toBe(true);
-    expect(parts.some((part) => part.includes('/ShadingType 3'))).toBe(true);
+    // The diamond is four linear shadings, one in each quarter.
+    expect(parts.filter((part) => part.includes('/ShadingType 2'))).toHaveLength(4);
 
     // A page that is one picture, with a second page after it: two pixels, one of them see-through.
     const rgba = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 0]);

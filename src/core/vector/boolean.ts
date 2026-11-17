@@ -1,7 +1,7 @@
 import type { BooleanOperation, VectorNetwork, VectorSegment, VectorVertex, WindingRule } from '../document/schema';
 import type { Point } from '../math/geometry';
 import { cubicAt, cubicBounds, cubicDerivative, flattenCubic, isStraight, reverseCubic, splitCubic, type Cubic } from './bezier';
-import { networkGeometry, stepCubic } from './network';
+import { networkGeometry, segmentCubic, stepCubic } from './network';
 
 /**
  * Boolean operations on shapes bounded by Bézier curves.
@@ -176,6 +176,105 @@ export function intersectCubics(a: Cubic, b: Cubic): CurveCrossing[] {
     }
   }
   return found;
+}
+
+/** How close, in the network's units, a crossing must be to a point to be taken as that point. */
+const CROSSING_TOLERANCE = 0.01;
+
+/**
+ * Puts a point wherever two segments of a network cross, and cuts both
+ * segments there, so that they meet at one shared point instead of passing
+ * over each other. Then the network's regions are found correctly, and each
+ * part can be filled, deleted or moved on its own. Crossings are found as
+ * `intersectCubics` finds them (straightened pieces flat to a hundredth of a
+ * unit, then sharpened on the curves) and curves keep their exact shape. A
+ * crossing that is already one of a segment's ends does not cut that
+ * segment; an end point that lies on another segment cuts that one and is
+ * joined to it. With `only`, just the crossings in which at least one of the
+ * listed segments takes part are split. Points are only added, never
+ * renumbered; `crossings` lists the points at the crossings. When nothing
+ * crosses, the same network object is returned.
+ */
+export function splitAtCrossings(network: VectorNetwork, only?: readonly number[]): { network: VectorNetwork; crossings: number[] } {
+  const chosen = only ? new Set(only) : null;
+  const curves = network.segments.map((_, i) => segmentCubic(network, i));
+  const vertices: VectorVertex[] = [...network.vertices];
+  const cuts: { t: number; vertex: number }[][] = network.segments.map(() => []);
+  const crossings: number[] = [];
+  const added: number[] = [];
+  const pointAt = (p: Point, ends: readonly number[]): number => {
+    for (const v of ends) if (dist(vertices[v] as Point, p) <= CROSSING_TOLERANCE) return v;
+    // Three or more segments through one place share one point.
+    for (const v of added) if (dist(vertices[v] as Point, p) <= CROSSING_TOLERANCE) return v;
+    vertices.push({ x: p.x, y: p.y });
+    added.push(vertices.length - 1);
+    return vertices.length - 1;
+  };
+  for (let i = 0; i < curves.length; i++) {
+    for (let j = i + 1; j < curves.length; j++) {
+      if (chosen && !chosen.has(i) && !chosen.has(j)) continue;
+      const a = network.segments[i] as VectorSegment;
+      const b = network.segments[j] as VectorSegment;
+      const ca = curves[i] as Cubic;
+      const cb = curves[j] as Cubic;
+      const lines = isStraight(ca) && isStraight(cb);
+      for (const hit of intersectCubics(ca, cb)) {
+        let point = hit.point;
+        if (lines) {
+          // Two straight lines cross at a point that can be worked out exactly.
+          const r = sub(ca.p3, ca.p0);
+          const d = sub(cb.p3, cb.p0);
+          const denominator = cross(r, d);
+          if (denominator !== 0) {
+            const u = cross(sub(cb.p0, ca.p0), d) / denominator;
+            point = { x: ca.p0.x + r.x * u, y: ca.p0.y + r.y * u };
+          }
+        }
+        const vertex = pointAt(point, [a.start, a.end, b.start, b.end]);
+        let cut = false;
+        if (vertex !== a.start && vertex !== a.end) {
+          (cuts[i] as { t: number; vertex: number }[]).push({ t: hit.s, vertex });
+          cut = true;
+        }
+        if (vertex !== b.start && vertex !== b.end) {
+          (cuts[j] as { t: number; vertex: number }[]).push({ t: hit.t, vertex });
+          cut = true;
+        }
+        if (cut && !crossings.includes(vertex)) crossings.push(vertex);
+      }
+    }
+  }
+  if (crossings.length === 0) return { network, crossings: [] };
+
+  const segments: VectorSegment[] = [];
+  const zero: Point = { x: 0, y: 0 };
+  network.segments.forEach((segment, i) => {
+    const list = (cuts[i] as { t: number; vertex: number }[])
+      .filter((cut) => cut.t > 1e-9 && cut.t < 1 - 1e-9)
+      .sort((x, y) => x.t - y.t)
+      .filter((cut, k, all) => k === 0 || (all[k - 1] as { vertex: number }).vertex !== cut.vertex);
+    if (list.length === 0) {
+      segments.push(segment);
+      return;
+    }
+    const curve = curves[i] as Cubic;
+    const straight = isStraight(curve);
+    const parts = cutCurve(curve, list.map((cut) => cut.t));
+    const chain = [segment.start, ...list.map((cut) => cut.vertex), segment.end];
+    parts.forEach((part, k) => {
+      const start = chain[k] as number;
+      const end = chain[k + 1] as number;
+      // A straight piece from a point to itself is nothing.
+      if (straight && start === end) return;
+      segments.push({
+        start,
+        end,
+        tangentStart: straight ? zero : sub(part.p1, part.p0),
+        tangentEnd: straight ? zero : sub(part.p2, part.p3),
+      });
+    });
+  });
+  return { network: { vertices, segments }, crossings };
 }
 
 /** Cuts a curve at the given parameters, which must be in ascending order and strictly between 0 and 1. */

@@ -178,8 +178,8 @@ export function cssFor(doc: Document, id: NodeId): string {
   return out.join('\n');
 }
 
-const swiftColor = (color: RGB, opacity = 1): string => `Color(red: ${round(color.r, 3)}, green: ${round(color.g, 3)}, blue: ${round(color.b, 3)}${opacity < 1 ? `, opacity: ${round(opacity)}` : ''})`;
-const swiftString = (text: string): string => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+export const swiftColor = (color: RGB, opacity = 1): string => `Color(red: ${round(color.r, 3)}, green: ${round(color.g, 3)}, blue: ${round(color.b, 3)}${opacity < 1 ? `, opacity: ${round(opacity)}` : ''})`;
+export const swiftString = (text: string): string => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
 const SWIFT_WEIGHTS: Record<number, string> = { 100: 'ultraLight', 200: 'thin', 300: 'light', 400: 'regular', 500: 'medium', 600: 'semibold', 700: 'bold', 800: 'heavy', 900: 'black' };
 
 /** A layer as SwiftUI would make it: the view it is nearest to, with modifiers for its size and look. */
@@ -231,8 +231,8 @@ export function swiftFor(doc: Document, id: NodeId): string {
   return lines.join('\n');
 }
 
-const composeColor = (color: RGB, opacity = 1): string => `Color(0x${hex2(opacity)}${hex2(color.r)}${hex2(color.g)}${hex2(color.b)})`;
-const kotlinString = (text: string): string => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/\n/g, '\\n')}"`;
+export const composeColor = (color: RGB, opacity = 1): string => `Color(0x${hex2(opacity)}${hex2(color.r)}${hex2(color.g)}${hex2(color.b)})`;
+export const kotlinString = (text: string): string => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/\n/g, '\\n')}"`;
 const dp = (value: number): string => `${round(value)}.dp`;
 
 /** A layer as Jetpack Compose would make it. */

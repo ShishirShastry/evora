@@ -20,7 +20,8 @@ import {
 } from '../../core';
 import type { ImageSource } from '../images/imageCache';
 import { getRenderBounds, renderScene } from '../render/scene';
-import { exportPdf, writableAsPdfText, type PdfImage, type PdfPage } from './pdf';
+import { separateShadow } from './effects';
+import { exportPdf, writableAsPdfText, type EffectPictures, type PdfImage, type PdfPage, type PlacedPicture } from './pdf';
 import { exportSvg, type SvgImage } from './svg';
 import { buildVectorScene } from './vector';
 
@@ -88,7 +89,7 @@ export function exportArea(doc: Document, nodeId: NodeId): { pageId: NodeId; bou
 }
 
 /** Draws part of a page, or some of its layers, on a new canvas at a scale. Transparent where nothing is, unless given a colour to lie on. */
-function draw(doc: Document, area: { pageId: NodeId; bounds: Rect; roots: NodeId[] | null }, scale: number, background: RGB | null, env: ExportEnvironment): ExportCanvas {
+function draw(doc: Document, area: { pageId: NodeId; bounds: Rect; roots: NodeId[] | null }, scale: number, background: RGB | null, env: ExportEnvironment, hiddenIds?: ReadonlySet<NodeId>): ExportCanvas {
   const width = Math.max(1, Math.round(area.bounds.width * scale));
   const height = Math.max(1, Math.round(area.bounds.height * scale));
   if (width > MAX_SIDE || height > MAX_SIDE || width * height > MAX_PIXELS) {
@@ -105,6 +106,7 @@ function draw(doc: Document, area: { pageId: NodeId; bounds: Rect; roots: NodeId
     images: env.images,
     background: false,
     roots: area.roots ?? undefined,
+    hiddenIds,
     createCanvas: (w, h) => env.createCanvas(w, h),
   });
   if (!background) return canvas;
@@ -204,7 +206,8 @@ export async function exportOne(doc: Document, target: ExportTarget, env: Export
   }
   if (parts.length === 0) parts.push({ bounds: area.bounds, roots: area.roots });
   const pages: PdfPage[] = [];
-  const textPictures: Record<string, { image: PdfImage; x: number; y: number; width: number; height: number }> = {};
+  const textPictures: Record<string, PlacedPicture> = {};
+  const effectPictures: Record<string, EffectPictures> = {};
   for (const part of parts) {
     const size = { width: part.bounds.width * scale, height: part.bounds.height * scale };
     const background = setting.background ? area.background : null;
@@ -218,8 +221,10 @@ export async function exportOne(doc: Document, target: ExportTarget, env: Export
     // The size of a vector page is its scale: the drawing is the design's own, the page is that many points.
     partScene.matrix = multiply([scale, 0, 0, scale, 0, 0], partScene.matrix);
     pages.push({ ...size, background, scene: partScene });
-    // Text as pictures: each text layer drawn by itself, unrotated, in its own box.
     const ids = part.roots ? part.roots.flatMap((id) => drawnIds(doc, id)) : getDescendantIds(doc, area.pageId);
+    // Shadows and blurs, which PDF cannot draw, as pictures made by the renderer.
+    Object.assign(effectPictures, effectPicturesFor(doc, ids, Math.min(4, Math.max(1, scale * 2)), env, warnings));
+    // Text as pictures: each text layer drawn by itself, unrotated, in its own box.
     for (const id of ids) {
       const node = doc.nodes[id];
       if (!isLayer(node) || node.type !== 'TEXT' || !node.visible) continue;
@@ -228,7 +233,7 @@ export async function exportOne(doc: Document, target: ExportTarget, env: Export
       textPictures[id] = textPicture(doc, node, env);
     }
   }
-  const out = await exportPdf(pages, { images: assets.pdf, textPictures, measurer: env.measurer, deflate: env.deflate, title: doc.nodes[target.nodeId]?.name });
+  const out = await exportPdf(pages, { images: assets.pdf, textPictures, effectPictures, measurer: env.measurer, deflate: env.deflate, title: doc.nodes[target.nodeId]?.name });
   for (const warning of out.warnings) warnings.add(warning);
   const first = pages[0] as PdfPage;
   return { file: { name: target.fileName, mimeType, bytes: out.bytes, width: first.width, height: first.height }, warnings: [...warnings] };
@@ -246,6 +251,63 @@ function textPicture(doc: Document, node: LayerNode, env: ExportEnvironment): { 
   const alone: Document = { ...doc, nodes: { ...doc.nodes, [node.id]: { ...node, parentId: pageId, x: 0, y: 0, rotation: 0, opacity: 1, effects: [] } } };
   const canvas = draw(alone, { pageId, bounds: { x: -pad, y: -pad, width, height }, roots: [node.id] }, scale, null, env);
   return { image: pixelsOf(canvas), x: -pad, y: -pad, width, height };
+}
+
+/**
+ * A picture of one layer by itself, in the layer's own space: upright at the
+ * origin, fully opaque and blended normally (its place, turn, opacity and
+ * blend are the PDF group's), with some of its properties changed.
+ */
+function layerPicture(doc: Document, node: LayerNode, patch: Partial<LayerNode>, scale: number, env: ExportEnvironment, bounds?: Rect, hiddenIds?: ReadonlySet<NodeId>): PlacedPicture {
+  const pageId = pageIdOf(doc, node.id);
+  const alone: Document = { ...doc, nodes: { ...doc.nodes, [node.id]: { ...node, ...patch, parentId: pageId, x: 0, y: 0, rotation: 0, opacity: 1, blendMode: 'NORMAL' } as LayerNode } };
+  const box = bounds ?? getRenderBounds(alone, node.id);
+  const canvas = draw(alone, { pageId, bounds: box, roots: [node.id] }, scale, null, env, hiddenIds);
+  return { image: pixelsOf(canvas), x: box.x, y: box.y, width: box.width, height: box.height };
+}
+
+/**
+ * Pictures of the shadows and blurs of the layers a vector PDF draws, as
+ * `exportPdf` takes them. A layer blur blurs everything in the layer, so the
+ * whole layer is a picture. Otherwise the layer stays vectors: its drop
+ * shadows alone are a picture laid under it, and its inner shadows alone
+ * (drawn with no fills, strokes or contents) a picture laid over its fills.
+ */
+export function effectPicturesFor(doc: Document, ids: readonly NodeId[], scale: number, env: ExportEnvironment, warnings: Set<string>): Record<string, EffectPictures> {
+  const out: Record<string, EffectPictures> = {};
+  const inPicture = new Set<NodeId>();
+  for (const id of ids) {
+    const node = doc.nodes[id];
+    if (inPicture.has(id) || !isLayer(node) || !node.visible || node.opacity <= 0) continue;
+    const shown = node.effects.filter((effect) => effect.visible);
+    const drops = shown.filter((effect) => effect.type === 'DROP_SHADOW');
+    const inners = node.type === 'TEXT' || node.type === 'GROUP' || node.type === 'LINE' ? [] : shown.filter((effect) => effect.type === 'INNER_SHADOW');
+    const blurred = shown.some((effect) => effect.type === 'LAYER_BLUR' && effect.radius > 0);
+    if (drops.length === 0 && inners.length === 0 && !blurred) continue;
+    try {
+      if (blurred) {
+        out[id] = { whole: layerPicture(doc, node, { effects: shown.filter((effect) => effect.type !== 'BACKGROUND_BLUR') }, scale, env) };
+        // What is in it is in the picture.
+        for (const inside of getDescendantIds(doc, id)) inPicture.add(inside);
+        continue;
+      }
+      const entry: EffectPictures = {};
+      if (drops.length > 0) {
+        const withShadow = layerPicture(doc, node, { effects: drops }, scale, env);
+        const without = layerPicture(doc, node, { effects: [] }, scale, env, withShadow);
+        const image = withShadow.image as Extract<PdfImage, { kind: 'pixels' }>;
+        entry.under = { ...withShadow, image: { kind: 'pixels', rgba: separateShadow(image.rgba, (without.image as typeof image).rgba), width: image.width, height: image.height } };
+      }
+      if (inners.length > 0) {
+        entry.inner = layerPicture(doc, node, { effects: inners, fills: [], strokes: [] }, scale, env, undefined, new Set(getDescendantIds(doc, id)));
+      }
+      out[id] = entry;
+    } catch (error) {
+      if (!(error instanceof ExportError)) throw error;
+      warnings.add('A shadow or blur too big to make a picture of was left out of the PDF.');
+    }
+  }
+  return out;
 }
 
 function pageIdOf(doc: Document, id: NodeId): NodeId {

@@ -60,7 +60,61 @@ function traceSteps(ctx: PathContext, network: VectorNetwork, steps: readonly Pa
 export function traceNetwork(ctx: PathContext, network: VectorNetwork, part: PathPart): void {
   const geometry = networkGeometry(network);
   if (part === 'fill') for (const loop of geometry.loops) traceSteps(ctx, network, loop, true);
-  else for (const chain of geometry.chains) traceSteps(ctx, network, chain.steps, chain.closed);
+  else {
+    for (const chain of geometry.chains) traceSteps(ctx, network, chain.steps, chain.closed);
+    traceBranchJoins(ctx, network);
+  }
+}
+
+/** How long the two arms of a join piece are, in the layer's units: short enough to stay inside the stroke of the segments it joins. */
+const JOIN_ARM = 0.05;
+
+/**
+ * Adds the joins of a branching network to the current path. A stroke is
+ * drawn as runs that stop where three or more segments meet, so nothing would
+ * join them there and the stroke would show a notch on the outside of the
+ * point. Of the segments that leave such a point, the two either side of the
+ * widest gap between them are where the outline of the stroke turns outwards;
+ * when that gap is wider than a half turn, a tiny piece that turns from one to
+ * the other is added, so the canvas draws the stroke's own join (miter, bevel
+ * or round) there. The piece lies inside the stroke otherwise, and as part of
+ * the same path it is painted once with it, so it adds nothing else.
+ */
+export function traceBranchJoins(ctx: PathContext, network: VectorNetwork): void {
+  network.vertices.forEach((vertex, index) => {
+    const directions: { x: number; y: number; angle: number }[] = [];
+    network.segments.forEach((segment, s) => {
+      for (const reversed of [false, true]) {
+        if ((reversed ? segment.end : segment.start) !== index) continue;
+        const c = stepCubic(network, { segment: s, reversed });
+        // The direction the segment leaves the point in: along its handle, or towards where it goes.
+        const toward = [c.p1, c.p2, c.p3].find((p) => Math.hypot(p.x - c.p0.x, p.y - c.p0.y) > 1e-9);
+        if (!toward) continue;
+        const length = Math.hypot(toward.x - c.p0.x, toward.y - c.p0.y);
+        const x = (toward.x - c.p0.x) / length;
+        const y = (toward.y - c.p0.y) / length;
+        directions.push({ x, y, angle: Math.atan2(y, x) });
+      }
+    });
+    if (directions.length < 3) return;
+    directions.sort((a, b) => a.angle - b.angle);
+    let widest = 0;
+    let after = 0;
+    directions.forEach((d, i) => {
+      const next = directions[(i + 1) % directions.length] as (typeof directions)[number];
+      const gap = i === directions.length - 1 ? next.angle + Math.PI * 2 - d.angle : next.angle - d.angle;
+      if (gap > widest) {
+        widest = gap;
+        after = i;
+      }
+    });
+    if (widest <= Math.PI + 1e-6) return;
+    const a = directions[after] as (typeof directions)[number];
+    const b = directions[(after + 1) % directions.length] as (typeof directions)[number];
+    ctx.moveTo(vertex.x + a.x * JOIN_ARM, vertex.y + a.y * JOIN_ARM);
+    ctx.lineTo(vertex.x, vertex.y);
+    ctx.lineTo(vertex.x + b.x * JOIN_ARM, vertex.y + b.y * JOIN_ARM);
+  });
 }
 
 function roundedRect(ctx: PathContext, x: number, y: number, w: number, h: number, radii: CornerRadii): void {
@@ -221,6 +275,7 @@ function traceTrimmedStroke(ctx: PathContext, node: LineNode | VectorNode): void
     });
     if (chain.closed && curves.length > 0) ctx.closePath();
   }
+  traceBranchJoins(ctx, node.network);
 }
 
 /** Traces the path a layer's stroke is drawn along: its outline, made room for arrowheads where it has them. */
@@ -254,10 +309,11 @@ function conic(ctx: Ctx, angle: number, x: number, y: number): CanvasGradient | 
 
 /**
  * A gradient in the layer's pixel space, usable as a fill or stroke style for
- * anything drawn in that space, including text and strokes. Linear gradients
- * are exact. The round kinds are circular here (the radius is the distance
- * between the handles in pixels); `fillWithPaint` draws them elliptical for
- * shapes, which is what a box-shaped fill wants.
+ * anything drawn in that space. Linear gradients are exact. The round kinds
+ * are circular here (the radius is the distance between the handles in
+ * pixels) and diamond is drawn as radial; `fillStretchedGradient` draws them
+ * stretched to the box, which is what the renderer uses for fills, strokes
+ * and text wherever it can. This is the fallback where it cannot.
  */
 export function gradientInPixels(ctx: Ctx, paint: GradientPaint, width: number, height: number): CanvasGradient {
   const fx = paint.from.x * width;
@@ -366,35 +422,76 @@ export function fillWithPaint(ctx: Ctx, paint: Paint, width: number, height: num
   } else {
     ctx.save();
     clipPath(ctx, rule);
-    // From here on, (0,0)-(1,1) is the layer's box.
-    ctx.transform(width, 0, 0, height, 0, 0);
-    const { from, to } = paint;
-    const radius = Math.max(1e-6, Math.hypot(to.x - from.x, to.y - from.y));
-    const angle = Math.atan2(to.y - from.y, to.x - from.x);
-    const far = 4;
-    if (paint.type === 'GRADIENT_RADIAL') {
-      ctx.fillStyle = addStops(ctx.createRadialGradient(from.x, from.y, 0, from.x, from.y, radius), paint);
-      ctx.fillRect(-far, -far, far * 2 + 1, far * 2 + 1);
-    } else if (paint.type === 'GRADIENT_ANGULAR') {
-      const gradient = conic(ctx, angle, from.x, from.y);
-      ctx.fillStyle = gradient ? addStops(gradient, paint) : addStops(ctx.createRadialGradient(from.x, from.y, 0, from.x, from.y, radius), paint);
-      ctx.fillRect(-far, -far, far * 2 + 1, far * 2 + 1);
-    } else {
-      // Diamond: the colour depends on |x| + |y| from the centre, which is a
-      // plain linear gradient within each of the four quadrants.
-      ctx.translate(from.x, from.y);
-      ctx.rotate(angle);
-      for (const [sx, sy] of [
-        [1, 1],
-        [-1, 1],
-        [-1, -1],
-        [1, -1],
-      ] as const) {
-        ctx.fillStyle = addStops(ctx.createLinearGradient(0, 0, (sx * radius) / 2, (sy * radius) / 2), paint);
-        ctx.fillRect(sx > 0 ? 0 : -far * 2, sy > 0 ? 0 : -far * 2, far * 2, far * 2);
-      }
-    }
+    fillStretchedGradient(ctx, paint, width, height);
     ctx.restore();
   }
   ctx.globalAlpha = previousAlpha;
+}
+
+/**
+ * Paints a radial, angular or diamond gradient stretched to the layer's box
+ * over the box and `margin` pixels round it (at least four times the box's
+ * size), in the layer's local space. The gradient is laid out in the box's
+ * unit square, so a radial gradient in a wide box is an ellipse and a diamond
+ * is a diamond. Every draw covers exactly the area it is clipped to, so this
+ * also works under a compositing operation such as "source-in" that clears
+ * what it does not cover: that is how strokes and text are given these
+ * gradients, by painting them over a mask of what the stroke or text covers.
+ * A linear gradient, or a box without area, is painted unstretched.
+ */
+export function fillStretchedGradient(ctx: Ctx, paint: GradientPaint, width: number, height: number, margin = 0): void {
+  if (paint.type === 'GRADIENT_LINEAR' || width <= 0 || height <= 0) {
+    const pad = Math.max(margin, (width + height) * 4);
+    ctx.fillStyle = gradientInPixels(ctx, paint, width, height);
+    ctx.fillRect(-pad, -pad, width + pad * 2, height + pad * 2);
+    return;
+  }
+  ctx.save();
+  // From here on, (0,0)-(1,1) is the layer's box.
+  ctx.transform(width, 0, 0, height, 0, 0);
+  const mx = Math.max(4, margin / width);
+  const my = Math.max(4, margin / height);
+  ctx.beginPath();
+  ctx.rect(-mx, -my, 1 + mx * 2, 1 + my * 2);
+  ctx.clip();
+  const { from, to } = paint;
+  const radius = Math.max(1e-6, Math.hypot(to.x - from.x, to.y - from.y));
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  if (paint.type === 'GRADIENT_RADIAL') {
+    ctx.fillStyle = addStops(ctx.createRadialGradient(from.x, from.y, 0, from.x, from.y, radius), paint);
+    ctx.fillRect(-mx, -my, 1 + mx * 2, 1 + my * 2);
+  } else if (paint.type === 'GRADIENT_ANGULAR') {
+    const gradient = conic(ctx, angle, from.x, from.y);
+    ctx.fillStyle = gradient ? addStops(gradient, paint) : addStops(ctx.createRadialGradient(from.x, from.y, 0, from.x, from.y, radius), paint);
+    ctx.fillRect(-mx, -my, 1 + mx * 2, 1 + my * 2);
+  } else {
+    // Diamond: the colour depends on |x| + |y| from the centre, which is a
+    // plain linear gradient within each of the four quadrants. Each quadrant
+    // is clipped to itself, so that no draw covers less than its clip.
+    const far = (1 + mx * 2 + my * 2 + Math.abs(from.x) + Math.abs(from.y)) * 2;
+    ctx.translate(from.x, from.y);
+    ctx.rotate(angle);
+    for (const [sx, sy] of [
+      [1, 1],
+      [-1, 1],
+      [-1, -1],
+      [1, -1],
+    ] as const) {
+      const x = sx > 0 ? 0 : -far;
+      const y = sy > 0 ? 0 : -far;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, far, far);
+      ctx.clip();
+      ctx.fillStyle = addStops(ctx.createLinearGradient(0, 0, (sx * radius) / 2, (sy * radius) / 2), paint);
+      ctx.fillRect(x, y, far, far);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+/** Whether a paint is a gradient that is laid out in the layer's box: radial, angular or diamond. */
+export function isStretchedGradient(paint: Paint): paint is GradientPaint {
+  return paint.type === 'GRADIENT_RADIAL' || paint.type === 'GRADIENT_ANGULAR' || paint.type === 'GRADIENT_DIAMOND';
 }

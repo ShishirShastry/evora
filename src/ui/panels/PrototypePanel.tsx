@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ACTION_TYPES,
   addFlow,
@@ -11,6 +11,7 @@ import {
   getDescendantIds,
   getPageIdOf,
   instanceOf,
+  keyComboOf,
   isFrame,
   isInstance,
   isLayer,
@@ -18,6 +19,7 @@ import {
   listVariables,
   newAction,
   newTrigger,
+  normalizeKeyCombo,
   OVERFLOWS,
   OVERLAY_POSITIONS,
   patchNodes,
@@ -63,7 +65,7 @@ import { CommitInput } from './TokenSections';
  * document through the operations in `core/ops/prototype`.
  */
 
-const TRIGGER_LABELS: Record<TriggerType, string> = { ON_CLICK: 'On click or tap', ON_DRAG: 'On drag', MOUSE_ENTER: 'While hovering', ON_PRESS: 'While pressing', AFTER_DELAY: 'After delay', ON_KEY: 'Key press' };
+const TRIGGER_LABELS: Record<TriggerType, string> = { ON_CLICK: 'On click or tap', ON_DRAG: 'On drag', MOUSE_ENTER: 'While hovering', ON_PRESS: 'While pressing', AFTER_DELAY: 'After delay', ON_KEY: 'Key press', MOUSE_LEAVE: 'Mouse leave', MOUSE_UP: 'Mouse up' };
 const ACTION_LABELS: Record<ActionType, string> = {
   NAVIGATE: 'Navigate to',
   OPEN_OVERLAY: 'Open overlay',
@@ -267,6 +269,72 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
   );
 }
 
+const MODIFIER_KEYS = ['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'CapsLock'];
+
+/**
+ * The key of a "key press" trigger. It can be typed ("Enter", "Ctrl+K",
+ * "shift+enter", written the one way triggers keep keys when it is
+ * committed), or recorded: after "Record", the next key pressed in the field,
+ * with the modifier keys held, is the key.
+ */
+function KeyField({ label, value, onCommit }: { label: string; value: string; onCommit: (key: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const commit = (text: string): void => {
+    const key = text === ' ' ? text : normalizeKeyCombo(text.trim());
+    if (key !== '' && key !== value) onCommit(key);
+  };
+  return (
+    <Row>
+      <input
+        key={value}
+        ref={input}
+        aria-label={label}
+        className="ev-field min-w-0 flex-1 placeholder:text-faint"
+        defaultValue={value}
+        placeholder={recording ? 'Press a key…' : 'Enter, ArrowRight, a, Ctrl+K, or Gamepad0 for a gamepad button'}
+        spellCheck={false}
+        onBlur={(event) => {
+          setRecording(false);
+          if (event.currentTarget.value !== value) commit(event.currentTarget.value);
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (recording) {
+            // Modifiers on their own wait for the key they are held with.
+            if (MODIFIER_KEYS.includes(event.key)) return;
+            event.preventDefault();
+            const key = keyComboOf(event);
+            event.currentTarget.value = key;
+            setRecording(false);
+            if (key !== value) onCommit(key);
+            return;
+          }
+          if (event.key === 'Enter') event.currentTarget.blur();
+          else if (event.key === 'Escape') {
+            event.currentTarget.value = value;
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="ev-icon-button !w-14 flex-none text-[11px] font-medium"
+        aria-label={`Record ${label}`}
+        aria-pressed={recording}
+        title="Press the key to use, with any modifier keys held"
+        onClick={() => {
+          setRecording(true);
+          input.current?.focus();
+          input.current?.select();
+        }}
+      >
+        Record
+      </button>
+    </Row>
+  );
+}
+
 function ReactionEditor({ layer, reaction, index }: { layer: LayerNode; reaction: Reaction; index: number }) {
   const { store } = useEditorContext();
   const label = `Interaction ${index + 1}`;
@@ -283,7 +351,7 @@ function ReactionEditor({ layer, reaction, index }: { layer: LayerNode; reaction
         <NumberField label={`${label} delay in milliseconds`} prefix="After" suffix="ms" value={reaction.trigger.delay} min={0} max={600000} onCommit={(delay) => change('Change delay', { trigger: { ...reaction.trigger, delay } })} />
       )}
       {reaction.trigger.type === 'ON_KEY' && (
-        <CommitInput label={`${label} key`} value={reaction.trigger.key} className="w-full" placeholder="Enter, ArrowRight, a, or Gamepad0 for a gamepad button" onCommit={(key) => change('Change key', { trigger: { ...reaction.trigger, key: key.trim() } })} />
+        <KeyField label={`${label} key`} value={reaction.trigger.key} onCommit={(key) => change('Change key', { trigger: { ...reaction.trigger, key } })} />
       )}
       <ActionList label={label} layer={layer} actions={reaction.actions} depth={0} onChange={(actions) => change('Change interaction', { actions })} />
     </li>

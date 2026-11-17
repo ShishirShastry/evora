@@ -85,6 +85,8 @@ export interface VectorGroup {
   /** Shows the group only where this other group paints. */
   mask: VectorGroup | null;
   items: VectorItem[];
+  /** For a layer: how many of the first items are its own fills, which an inner shadow is painted over. */
+  fills?: number;
 }
 
 export type VectorItem = VectorFill | VectorStroke | VectorText | VectorGroup;
@@ -245,6 +247,7 @@ function layerGroup(doc: Document, id: NodeId, measurer: TextMeasurer, hidden: R
       if (visible(paint)) group.items.push({ kind: 'fill', path: outline, rule, paint, width: node.width, height: node.height });
     }
   }
+  group.fills = group.items.length;
   if (node.type === 'FRAME' || node.type === 'GROUP') {
     const children = childItems(doc, id, measurer, hidden);
     if (children.length > 0) {

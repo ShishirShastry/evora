@@ -271,9 +271,11 @@ function Viewer({ storage, doc, startId, onExit }: { storage: DocumentStorage; d
     const onKey = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'SELECT' || target.tagName === 'INPUT' || target.tagName === 'BUTTON') && event.key !== 'Escape') return;
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (player.key(event.key)) event.preventDefault();
-      else if (event.key === 'r' || event.key === 'R') player.restart();
+      // A modifier key on its own is not a key press yet: it waits for the key it is held with.
+      if (event.key === 'Control' || event.key === 'Alt' || event.key === 'Shift' || event.key === 'Meta' || event.key === 'AltGraph') return;
+      // With modifiers held a key goes to the prototype ("Ctrl+K"); one it has no use for is left to the browser.
+      if (player.key(event.key, event)) event.preventDefault();
+      else if ((event.key === 'r' || event.key === 'R') && !event.ctrlKey && !event.metaKey && !event.altKey) player.restart();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

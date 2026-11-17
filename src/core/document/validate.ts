@@ -36,6 +36,7 @@ import {
   TRANSITION_DIRECTIONS,
   TRANSITION_TYPES,
   TRIGGER_TYPES,
+  normalizeKeyCombo,
   type Action,
   type Flow,
   type LibraryRef,
@@ -413,7 +414,7 @@ function reactions(value: unknown): Reaction[] {
     seen.add(item.id);
     out.push({
       id: item.id,
-      trigger: { type: trigger.type as Reaction['trigger']['type'], delay: finite(trigger.delay, 800, 0, 600000), key: typeof trigger.key === 'string' ? trigger.key : '' },
+      trigger: { type: trigger.type as Reaction['trigger']['type'], delay: finite(trigger.delay, 800, 0, 600000), key: typeof trigger.key === 'string' ? normalizeKeyCombo(trigger.key) : '' },
       actions: actions(item.actions),
     });
   }
@@ -494,6 +495,8 @@ function styles(value: unknown): Record<string, Style> {
         letterSpacing: finite(text.letterSpacing, 0, -200, 2000),
         textDecoration: oneOf(text.textDecoration, TEXT_DECORATIONS, 'NONE'),
         textCase: oneOf(text.textCase, TEXT_CASES, 'ORIGINAL'),
+        // Optional: a style made before version 25, or by a part of the application that does not set it, has none.
+        ...(text.paragraphSpacing !== undefined ? { paragraphSpacing: finite(text.paragraphSpacing, 0, 0, 10000) } : {}),
       },
       effects: effects(item.effects),
       grids: layoutGrids(item.grids),
@@ -749,6 +752,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.flipX = raw.flipX === true;
     layer.flipY = raw.flipY === true;
     layer.listType = oneOf(raw.listType, TEXT_LIST_TYPES, 'NONE');
+    layer.paragraphSpacing = finite(raw.paragraphSpacing, 0, 0, 10000);
     layer.styleRanges = styleRanges(raw.styleRanges, layer.characters.length);
     // A text hugs exactly where its own sizing mode fits it to its content.
     Object.assign(layer, textLayoutSizing(layer));

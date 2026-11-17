@@ -13,9 +13,9 @@ import {
 } from '../document/schema';
 import { applyToPoint, invert, multiply } from '../math/matrix';
 import { getChildIds, getDescendantIds, getWorldMatrix, sortByPaintOrder, topLevelIds } from '../scene/tree';
-import type { BooleanOperand } from '../vector/boolean';
+import { splitAtCrossings, type BooleanOperand } from '../vector/boolean';
 import { fitVectorNode } from '../vector/fit';
-import { mapNetwork } from '../vector/network';
+import { mapNetwork, segmentsOfPaths } from '../vector/network';
 import { combineNetworks, hasOutline, shapeNetwork } from '../vector/shapes';
 import { strokeOutline } from '../vector/stroke';
 import { hasVisiblePaint } from '../scene/shapes';
@@ -298,4 +298,44 @@ export function booleanNodes(doc: Document, ids: readonly NodeId[], operation: B
   const result = next.nodes[grouped.id];
   if (!result || result.type !== 'BOOLEAN_OPERATION' || result.network.segments.length === 0) return null;
   return { doc: next, id: grouped.id };
+}
+
+/** The selected vector layers that "Split at intersections" can work on: those that are not locked. */
+function splittableVectors(doc: Document, ids: readonly NodeId[]): VectorNode[] {
+  const out: VectorNode[] = [];
+  for (const id of ids) {
+    const node = doc.nodes[id];
+    if (node && node.type === 'VECTOR' && !node.locked) out.push(node);
+  }
+  return out;
+}
+
+/** Can `splitIntersections` be tried on this selection? (Whether anything crosses is only known by trying.) */
+export function canSplitIntersections(doc: Document, ids: readonly NodeId[]): boolean {
+  return splittableVectors(doc, ids).length > 0;
+}
+
+/**
+ * Puts a shared point wherever the segments of each selected vector layer
+ * cross each other, cutting both segments there (see `splitAtCrossings`).
+ * With `points`, which must belong to a single selected layer, only the
+ * crossings of the paths those points are on are split. `crossings` gives,
+ * per layer that changed, the points now at its crossings. Returns null when
+ * nothing crosses, and leaves the document as it was.
+ */
+export function splitIntersections(
+  doc: Document,
+  ids: readonly NodeId[],
+  points?: readonly number[],
+): { doc: Document; crossings: Record<NodeId, number[]> } | null {
+  let next = doc;
+  const crossings: Record<NodeId, number[]> = {};
+  for (const node of splittableVectors(doc, ids)) {
+    const only = points && points.length > 0 ? segmentsOfPaths(node.network, points) : undefined;
+    const split = splitAtCrossings(node.network, only);
+    if (split.crossings.length === 0) continue;
+    next = setNetwork(next, node.id, split.network);
+    crossings[node.id] = split.crossings;
+  }
+  return next === doc ? null : { doc: next, crossings };
 }

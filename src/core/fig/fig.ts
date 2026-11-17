@@ -7,6 +7,7 @@ import {
   isLayer,
   isPage,
   isShadow,
+  formatKeyCombo,
   type AssetInfo,
   type BlendMode,
   type DesignNode,
@@ -76,12 +77,32 @@ import { isZstd, zstdDecompress, ZstdError } from './zstd';
 
 /** The name the keyboard gives a key (as in KeyboardEvent.key), from the key code Figma keeps of it. */
 function keyName(code: number): string {
-  const named: Record<number, string> = { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 16: 'Shift', 17: 'Control', 18: 'Alt', 27: 'Escape', 32: ' ', 33: 'PageUp', 34: 'PageDown', 35: 'End', 36: 'Home', 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown', 46: 'Delete', 91: 'Meta', 186: ';', 187: '=', 188: ',', 189: '-', 190: '.', 191: '/', 192: '`', 219: '[', 220: '\\', 221: ']', 222: "'" };
+  const named: Record<number, string> = { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 16: 'Shift', 17: 'Control', 18: 'Alt', 27: 'Escape', 32: ' ', 33: 'PageUp', 34: 'PageDown', 35: 'End', 36: 'Home', 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown', 46: 'Delete', 91: 'Meta', 93: 'Meta', 186: ';', 187: '=', 188: ',', 189: '-', 190: '.', 191: '/', 192: '`', 219: '[', 220: '\\', 221: ']', 222: "'" };
   if (named[code]) return named[code] as string;
   if ((code >= 48 && code <= 57) || (code >= 65 && code <= 90)) return String.fromCharCode(code).toLowerCase();
   if (code >= 96 && code <= 105) return String(code - 96);
   if (code >= 112 && code <= 123) return `F${code - 111}`;
   return '';
+}
+
+/**
+ * The key of a Figma key trigger, from its key codes: the modifier keys among
+ * them (16 Shift, 17 Ctrl, 18 Alt, 91 and 93 Meta) held with the last other
+ * key, written as triggers here keep keys ("Ctrl+Shift+K").
+ */
+export function keyOf(codes: readonly number[]): string {
+  const modifiers = { ctrl: false, alt: false, shift: false, meta: false };
+  let key = '';
+  for (const code of codes) {
+    if (code === 16) modifiers.shift = true;
+    else if (code === 17) modifiers.ctrl = true;
+    else if (code === 18) modifiers.alt = true;
+    else if (code === 91 || code === 93) modifiers.meta = true;
+    else key = keyName(code);
+  }
+  // Only modifier keys: the last of them is the key itself.
+  if (key === '') return codes.length > 0 ? keyName(codes[codes.length - 1] as number) : '';
+  return formatKeyCombo({ ...modifiers, key });
 }
 
 export class FigError extends Error {}
@@ -162,6 +183,7 @@ message NodeChange {
   StackMode stackMode = 38; float stackSpacing = 39; float stackHorizontalPadding = 40; float stackVerticalPadding = 41; float stackPaddingRight = 42; float stackPaddingBottom = 43; StackJustify stackPrimaryAlignItems = 44; StackAlign stackCounterAlignItems = 45;
   SymbolData symbolData = 46; float starInnerScale = 47; uint count = 48; ArcData arcData = 49; VectorData vectorData = 50; BooleanOperation booleanOperation = 51; Color backgroundColor = 52; bool internalOnly = 53; bool resizeToFit = 54; bool isStateGroup = 55; string description = 56;
   bool borderStrokeWeightsIndependent = 57; float borderTopWeight = 58; float borderRightWeight = 59; float borderBottomWeight = 60; float borderLeftWeight = 61;
+  float paragraphSpacing = 62;
 }
 message Message { MessageType type = 1; uint sessionID = 2; uint ackID = 3; NodeChange[] nodeChanges = 4; Blob[] blobs = 5; }
 `;
@@ -526,6 +548,7 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
       lineHeight: change.lineHeight === undefined || (str(leading.units) === 'PERCENT' && num(leading.value) === 100) ? null : str(leading.units) === 'PERCENT' ? (num(leading.value) / 100) * fontSize : str(leading.units) === 'RAW' ? num(leading.value) * fontSize : num(leading.value),
       textDecoration: (['UNDERLINE', 'STRIKETHROUGH'].includes(str(change.textDecoration)) ? str(change.textDecoration) : 'NONE') as TextDecoration,
       textCase: (['UPPER', 'LOWER', 'TITLE'].includes(str(change.textCase)) ? str(change.textCase) : 'ORIGINAL') as TextCase,
+      paragraphSpacing: Math.max(0, num(change.paragraphSpacing)),
     };
   };
 
@@ -644,10 +667,8 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
       if (interaction.isDeleted === true) continue;
       const event = obj(interaction.event);
       const kind = str(event.interactionType, 'ON_CLICK');
-      const trigger = ({ ON_CLICK: 'ON_CLICK', ON_HOVER: 'MOUSE_ENTER', MOUSE_ENTER: 'MOUSE_ENTER', ON_PRESS: 'ON_PRESS', MOUSE_DOWN: 'ON_PRESS', AFTER_TIMEOUT: 'AFTER_DELAY', DRAG: 'ON_DRAG', ON_KEY_DOWN: 'ON_KEY' } as Record<string, TriggerType>)[kind];
-      const codes = list(obj(event.keyTrigger).keyCodes).map((code) => num(code));
-      const key = codes.length > 0 ? keyName(codes[codes.length - 1] as number) : '';
-      if (kind === 'ON_KEY_DOWN' && codes.length > 1) miss('Key presses with modifier keys (the last key alone triggers them)');
+      const trigger = ({ ON_CLICK: 'ON_CLICK', ON_HOVER: 'MOUSE_ENTER', MOUSE_ENTER: 'MOUSE_ENTER', ON_PRESS: 'ON_PRESS', MOUSE_DOWN: 'ON_PRESS', AFTER_TIMEOUT: 'AFTER_DELAY', DRAG: 'ON_DRAG', ON_KEY_DOWN: 'ON_KEY', MOUSE_LEAVE: 'MOUSE_LEAVE', MOUSE_OUT: 'MOUSE_LEAVE', MOUSE_UP: 'MOUSE_UP' } as Record<string, TriggerType>)[kind];
+      const key = keyOf(list(obj(event.keyTrigger).keyCodes).map((code) => num(code)));
       if (!trigger) {
         miss(`Prototype triggers of the kind “${kind}”`);
         continue;
@@ -1033,7 +1054,7 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
       if (kinds.size === 1 && kinds.has('ORDERED_LIST')) props.listType = 'NUMBERED';
       else if (kinds.size === 1 && kinds.has('UNORDERED_LIST')) props.listType = 'BULLETED';
       else if (kinds.has('ORDERED_LIST') || kinds.has('UNORDERED_LIST')) miss('Lists in only some paragraphs of a text, or of both kinds (shown as plain text)');
-      if (num(change.paragraphSpacing) > 0 || num(change.paragraphIndent) > 0) miss('Space between paragraphs and paragraph indents');
+      if (num(change.paragraphIndent) > 0) miss('Paragraph indents (the paragraphs start at the edge)');
       if (flipped) props.flipY = true;
       Object.assign(props, typeSettings(change), {
         characters,
@@ -1184,12 +1205,13 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
       if (override.textData) props.characters = str(obj(override.textData).characters);
       if (override.fontSize !== undefined) props.fontSize = num(override.fontSize, 12);
       if (override.fontName) Object.assign(props, fontStyle(override.fontName));
+      if (override.paragraphSpacing !== undefined) props.paragraphSpacing = Math.max(0, num(override.paragraphSpacing));
       if (override.overriddenSymbolID) props.componentId = idOf(guidKey(override.overriddenSymbolID));
       if (override.effects) props.effects = effects(override.effects);
       if (override.prototypeInteractions) props.reactions = reactionsOf(override.prototypeInteractions);
       // What Figma works out for itself again (geometry, measured text, versions) is not a change of the designer's.
       const derived = new Set(['guidPath', 'derivedTextData', 'fillGeometry', 'strokeGeometry', 'fontVersion', 'textUserLayoutVersion', 'textExplicitLayoutVersion', 'fontVariations', 'textBidiVersion', 'textTracking', 'autoRename', 'emojiImageSet', 'editInfo', 'overrideLevel']);
-      const converted = new Set(['fillPaints', 'strokePaints', 'visible', 'opacity', 'textData', 'fontSize', 'fontName', 'overriddenSymbolID', 'effects', 'prototypeInteractions', 'name', 'strokeWeight', 'borderStrokeWeightsIndependent', 'borderTopWeight', 'borderRightWeight', 'borderBottomWeight', 'borderLeftWeight', 'size', 'componentPropAssignments', 'stackPositioning']);
+      const converted = new Set(['fillPaints', 'strokePaints', 'visible', 'opacity', 'textData', 'fontSize', 'fontName', 'paragraphSpacing', 'overriddenSymbolID', 'effects', 'prototypeInteractions', 'name', 'strokeWeight', 'borderStrokeWeightsIndependent', 'borderTopWeight', 'borderRightWeight', 'borderBottomWeight', 'borderLeftWeight', 'size', 'componentPropAssignments', 'stackPositioning']);
       const NAMES: Record<string, string> = {};
       for (const key of Object.keys(override)) {
         if (derived.has(key) || converted.has(key)) continue;
@@ -1544,6 +1566,7 @@ export async function writeFig(doc: Document, images: Readonly<Record<string, { 
         textCase: node.textCase,
       });
       if (node.lineHeight !== null) change.lineHeight = { value: node.lineHeight, units: 'PIXELS' };
+      if (node.paragraphSpacing > 0) change.paragraphSpacing = node.paragraphSpacing;
       if (node.styleRanges.length > 0) miss('Parts of text in a style of their own');
       if (node.listType !== 'NONE') miss('Lists in text');
     }

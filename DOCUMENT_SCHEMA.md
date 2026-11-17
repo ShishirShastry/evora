@@ -1,6 +1,6 @@
 # Evora — Document Schema
 
-Current schema version: **24**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping), and version 24 a stroke weight for each side of a box, links in prototypes and Auto Layout rows aligned on the baseline of their text (all needed to open Figma files faithfully). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **25**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping), version 24 a stroke weight for each side of a box, links in prototypes and Auto Layout rows aligned on the baseline of their text (all needed to open Figma files faithfully), and version 25 space between the paragraphs of a text and the prototype triggers "mouse leave" and "mouse up". This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -300,6 +300,7 @@ interface TextNode extends LayerBase {
   italic: boolean;
   lineHeight: number | null; // pixels; null = automatic (1.2 × fontSize, rounded)
   letterSpacing: number;     // pixels added after each character
+  paragraphSpacing: number;  // version 25: pixels added after each paragraph (a line break typed in), not after a wrapped line; 0 in older files
   textAlign: 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED';   // JUSTIFIED: version 13
   verticalAlign: 'TOP' | 'MIDDLE' | 'BOTTOM';
   textAutoResize: 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'NONE';
@@ -537,7 +538,7 @@ interface Style {
   description: string;
   type: 'PAINT' | 'TEXT' | 'EFFECT' | 'GRID';
   paints: Paint[];            // PAINT: used for fills or for strokes
-  text: { fontFamily; fontSize; fontWeight; italic; lineHeight; letterSpacing; textDecoration; textCase };   // TEXT
+  text: { fontFamily; fontSize; fontWeight; italic; lineHeight; letterSpacing; textDecoration; textCase; paragraphSpacing? };   // TEXT (paragraphSpacing from version 25; a style without it sets 0)
   effects: Effect[];          // EFFECT
   grids: LayoutGrid[];        // GRID
 }
@@ -601,7 +602,7 @@ Since version 21 a `Style`, a `Variable` and a `VariableCollection` each have `r
 ```ts
 interface Reaction {
   id: string;
-  trigger: { type: 'ON_CLICK' | 'ON_DRAG' | 'MOUSE_ENTER' | 'ON_PRESS' | 'AFTER_DELAY' | 'ON_KEY'; delay: number /* ms */; key: string };
+  trigger: { type: 'ON_CLICK' | 'ON_DRAG' | 'MOUSE_ENTER' | 'ON_PRESS' | 'AFTER_DELAY' | 'ON_KEY' | 'MOUSE_LEAVE' | 'MOUSE_UP'; delay: number /* ms */; key: string };   // MOUSE_LEAVE, MOUSE_UP from version 25
   actions: Action[];           // run in order
 }
 
@@ -628,9 +629,9 @@ interface Transition {
 
 **What is stored and what is not.** The document holds the design of the prototype: interactions on layers, flows and the device on pages, how frames scroll and open as overlays. Nothing about a prototype being played is stored: the player (`src/core/prototype/player.ts`) works on a copy of the document, in which "Set variable" and "Change to" make their changes, and that copy is dropped when the prototype is closed or started again.
 
-**Triggers.** `MOUSE_ENTER` ("while hovering") and `ON_PRESS` ("while pressing") last only while the pointer is over the layer or held down on it: what they did is undone after, unless something else happened in between, which is then kept. `ON_KEY` names a key as the keyboard does (`Enter`, `ArrowRight`, `a`), compared without regard to case; a gamepad button is the key `Gamepad0`, `Gamepad1`… An event on a layer with no interaction for it goes to the layers it is in, innermost first.
+**Triggers.** `MOUSE_ENTER` ("while hovering") and `ON_PRESS` ("while pressing") last only while the pointer is over the layer or held down on it: what they did is undone after, unless something else happened in between, which is then kept. `MOUSE_LEAVE` (version 25) runs once when the pointer leaves the layer (moving onto a layer inside it is not leaving it) and `MOUSE_UP` once when the pointer is let go over it, before a click; what they do is kept. `ON_KEY` names a key as the keyboard does (`Enter`, `ArrowRight`, `a`), after the modifier keys held with it in the order Ctrl, Alt, Shift, Meta (`Ctrl+K`, `Shift+Enter`, `Ctrl+Alt+S`; files are normalised to that form when opened), compared without regard to the key's case but with its modifiers exactly (a trigger for `k` does not run on Ctrl+K); a gamepad button is the key `Gamepad0`, `Gamepad1`… An event on a layer with no interaction for it goes to the layers it is in, innermost first.
 
-**Actions.** `NAVIGATE` shows a frame as the screen and closes any overlays. `OPEN_OVERLAY` shows a frame over the screen, placed by that frame's `overlayPosition`, with its `overlayBackground` behind it; `SWAP_OVERLAY` replaces the top overlay; `CLOSE_OVERLAY` closes it. `BACK` closes the top overlay or, without one, returns to the screen before, with the transition that led here run the other way. `SCROLL_TO` scrolls the nearest scrolling frame round a layer until the layer is at its top-left. `CHANGE_TO` makes the nearest instance round the layer (or the layer itself) that shows a variant of the destination's set show the destination instead: this is how interactive components work, and the interactions on a component apply to every instance of it. `SET_VARIABLE` gives a variable the value of an expression, in every mode. `CONDITIONAL` runs `then` or `otherwise`. `INPUT` makes what is typed go into a string variable until Enter. `OPEN_LINK` (version 24) hands its address to whatever shows the prototype; the viewer opens only `http:`, `https:` and `mailto:` addresses, in a new tab with no access back to the application, and the prototype stays where it is.
+**Actions.** `NAVIGATE` shows a frame as the screen and closes any overlays. `OPEN_OVERLAY` shows a frame over the screen, placed by that frame's `overlayPosition`, with its `overlayBackground` behind it; `SWAP_OVERLAY` replaces the top overlay; `CLOSE_OVERLAY` closes it. `BACK` closes the top overlay or, without one, returns to the screen before, with the transition that led here run the other way. `SCROLL_TO` scrolls the nearest scrolling frame round a layer until the layer is at its top-left. `CHANGE_TO` makes the nearest instance round the layer (or the layer itself) that shows a variant of the destination's set show the destination instead: this is how interactive components work, and the interactions on a component apply to every instance of it. `SET_VARIABLE` gives a variable the value of an expression in the mode in effect where the interaction runs (the mode chosen on that layer or on what it is in, else the collection's first), and expressions there read that mode. `CONDITIONAL` runs `then` or `otherwise`. `INPUT` makes what is typed go into a string variable until Enter. `OPEN_LINK` (version 24) hands its address to whatever shows the prototype; the viewer opens only `http:`, `https:` and `mailto:` addresses, in a new tab with no access back to the application, and the prototype stays where it is.
 
 **Expressions** (`src/core/prototype/expression.ts`): numbers, strings in quotes, `true` / `false`, colours as `#RRGGBB`, variables by name in braces (`{count}`, or `{Collection/name}`), `+ - * / %`, comparisons, `and` / `or` / `not` (also `&& || !`), parentheses. `+` joins when either side is a string. An expression that cannot be worked out changes nothing.
 
@@ -712,7 +713,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 24;
+const CURRENT_SCHEMA_VERSION = 25;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -772,6 +773,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   22: addExportAndHandoff,
   // 23 -> 24: every layer gets strokeSides null. OPEN_LINK actions and BASELINE alignment are new; no older file has either.
   23: addStrokeSides,
+  // 24 -> 25: every text layer gets paragraphSpacing 0. MOUSE_LEAVE and MOUSE_UP triggers are new; no older file has them.
+  24: addParagraphSpacing,
 };
 ```
 
@@ -800,6 +803,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 21 | 22 | `reactions` and `scrollBehavior` on every layer; `overflow` and the three overlay settings on frames; `flows` and `prototypeDevice` on pages | `src/prototype.test.ts` ("opens a version 21 file, which has no prototype") |
 | 22 | 23 | `exportSettings`, `devStatus`, `annotations`, `devResources` and `codeConnect` on every layer; `exportSettings` on pages | `src/export.test.ts` ("opens a version 22 file, which has no export settings") |
 | 23 | 24 | `strokeSides` on every layer; the `OPEN_LINK` action; `BASELINE` among the alignments across a layout | `src/export.test.ts` ("opens a version 23 file, which has none") |
+| 24 | 25 | `paragraphSpacing` on text layers (optional in text styles); the `MOUSE_LEAVE` and `MOUSE_UP` triggers; keys with modifiers | `src/gaps-proto.test.ts` ("opens a version 24 file, whose text has no space between paragraphs") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.

@@ -53,6 +53,7 @@ export const OVERRIDABLE: readonly string[] = [
   'textDecoration',
   'textCase',
   'listType',
+  'paragraphSpacing',
   'styleRanges',
   // A component used inside the component: which one it is, what was changed in it, and what its properties are set to.
   'componentId',

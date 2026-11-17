@@ -193,7 +193,8 @@ export function clearTextLayoutCache(): void {
  * spreads the words of every wrapped line across the width, leaving the last
  * line of each paragraph as it is. In a list every paragraph is an item with
  * a bullet or a number in front of it, and its lines are set in to make room.
- * Results are cached per layer object, which is immutable.
+ * The layer's paragraph spacing is added after every paragraph but the last
+ * (after a line break, never after a line that wraps). Results are cached per layer object, which is immutable.
  */
 export function layoutText(node: TextNode, measurer: TextMeasurer): TextLayout {
   let perMeasurer = layoutCache.get(measurer);
@@ -284,7 +285,11 @@ export function layoutText(node: TextNode, measurer: TextMeasurer): TextLayout {
   });
 
   const width = Math.max(0, ...measured.map((line) => line.width)) + indent;
-  const height = measured.reduce((sum, line) => sum + line.height, 0);
+  // Space between paragraphs comes after the last line of each paragraph but the last.
+  const spacing = Math.max(0, node.paragraphSpacing ?? 0);
+  const lastParagraph = paragraphs.length - 1;
+  const spaceAfter = (row: { paragraph: number; wrapped: boolean }): number => (!row.wrapped && row.paragraph < lastParagraph ? spacing : 0);
+  const height = measured.reduce((sum, line) => sum + line.height + spaceAfter(line.row), 0);
   // Lines are placed in the box the layer will have: its own size, except for
   // the dimensions that are fitted to the text.
   const boxWidth = node.textAutoResize === 'WIDTH_AND_HEIGHT' ? width : node.width;
@@ -327,7 +332,7 @@ export function layoutText(node: TextNode, measurer: TextMeasurer): TextLayout {
       marker = { text: paragraph.marker.text, x: indent - markerGap - markerWidth, width: markerWidth, style: paragraph.marker.style };
     }
     const result: TextLine = { text: runs.map((run) => run.text).join(''), width: lineWidth, x: lineX, baseline, top, height: line.height, runs, marker };
-    top += line.height;
+    top += line.height + spaceAfter(line.row);
     return result;
   });
 

@@ -49,6 +49,29 @@ export function spacingInParent(doc: Document, id: NodeId): { left: number; top:
   return { left: round(inner.x - outer.x), top: round(inner.y - outer.y), right: round(outer.x + outer.width - inner.x - inner.width), bottom: round(outer.y + outer.height - inner.y - inner.height) };
 }
 
+/**
+ * How far a layer is from each edge of the frame it is in: the nearest
+ * frame round it, past any groups and boolean groups between. Null for a
+ * layer that is in no frame (a top-level layer on the page).
+ */
+export function distanceToFrame(doc: Document, id: NodeId): { frameId: NodeId; frameName: string; left: number; top: number; right: number; bottom: number } | null {
+  const node = doc.nodes[id];
+  if (!isLayer(node)) return null;
+  let current = doc.nodes[node.parentId];
+  while (isLayer(current) && !isFrame(current)) current = doc.nodes[current.parentId];
+  if (!isFrame(current)) return null;
+  const inner = getWorldBounds(doc, id);
+  const outer = getWorldBounds(doc, current.id);
+  return {
+    frameId: current.id,
+    frameName: current.name,
+    left: round(inner.x - outer.x),
+    top: round(inner.y - outer.y),
+    right: round(outer.x + outer.width - inner.x - inner.width),
+    bottom: round(outer.y + outer.height - inner.y - inner.height),
+  };
+}
+
 /** The distances between two boxes on the page, as a measurement shows them: the gap each way, or how far one edge is inside the other. */
 export function distancesBetween(a: Rect, b: Rect): { horizontal: number | null; vertical: number | null } {
   const horizontal = b.x >= a.x + a.width ? b.x - a.x - a.width : a.x >= b.x + b.width ? a.x - b.x - b.width : null;

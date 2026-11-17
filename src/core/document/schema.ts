@@ -1,5 +1,5 @@
 /**
- * Evora document schema, version 24 (adds a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * Evora document schema, version 25 (adds space between the paragraphs of text, and prototype triggers for the pointer leaving a layer and being let go over it; version 24: a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 24;
+export const CURRENT_SCHEMA_VERSION = 25;
 export const FILE_FORMAT = 'evora';
 export const FILE_EXTENSION = '.evora';
 /**
@@ -470,16 +470,85 @@ export interface CodeConnect {
 
 // ---------------------------------------------------------------- prototyping
 
-/** What sets an interaction off. */
-export type TriggerType = 'ON_CLICK' | 'ON_DRAG' | 'MOUSE_ENTER' | 'ON_PRESS' | 'AFTER_DELAY' | 'ON_KEY';
-export const TRIGGER_TYPES: readonly TriggerType[] = ['ON_CLICK', 'ON_DRAG', 'MOUSE_ENTER', 'ON_PRESS', 'AFTER_DELAY', 'ON_KEY'];
+/**
+ * What sets an interaction off. MOUSE_ENTER and ON_PRESS last while the
+ * pointer hovers or presses and are undone after; MOUSE_LEAVE (the pointer
+ * leaves the layer) and MOUSE_UP (the pointer is let go over it) happen once
+ * and are kept.
+ */
+export type TriggerType = 'ON_CLICK' | 'ON_DRAG' | 'MOUSE_ENTER' | 'ON_PRESS' | 'AFTER_DELAY' | 'ON_KEY' | 'MOUSE_LEAVE' | 'MOUSE_UP';
+export const TRIGGER_TYPES: readonly TriggerType[] = ['ON_CLICK', 'ON_DRAG', 'MOUSE_ENTER', 'ON_PRESS', 'AFTER_DELAY', 'ON_KEY', 'MOUSE_LEAVE', 'MOUSE_UP'];
 
 export interface Trigger {
   type: TriggerType;
   /** AFTER_DELAY: how long after the screen is shown, in milliseconds. */
   delay: number;
-  /** ON_KEY: the key, as the keyboard names it ("Enter", "ArrowRight", "a"). */
+  /**
+   * ON_KEY: the key, as the keyboard names it ("Enter", "ArrowRight", "a"),
+   * after the modifier keys held with it, if any, in the order Ctrl, Alt,
+   * Shift, Meta ("Ctrl+K", "Shift+Enter", "Ctrl+Alt+S"): see `normalizeKeyCombo`.
+   */
   key: string;
+}
+
+/** A key with the modifier keys held while it is pressed. */
+export interface KeyCombo {
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+  /** The key itself, as the keyboard names it. */
+  key: string;
+}
+
+const MODIFIER_NAMES: Record<string, 'ctrl' | 'alt' | 'shift' | 'meta'> = { ctrl: 'ctrl', control: 'ctrl', alt: 'alt', option: 'alt', shift: 'shift', meta: 'meta', cmd: 'meta', command: 'meta', win: 'meta', super: 'meta' };
+
+/**
+ * Reads a key as a trigger writes it: modifiers joined to the key by "+"
+ * ("Ctrl+K", "shift+enter", "Ctrl++" for the plus key). Text whose parts
+ * before the last "+" are not all modifier names is a key on its own.
+ */
+export function parseKeyCombo(text: string): KeyCombo {
+  const combo: KeyCombo = { ctrl: false, alt: false, shift: false, meta: false, key: text };
+  if (text.length < 2) return combo;
+  const plusKey = text.endsWith('++');
+  const cut = plusKey ? text.length - 2 : text.lastIndexOf('+');
+  if (cut <= 0) return combo;
+  const names = text.slice(0, cut).split('+').map((name) => name.trim().toLowerCase());
+  if (!names.every((name) => MODIFIER_NAMES[name] !== undefined)) return combo;
+  for (const name of names) combo[MODIFIER_NAMES[name] as 'ctrl' | 'alt' | 'shift' | 'meta'] = true;
+  combo.key = plusKey ? '+' : text.slice(cut + 1);
+  return combo;
+}
+
+/** Writes a key and its modifiers the one way triggers keep them: Ctrl, Alt, Shift, Meta, then the key (a letter in capitals after a modifier). */
+export function formatKeyCombo(combo: KeyCombo): string {
+  const names = [combo.ctrl && 'Ctrl', combo.alt && 'Alt', combo.shift && 'Shift', combo.meta && 'Meta'].filter(Boolean) as string[];
+  if (names.length === 0) return combo.key;
+  const key = /^[a-z]$/i.test(combo.key) ? combo.key.toUpperCase() : combo.key;
+  return [...names, key].join('+');
+}
+
+/** A key as a trigger keeps it, however it was written: "control+shift+k" is "Ctrl+Shift+K". */
+export function normalizeKeyCombo(text: string): string {
+  return formatKeyCombo(parseKeyCombo(text));
+}
+
+/**
+ * The key a keyboard event names, with the modifiers held. Shift counts only
+ * for keys it does not already change: letters and named keys such as Enter
+ * ("!" is Shift and 1 on many keyboards, and is the key "!").
+ */
+export function keyComboOf(event: { key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }): string {
+  const shiftCounts = event.key.length > 1 || /^[a-z]$/i.test(event.key);
+  return formatKeyCombo({ ctrl: event.ctrlKey === true, alt: event.altKey === true, shift: event.shiftKey === true && shiftCounts, meta: event.metaKey === true, key: event.key });
+}
+
+/** Whether a key pressed is the key of a trigger: the same modifiers exactly, and the same key whatever its case. */
+export function keyCombosMatch(trigger: string, pressed: string): boolean {
+  const a = parseKeyCombo(trigger);
+  const b = parseKeyCombo(pressed);
+  return a.ctrl === b.ctrl && a.alt === b.alt && a.shift === b.shift && a.meta === b.meta && a.key.toLowerCase() === b.key.toLowerCase();
 }
 
 export type TransitionType = 'INSTANT' | 'DISSOLVE' | 'SMART_ANIMATE' | 'MOVE_IN' | 'MOVE_OUT' | 'PUSH' | 'SLIDE_IN' | 'SLIDE_OUT';
@@ -572,6 +641,8 @@ export interface TextStyleValues {
   letterSpacing: number;
   textDecoration: TextDecoration;
   textCase: TextCase;
+  /** Space between paragraphs, in pixels. Optional: a style without it (made before version 25) sets it to 0. */
+  paragraphSpacing?: number;
 }
 
 /**
@@ -867,6 +938,8 @@ export interface TextNode extends LayerBase {
   flipY: boolean;
   /** A list makes every paragraph an item, with a bullet or its number in front and its lines set in. */
   listType: TextListType;
+  /** Extra space between paragraphs (after a line break, not after a line that wraps), in pixels. */
+  paragraphSpacing: number;
   /**
    * The parts of the text that differ from the layer's own style: in order,
    * not overlapping, not empty, inside the text, each changing something,

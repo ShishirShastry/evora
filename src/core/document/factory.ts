@@ -272,6 +272,7 @@ export function createLayer(
         flipX: false,
         flipY: false,
         listType: 'NONE',
+        paragraphSpacing: 0,
         styleRanges: [],
         textCase: 'ORIGINAL',
       };

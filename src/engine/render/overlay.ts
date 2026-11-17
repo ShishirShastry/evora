@@ -8,8 +8,9 @@ import {
   frameGuides,
   getChildIds,
   getTangent,
-  handlesOf,
+  handleVertex,
   isVector,
+  shownHandles,
   layoutGridGeometry,
   getWorldCorners,
   getWorldMatrix,
@@ -554,7 +555,8 @@ const HANDLE_RADIUS = 3;
 
 /**
  * Draws a vector's points as squares (filled when selected), the handles of
- * the selected points as round knobs on a line, and the segment the pen
+ * the selected points and of their neighbours on the segments that leave
+ * them as round knobs on a line, and the segment the pen
  * would add next. All in screen pixels.
  */
 function drawVectorEditing(ctx: Ctx, doc: Document, viewport: Viewport, edit: VectorOverlay): void {
@@ -585,25 +587,23 @@ function drawVectorEditing(ctx: Ctx, doc: Document, viewport: Viewport, edit: Ve
     const matrix = getWorldMatrix(doc, node.id);
     const at = (p: Point): Point => worldToScreen(viewport, applyToPoint(matrix, p));
     const selected = new Set(edit.selected);
-    for (const vertex of edit.selected) {
-      const point = node.network.vertices[vertex];
+    // The selected points' handles, and those at the other ends of their segments, so a curve can be shaped from either side.
+    for (const ref of shownHandles(node.network, edit.selected)) {
+      const point = node.network.vertices[handleVertex(node.network, ref)];
       if (!point) continue;
       const origin = at(point);
-      for (const ref of handlesOf(node.network, vertex)) {
-        const tangent = getTangent(node.network, ref);
-        if (tangent.x === 0 && tangent.y === 0) continue;
-        const tip = at({ x: point.x + tangent.x, y: point.y + tangent.y });
-        ctx.beginPath();
-        ctx.moveTo(origin.x, origin.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.strokeStyle = ACCENT;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(tip.x, tip.y, HANDLE_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.stroke();
-      }
+      const tangent = getTangent(node.network, ref);
+      const tip = at({ x: point.x + tangent.x, y: point.y + tangent.y });
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.strokeStyle = ACCENT;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, HANDLE_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.stroke();
     }
     node.network.vertices.forEach((point, index) => {
       const emphasised = index === edit.hoverVertex || index === edit.penVertex;

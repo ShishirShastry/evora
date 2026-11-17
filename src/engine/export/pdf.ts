@@ -1,4 +1,5 @@
 import { imagePlacement, isGradient, multiply, type BlendMode, type GradientPaint, type ImagePaint, type Matrix, type Paint, type RGB, type TextMeasurer } from '../../core';
+import { angularWedges, diamondQuadrants, drawnAsShapes, pathArea, type Area, type GradientSpace } from './gradients';
 import type { Clip, Segment, VectorFill, VectorGroup, VectorItem, VectorStroke, VectorText } from './vector';
 
 /**
@@ -9,6 +10,14 @@ import type { Clip, Segment, VectorFill, VectorGroup, VectorItem, VectorStroke, 
  * images as images, text as text in the nearest of the fonts every PDF
  * reader has, or as a picture of the text) or one picture of the whole
  * thing. One unit of the design is one point of the page.
+ *
+ * Gradient stops that are partly transparent are written with a soft mask
+ * that holds the same gradient in grey, one shade for each stop's opacity.
+ * Angular gradients are fans of thin wedges and diamond gradients four
+ * linear shadings, as in SVG (see `gradients.ts`). Shadows and blurs, which
+ * PDF cannot draw, are pictures made by the editor's renderer and passed in
+ * (`effectPictures`): a drop shadow under the layer's vectors, an inner
+ * shadow over its fills, and a blurred layer in place of the layer.
  */
 
 /** A picture for a PDF: a JPEG as it is, or pixels (red, green, blue, alpha for each). */
@@ -25,11 +34,32 @@ export interface PdfPage {
   picture?: PdfImage;
 }
 
+/** A picture placed in a layer's own space. */
+export interface PlacedPicture {
+  image: PdfImage;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Pictures of a layer's effects, made by the renderer, which a vector PDF draws with the layer's vectors. */
+export interface EffectPictures {
+  /** The layer's drop shadows alone, drawn under it. */
+  under?: PlacedPicture;
+  /** The layer's inner shadows alone, drawn over its fills and under what is in it and its strokes. */
+  inner?: PlacedPicture;
+  /** The whole layer as it looks, drawn instead of its vectors: for a layer blur, which blurs everything in it. */
+  whole?: PlacedPicture;
+}
+
 export interface PdfOptions {
   /** Images used by image fills, by hash. */
   images?: Readonly<Record<string, PdfImage>>;
   /** Pictures of text layers, by layer ID, with where each goes in the layer's own space. A text layer with one is drawn as that picture. */
-  textPictures?: Readonly<Record<string, { image: PdfImage; x: number; y: number; width: number; height: number }>>;
+  textPictures?: Readonly<Record<string, PlacedPicture>>;
+  /** Pictures of layers' shadows and blurs, by layer ID. A layer with effects and none here has them left out, which is said. */
+  effectPictures?: Readonly<Record<string, EffectPictures>>;
   /** Measures text, to place each character where the design has it. Needed for text written as text. */
   measurer?: TextMeasurer;
   /** Compresses a stream (zlib format). Without it streams are written as they are. */
@@ -206,6 +236,9 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
   const fonts = new Map<string, { name: string; id: number }>();
   const patterns: { name: string; id: number }[] = [];
   const xobjects: { name: string; id: number }[] = [];
+  const shadings: { name: string; id: number }[] = [];
+  /** Graphics states that set a soft mask, written as they are. */
+  const maskStates: { name: string; id: number }[] = [];
   const imageNames = new Map<PdfImage, string>();
 
   const state = (fill: number, stroke: number, blend: BlendMode): string => {
@@ -256,16 +289,16 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
     return name;
   };
 
-  /** A function from 0..1 to the colours of a gradient's stops. */
-  const stopsFunction = (paint: GradientPaint): number => {
+  /** A function from 0..1 to the colours of a gradient's stops, or, with `alpha`, to their opacities as shades of grey. */
+  const stopsFunction = (paint: GradientPaint, alpha = false): number => {
     const stops = [...paint.stops].sort((a, b) => a.position - b.position);
-    if (stops.some((stop) => stop.opacity < 1)) warnings.add('A gradient stop that is partly transparent is written solid: a PDF shading has no transparency of its own.');
+    const value = (stop: GradientPaint['stops'][number]): string => (alpha ? num(stop.opacity) : rgb(stop.color));
     const pieces: string[] = [];
     const bounds: number[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
       const a = stops[i] as GradientPaint['stops'][number];
       const b = stops[i + 1] as GradientPaint['stops'][number];
-      pieces.push(`<< /FunctionType 2 /Domain [0 1] /C0 [${rgb(a.color)}] /C1 [${rgb(b.color)}] /N 1 >>`);
+      pieces.push(`<< /FunctionType 2 /Domain [0 1] /C0 [${value(a)}] /C1 [${value(b)}] /N 1 >>`);
       if (i > 0) bounds.push(Math.min(1, Math.max(0, a.position)));
     }
     if (pieces.length === 1) return file.add(pieces[0] as string);
@@ -273,24 +306,50 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
     return file.add(`<< /FunctionType 3 /Domain [0 1] /Functions [${pieces.join(' ')}] /Bounds [${bounds.map(num).join(' ')}] /Encode [${pieces.map(() => '0 1').join(' ')}] >>`);
   };
 
-  /** A gradient as a pattern that can be painted with. `ctm` is where the layer's space is on the page or form being drawn. */
-  const gradient = (paint: GradientPaint, width: number, height: number, ctm: Matrix): string => {
+  /** A graphics state whose soft mask is what `content` draws, in the space in effect where the state is set: white shows, black hides. */
+  const softMask = (content: string): string => {
+    const group = file.add({ dictionary: ` /Type /XObject /Subtype /Form /BBox [-100000 -100000 100000 100000] /Group << /S /Transparency /CS /DeviceRGB >> /Resources ${resourcesId} 0 R`, bytes: latin1(content), compress: true });
+    const name = `GM${maskStates.length + 1}`;
+    maskStates.push({ name, id: file.add(`<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G ${group} 0 R >> >>`) });
+    return name;
+  };
+
+  /**
+   * Sets a gradient to fill or stroke with: a shading of the given kind and
+   * coordinates in the gradient's own space, which `placement` puts in the
+   * layer's space. `ctm` is where the layer's space is on the page or form
+   * being drawn. Stops that are partly transparent add a soft mask of the
+   * same shading in grey, which stays in force to the end of the `q` it is in.
+   */
+  const shade = (paint: GradientPaint, kind: 2 | 3, coords: readonly number[], extend: string, placement: Matrix, ctm: Matrix, stroking: boolean): string => {
+    const shading = file.add(`<< /ShadingType ${kind} /ColorSpace /DeviceRGB /Coords [${coords.map(num).join(' ')}] /Function ${stopsFunction(paint)} 0 R /Extend [${extend}] >>`);
+    const name = `P${patterns.length + 1}`;
+    patterns.push({ name, id: file.add(`<< /Type /Pattern /PatternType 2 /Shading ${shading} 0 R /Matrix [${multiply(ctm, placement).map(num).join(' ')}] >>`) });
+    let out = '';
+    if (paint.stops.some((stop) => stop.opacity < 1)) {
+      const grey = file.add(`<< /ShadingType ${kind} /ColorSpace /DeviceGray /Coords [${coords.map(num).join(' ')}] /Function ${stopsFunction(paint, true)} 0 R /Extend [${extend}] >>`);
+      const shadingName = `Sh${shadings.length + 1}`;
+      shadings.push({ name: shadingName, id: grey });
+      out += `/${softMask(`q ${placement.map(num).join(' ')} cm /${shadingName} sh Q
+`)} gs
+`;
+    }
+    return `${out}/Pattern ${stroking ? 'CS' : 'cs'} /${name} ${stroking ? 'SCN' : 'scn'}
+`;
+  };
+
+  /** A linear, radial or (for lines and text) diamond gradient, set to fill or stroke with. In 'box' space a round gradient stretches with the layer's box; in 'pixels' it is a circle, and a diamond is drawn round, as the canvas draws them. */
+  const gradient = (paint: GradientPaint, width: number, height: number, ctm: Matrix, stroking: boolean, space: GradientSpace): string => {
     const fx = paint.from.x * width;
     const fy = paint.from.y * height;
-    const fn = stopsFunction(paint);
-    let shading: number;
-    let matrix = ctm;
-    if (paint.type === 'GRADIENT_LINEAR') {
-      shading = file.add(`<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [${num(fx)} ${num(fy)} ${num(paint.to.x * width)} ${num(paint.to.y * height)}] /Function ${fn} 0 R /Extend [true true] >>`);
-    } else {
-      if (paint.type !== 'GRADIENT_RADIAL') warnings.add(`${paint.type === 'GRADIENT_ANGULAR' ? 'An angular' : 'A diamond'} gradient was written as a radial one: PDF has no such gradient.`);
-      const radius = Math.max(1e-6, Math.hypot(paint.to.x - paint.from.x, paint.to.y - paint.from.y));
-      shading = file.add(`<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [0 0 0 0 0 1] /Function ${fn} 0 R /Extend [false true] >>`);
-      matrix = multiply(ctm, [width * radius, 0, 0, height * radius, fx, fy]);
+    const identity: Matrix = [1, 0, 0, 1, 0, 0];
+    if (paint.type === 'GRADIENT_LINEAR') return shade(paint, 2, [fx, fy, paint.to.x * width, paint.to.y * height], 'true true', identity, ctm, stroking);
+    if (space === 'pixels' || width <= 0 || height <= 0) {
+      const r = Math.max(1e-3, Math.hypot(paint.to.x * width - fx, paint.to.y * height - fy));
+      return shade(paint, 3, [fx, fy, 0, fx, fy, r], 'false true', identity, ctm, stroking);
     }
-    const name = `P${patterns.length + 1}`;
-    patterns.push({ name, id: file.add(`<< /Type /Pattern /PatternType 2 /Shading ${shading} 0 R /Matrix [${matrix.map(num).join(' ')}] >>`) });
-    return name;
+    const radius = Math.max(1e-6, Math.hypot(paint.to.x - paint.from.x, paint.to.y - paint.from.y));
+    return shade(paint, 3, [0, 0, 0, 0, 0, 1], 'false true', [width * radius, 0, 0, height * radius, fx, fy], ctm, stroking);
   };
 
   const trace = (segments: readonly Segment[]): string => {
@@ -304,11 +363,37 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
   };
   const clipOps = (clip: Clip): string => `${trace(clip.path)}${clip.rule === 'evenodd' ? 'W*' : 'W'} n\n`;
 
-  /** Sets the colour to fill or stroke with. Null for a paint that cannot colour a line or text. */
-  const colour = (paint: Paint, width: number, height: number, ctm: Matrix, stroking: boolean): string | null => {
+  /** Sets the colour to fill or stroke with. Null for a paint that cannot be given as a colour: an image, or a gradient drawn as shapes. */
+  const colour = (paint: Paint, width: number, height: number, ctm: Matrix, stroking: boolean, space: GradientSpace = 'box'): string | null => {
     if (paint.type === 'SOLID') return `${rgb(paint.color)} ${stroking ? 'RG' : 'rg'}\n`;
-    if (!isGradient(paint)) return null;
-    return `/Pattern ${stroking ? 'CS' : 'cs'} /${gradient(paint, width, height, ctm)} ${stroking ? 'SCN' : 'scn'}\n`;
+    if (!isGradient(paint) || drawnAsShapes(paint, space)) return null;
+    return gradient(paint, width, height, ctm, stroking, space);
+  };
+
+  /**
+   * An angular or diamond gradient drawn over an area of the layer's space,
+   * as wedges or quarters; what shows of it is up to the clip or soft mask
+   * in force. `opacity` is the paint's, which each wedge takes on with its own.
+   */
+  const gradientShapes = (paint: GradientPaint, width: number, height: number, space: GradientSpace, area: Area, ctm: Matrix, opacity: number): string => {
+    let out = '';
+    if (paint.type === 'GRADIENT_DIAMOND') {
+      if (opacity < 1) out += `/${state(opacity, 1, 'NORMAL')} gs\n`;
+      for (const quadrant of diamondQuadrants(paint, width, height, area) ?? []) {
+        out += `q\n${shade(paint, 2, [0, 0, quadrant.to.x, quadrant.to.y], 'true true', quadrant.matrix, ctm, false)}${trace(quadrant.path)}f\nQ\n`;
+      }
+      return out;
+    }
+    let alpha = 1;
+    for (const wedge of angularWedges(paint, width, height, space, area)) {
+      const wanted = wedge.opacity * opacity;
+      if (wanted !== alpha) {
+        out += `/${state(wanted, 1, 'NORMAL')} gs\n`;
+        alpha = wanted;
+      }
+      out += `${rgb(wedge.color)} rg\n${trace(wedge.path)}f\n`;
+    }
+    return out;
   };
 
   /** Draws a picture into a box of the current space, the right way up. */
@@ -348,18 +433,31 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
 
   const fill = (item: VectorFill, ctm: Matrix): string => {
     if (item.paint.type === 'IMAGE') return imageFill(item, item.paint);
+    if (isGradient(item.paint) && drawnAsShapes(item.paint, 'box')) {
+      const area = pathArea(item.path);
+      if (!area) return '';
+      return `q\n${clipOps({ path: item.path, rule: item.rule })}${gradientShapes(item.paint, item.width, item.height, 'box', area, ctm, item.paint.opacity)}Q\n`;
+    }
     const set = colour(item.paint, item.width, item.height, ctm, false);
     if (set === null || item.path.length === 0) return '';
     return `q\n${item.paint.opacity < 1 ? `/${state(item.paint.opacity, 1, 'NORMAL')} gs\n` : ''}${set}${trace(item.path)}${item.rule === 'evenodd' ? 'f*' : 'f'}\nQ\n`;
   };
 
   const stroke = (item: VectorStroke, ctm: Matrix): string => {
-    const set = colour(item.paint, item.width, item.height, ctm, true);
-    if (set === null || item.path.length === 0) return '';
+    if (item.path.length === 0) return '';
+    const line = `${num(item.lineWidth)} w ${item.cap === 'ROUND' ? 1 : item.cap === 'SQUARE' ? 2 : 0} J ${item.join === 'ROUND' ? 1 : item.join === 'BEVEL' ? 2 : 0} j [${item.dash.map(num).join(' ')}] 0 d\n`;
+    if (isGradient(item.paint) && drawnAsShapes(item.paint, 'pixels')) {
+      // The wedges, shown through a soft mask that is the line drawn in white.
+      const area = pathArea(item.path, item.lineWidth + 2) as Area;
+      const mask = softMask(`1 1 1 RG\n${line}${trace(item.path)}S\n`);
+      return `q\n${item.clip ? clipOps(item.clip) : ''}/${mask} gs\n${gradientShapes(item.paint, item.width, item.height, 'pixels', area, ctm, item.paint.opacity)}Q\n`;
+    }
+    const set = colour(item.paint, item.width, item.height, ctm, true, 'pixels');
+    if (set === null) return '';
     let out = 'q\n';
     if (item.clip) out += clipOps(item.clip);
     if (item.paint.opacity < 1) out += `/${state(1, item.paint.opacity, 'NORMAL')} gs\n`;
-    out += `${set}${num(item.lineWidth)} w ${item.cap === 'ROUND' ? 1 : item.cap === 'SQUARE' ? 2 : 0} J ${item.join === 'ROUND' ? 1 : item.join === 'BEVEL' ? 2 : 0} j [${item.dash.map(num).join(' ')}] 0 d\n`;
+    out += `${set}${line}`;
     return `${out}${trace(item.path)}S\nQ\n`;
   };
 
@@ -374,32 +472,51 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
     let out = 'q\n';
     if (node.flipX || node.flipY) out += `${node.flipX ? -1 : 1} 0 0 ${node.flipY ? -1 : 1} ${num(node.flipX ? node.width : 0)} ${num(node.flipY ? node.height : 0)} cm\n`;
     const local = node.flipX || node.flipY ? multiply(ctm, [node.flipX ? -1 : 1, 0, 0, node.flipY ? -1 : 1, node.flipX ? node.width : 0, node.flipY ? node.height : 0]) : ctm;
-    if (paint && paint.opacity < 1) out += `/${state(paint.opacity, 1, 'NORMAL')} gs\n`;
-    const base = paint ? colour(paint, node.width, node.height, local, false) : null;
-    for (const line of item.lines) {
-      for (const run of line.marker ? [line.marker, ...line.runs] : line.runs) {
-        if (run.text === '') continue;
-        const style = run.style;
-        const set = style.color ? `${rgb(style.color)} rg\n` : base;
-        if (set === null) continue;
-        out += set;
-        const name = font(standardFont(style.fontFamily, style.fontWeight, style.italic));
-        out += `BT /${name} ${num(style.fontSize)} Tf\n`;
-        // Each character goes where the design's own font puts it, so lines keep their length in the stand-in font.
-        let before = '';
-        for (const char of run.text) {
-          const code = winAnsiCode(char);
-          const x = run.x + (measurer ? measurer.width(before, style) : (run.width * [...before].length) / Math.max(1, [...run.text].length));
-          before += char;
-          if (code === null || char === ' ') continue;
-          const escaped = code === 40 || code === 41 || code === 92 ? `\\${String.fromCharCode(code)}` : String.fromCharCode(code);
-          out += `1 0 0 -1 ${num(x)} ${num(line.baseline)} Tm (${escaped}) Tj\n`;
+    /** The runs that `pick` gives a colour, each in its own `q`, so that whatever the colour brings with it ends with the run. */
+    const runs = (pick: (own: RGB | null) => string | null): string => {
+      let ops = '';
+      for (const line of item.lines) {
+        for (const run of line.marker ? [line.marker, ...line.runs] : line.runs) {
+          if (run.text === '') continue;
+          const style = run.style;
+          const set = pick(style.color);
+          if (set === null) continue;
+          ops += `q\n${set}`;
+          const name = font(standardFont(style.fontFamily, style.fontWeight, style.italic));
+          ops += `BT /${name} ${num(style.fontSize)} Tf\n`;
+          // Each character goes where the design's own font puts it, so lines keep their length in the stand-in font.
+          let before = '';
+          for (const char of run.text) {
+            const code = winAnsiCode(char);
+            const x = run.x + (measurer ? measurer.width(before, style) : (run.width * [...before].length) / Math.max(1, [...run.text].length));
+            before += char;
+            if (code === null || char === ' ') continue;
+            const escaped = code === 40 || code === 41 || code === 92 ? `\\${String.fromCharCode(code)}` : String.fromCharCode(code);
+            ops += `1 0 0 -1 ${num(x)} ${num(line.baseline)} Tm (${escaped}) Tj\n`;
+          }
+          ops += 'ET\n';
+          const offset = style.textDecoration === 'UNDERLINE' ? style.fontSize * 0.12 : style.textDecoration === 'STRIKETHROUGH' ? -style.fontSize * 0.3 : null;
+          if (offset !== null) ops += `${num(run.x)} ${num(line.baseline + offset)} ${num(run.width)} ${num(Math.max(1, style.fontSize / 16))} re f\n`;
+          ops += 'Q\n';
         }
-        out += 'ET\n';
-        const offset = style.textDecoration === 'UNDERLINE' ? style.fontSize * 0.12 : style.textDecoration === 'STRIKETHROUGH' ? -style.fontSize * 0.3 : null;
-        if (offset !== null) out += `${num(run.x)} ${num(line.baseline + offset)} ${num(run.width)} ${num(Math.max(1, style.fontSize / 16))} re f\n`;
       }
+      return ops;
+    };
+    const own = (color: RGB | null): string | null => (color ? `${rgb(color)} rg\n` : null);
+    if (paint && isGradient(paint) && drawnAsShapes(paint, 'pixels')) {
+      // The wedges, shown through a soft mask that is the glyphs in white; the parts with a colour of their own after them.
+      const glyphs = runs((color) => (color ? null : '1 1 1 rg\n'));
+      if (glyphs !== '') {
+        const tallest = item.lines.reduce((most, line) => line.runs.reduce((size, run) => Math.max(size, run.style.fontSize), most), 0);
+        const pad = tallest + 2;
+        const area: Area = { x: -pad, y: -pad, width: node.width + pad * 2, height: node.height + pad * 2 };
+        out += `q\n/${softMask(glyphs)} gs\n${gradientShapes(paint, node.width, node.height, 'pixels', area, local, paint.opacity)}Q\n`;
+      }
+      return `${out}${runs(own)}Q\n`;
     }
+    if (paint && paint.opacity < 1) out += `/${state(paint.opacity, 1, 'NORMAL')} gs\n`;
+    const base = paint ? colour(paint, node.width, node.height, local, false, 'pixels') : null;
+    out += runs((color) => own(color) ?? base);
     return `${out}Q\n`;
   };
 
@@ -414,13 +531,17 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
   };
 
   const group = (item: VectorGroup, ctm: Matrix): string => {
-    if (item.effects.some((effect) => effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW' || effect.type === 'LAYER_BLUR' || effect.type === 'BACKGROUND_BLUR')) {
+    const pictures = item.layerId !== null ? options.effectPictures?.[item.layerId] : undefined;
+    if (!pictures && item.effects.some((effect) => effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW' || effect.type === 'LAYER_BLUR')) {
       warnings.add('Shadows and blurs are not written to a vector PDF. Choose “As a picture” for the PDF’s content to keep them.');
+    }
+    if (item.effects.some((effect) => effect.type === 'BACKGROUND_BLUR')) {
+      warnings.add('A background blur is not written to a vector PDF: it blurs what is behind the layer, which a PDF cannot do. Choose “As a picture” for the PDF’s content to keep it.');
     }
     const whole = item.opacity < 1 || item.blend !== 'NORMAL';
     // One shape with one opaque paint can take the opacity itself; anything more is drawn apart and laid down as a whole.
     const only = item.items.length === 1 ? item.items[0] : undefined;
-    const single = !item.mask && only !== undefined && (only.kind === 'fill' || only.kind === 'stroke') && only.paint.type !== 'IMAGE' && only.paint.opacity === 1;
+    const single = !pictures && !item.mask && only !== undefined && (only.kind === 'fill' || only.kind === 'stroke') && only.paint.type !== 'IMAGE' && only.paint.type !== 'GRADIENT_ANGULAR' && only.paint.type !== 'GRADIENT_DIAMOND' && only.paint.opacity === 1;
     // Inside a form, shadings are placed from the form's own space, which starts where the form is drawn.
     const inner = whole && !single ? ([1, 0, 0, 1, 0, 0] as Matrix) : multiply(ctm, item.matrix);
     let body = '';
@@ -437,8 +558,18 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
       } else warnings.add('A mask that is not a single shape is not applied in a vector PDF.');
       if (item.mask.opacity < 1 || item.mask.items.some((entry) => entry.kind === 'fill' && entry.paint.type !== 'SOLID')) warnings.add('A mask is applied by its outline in a vector PDF: how transparent it is in places is not.');
     }
-    if (item.clip) body += clipOps(item.clip);
-    for (const child of item.items) body += write(child, inner);
+    const placed = (picture: PlacedPicture): string => draw(picture.image, picture.x, picture.y, picture.width, picture.height);
+    if (pictures?.whole) body += placed(pictures.whole);
+    else {
+      // A drop shadow is under everything the layer draws; an inner shadow is over its fills.
+      if (pictures?.under) body += placed(pictures.under);
+      if (item.clip) body += clipOps(item.clip);
+      item.items.forEach((child, index) => {
+        if (pictures?.inner && index === (item.fills ?? 0)) body += placed(pictures.inner);
+        body += write(child, inner);
+      });
+      if (pictures?.inner && item.items.length <= (item.fills ?? 0)) body += placed(pictures.inner);
+    }
     if (body === '') return '';
     const place = `${item.matrix.map(num).join(' ')} cm\n`;
     if (!whole) return `q\n${place}${body}Q\n`;
@@ -469,7 +600,7 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
       return `/${name} << /Type /ExtGState /ca ${fill} /CA ${stroke} /BM /${BLEND_NAMES[blend]} >>`;
     })
     .join(' ');
-  file.set(resourcesId, `<< /ProcSet [/PDF /Text /ImageB /ImageC] /ExtGState << ${stateEntries} >> /Font << ${entries([...fonts.values()])} >> /Pattern << ${entries(patterns)} >> /XObject << ${entries(xobjects)} >> >>`);
+  file.set(resourcesId, `<< /ProcSet [/PDF /Text /ImageB /ImageC] /ExtGState << ${[stateEntries, entries(maskStates)].filter((part) => part !== '').join(' ')} >> /Font << ${entries([...fonts.values()])} >> /Pattern << ${entries(patterns)} >> /Shading << ${entries(shadings)} >> /XObject << ${entries(xobjects)} >> >>`);
   file.set(pagesId, `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`);
   file.set(catalogId, `<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
   const infoId = file.add(`<< /Title ${pdfString(options.title ?? 'Untitled')} /Producer (Evora) /Creator (Evora) >>`);

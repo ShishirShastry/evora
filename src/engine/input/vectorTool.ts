@@ -21,6 +21,7 @@ import {
   rectFromPoints,
   setNetwork,
   setTangent,
+  shownHandles,
   smoothVertex,
   snapAngle,
   splitSegment,
@@ -243,19 +244,27 @@ export class VectorTool {
     return best;
   }
 
-  /** The handle under a page-space position, among those of the selected points. */
+  /**
+   * The handle under a page-space position, among those shown: the selected
+   * points' own, and those at the far ends of their segments. The nearest wins,
+   * and a selected point's own handle wins a tie.
+   */
   private handleAt(node: VectorNode, matrix: Matrix, world: Point, selected: readonly number[]): HandleRef | null {
-    const reach = this.tolerance(POINT_HIT_PX);
-    for (const vertex of selected) {
-      const at = node.network.vertices[vertex];
-      if (!at) continue;
-      for (const ref of handlesOf(node.network, vertex)) {
-        const tangent = getTangent(node.network, ref);
-        if (tangent.x === 0 && tangent.y === 0) continue;
-        if (distance(applyToPoint(matrix, add(at, tangent)), world) <= reach) return ref;
+    let best: HandleRef | null = null;
+    let bestDistance = this.tolerance(POINT_HIT_PX);
+    const own = new Set(selected);
+    const shown = shownHandles(node.network, selected);
+    // A selected point's own handles are tried first.
+    shown.sort((a, b) => Number(own.has(handleVertex(node.network, b))) - Number(own.has(handleVertex(node.network, a))));
+    for (const ref of shown) {
+      const at = node.network.vertices[handleVertex(node.network, ref)] as Point;
+      const d = distance(applyToPoint(matrix, add(at, getTangent(node.network, ref))), world);
+      if (d < bestDistance || (best === null && d <= bestDistance)) {
+        best = ref;
+        bestDistance = d;
       }
     }
-    return null;
+    return best;
   }
 
   private segmentAt(node: VectorNode, matrix: Matrix, world: Point): { segment: number; t: number } | null {

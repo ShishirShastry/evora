@@ -38,6 +38,12 @@ export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error';
 interface EditorSnapshot {
   selection: NodeId[];
   pageId: NodeId;
+  /**
+   * The points selected in the vector being edited, so that undo and redo
+   * bring them back. Undo records the points selected when it is used as the
+   * entry's `after`, and redo its `before`, so each returns to what was left.
+   */
+  vectorEdit?: VectorEdit | null;
 }
 
 export interface HistoryEntry {
@@ -104,7 +110,7 @@ export interface EditorState {
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
   /** Snapshot taken when a continuous interaction started; null when idle. */
-  gesture: { doc: Document; selection: NodeId[] } | null;
+  gesture: { doc: Document; selection: NodeId[]; vectorEdit?: VectorEdit | null } | null;
 
   // Persistence status, written by the autosaver.
   saveStatus: SaveStatus;
@@ -274,6 +280,16 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       };
     };
 
+    /**
+     * After an undo or redo, the points of the vector still being edited are
+     * the ones recorded with the step, when they are of that same vector.
+     */
+    const restorePoints = <V extends { selection: NodeId[]; vectorEdit: VectorEdit | null }>(doc: Document, view: V, recorded: VectorEdit | null | undefined): V => {
+      const current = view.vectorEdit;
+      if (!current || !recorded || recorded.id !== current.id) return view;
+      return { ...view, vectorEdit: keepVectorEdit(doc, view.selection, recorded) ?? current };
+    };
+
     const push = (state: EditorState, entry: HistoryEntry) => {
       const undoStack = [...state.undoStack, entry];
       if (undoStack.length > HISTORY_LIMIT) undoStack.splice(0, undoStack.length - HISTORY_LIMIT);
@@ -326,8 +342,8 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
           ...push(state, {
             label,
             patch,
-            before: { selection: state.selection, pageId: state.pageId },
-            after: { selection: view.selection, pageId: view.pageId },
+            before: { selection: state.selection, pageId: state.pageId, vectorEdit: state.vectorEdit },
+            after: { selection: view.selection, pageId: view.pageId, vectorEdit: view.vectorEdit },
           }),
         });
       },
@@ -335,7 +351,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       beginGesture() {
         const state = get();
         if (state.gesture) return;
-        set({ gesture: { doc: state.doc, selection: state.selection } });
+        set({ gesture: { doc: state.doc, selection: state.selection, vectorEdit: state.vectorEdit } });
       },
 
       updateGesture(fn, select) {
@@ -360,8 +376,8 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
           ...push(state, {
             label,
             patch,
-            before: { selection: state.gesture.selection, pageId: state.pageId },
-            after: { selection: state.selection, pageId: state.pageId },
+            before: { selection: state.gesture.selection, pageId: state.pageId, vectorEdit: state.gesture.vectorEdit ?? null },
+            after: { selection: state.selection, pageId: state.pageId, vectorEdit: state.vectorEdit },
           }),
         });
       },
@@ -384,13 +400,15 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const entry = state.undoStack[state.undoStack.length - 1];
         if (!entry) return;
         const next = applyPatch(state.doc, entry.patch, 'backward');
+        // Redo returns to the points selected now.
+        const kept: HistoryEntry = { ...entry, after: { ...entry.after, vectorEdit: state.vectorEdit } };
         set({
           doc: next,
           undoStack: state.undoStack.slice(0, -1),
-          redoStack: [...state.redoStack, entry],
+          redoStack: [...state.redoStack, kept],
           renamingId: null,
           editingTextId: null,
-          ...withPage(state, next, entry.before.pageId, entry.before.selection),
+          ...restorePoints(next, withPage(state, next, entry.before.pageId, entry.before.selection), entry.before.vectorEdit),
         });
       },
 
@@ -400,13 +418,15 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
         const entry = state.redoStack[state.redoStack.length - 1];
         if (!entry) return;
         const next = applyPatch(state.doc, entry.patch, 'forward');
+        // A later undo returns to the points selected now.
+        const kept: HistoryEntry = { ...entry, before: { ...entry.before, vectorEdit: state.vectorEdit } };
         set({
           doc: next,
           redoStack: state.redoStack.slice(0, -1),
-          undoStack: [...state.undoStack, entry],
+          undoStack: [...state.undoStack, kept],
           renamingId: null,
           editingTextId: null,
-          ...withPage(state, next, entry.after.pageId, entry.after.selection),
+          ...restorePoints(next, withPage(state, next, entry.after.pageId, entry.after.selection), entry.after.vectorEdit),
         });
       },
 

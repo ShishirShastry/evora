@@ -5,6 +5,7 @@ import {
   getWorldBounds,
   getWorldMatrix,
   getWorldRotation,
+  hasArc,
   hasVisiblePaint,
   isLayer,
   isPage,
@@ -15,6 +16,7 @@ import {
   type BlendMode,
   type BlurEffect,
   type Document,
+  type GradientPaint,
   type LayerNode,
   type NodeId,
   type NodeMap,
@@ -30,7 +32,22 @@ import {
 import type { ImageSource } from '../images/imageCache';
 import { applyTextStyle } from '../text/measure';
 import { visibleRect, type Size, type Viewport } from '../viewport';
-import { strokeSideBands, strokeWidthOf, arrowHeads, clipPath, fillPath, fillRuleOf, fillWithPaint, paintStyle, rgbToCss, traceArrowHead, traceLayerPath, traceStrokePath } from './paint';
+import {
+  strokeSideBands,
+  strokeWidthOf,
+  arrowHeads,
+  clipPath,
+  fillPath,
+  fillRuleOf,
+  fillStretchedGradient,
+  fillWithPaint,
+  isStretchedGradient,
+  paintStyle,
+  rgbToCss,
+  traceArrowHead,
+  traceLayerPath,
+  traceStrokePath,
+} from './paint';
 
 export interface RenderStats {
   /** Layers actually painted. */
@@ -43,6 +60,25 @@ export interface RenderStats {
 export type CanvasFactory = (pixelWidth: number, pixelHeight: number) => HTMLCanvasElement | OffscreenCanvas;
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+/** A rectangle of the canvas, in device pixels. */
+type PixelRegion = { x: number; y: number; w: number; h: number };
+
+/** A scratch canvas in use, and the part of it that was cleared for the job. */
+interface Scratch {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  ctx: Ctx;
+  region: PixelRegion;
+}
+
+/**
+ * Whether shadow spread can be drawn by tracing a layer's outline narrower or
+ * wider: true for boxes and whole ellipses. Every other outline is grown or
+ * shrunk on a scratch canvas.
+ */
+function spreadsByInset(node: LayerNode): boolean {
+  return node.type === 'RECTANGLE' || node.type === 'FRAME' || (node.type === 'ELLIPSE' && !hasArc(node));
+}
 
 export interface RenderOptions {
   /** Size of the canvas in CSS pixels. */
@@ -240,12 +276,31 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     if (offset !== null) target.fillRect(run.x, baseline + offset, run.width, Math.max(1, size / 16));
   };
 
-  /** Paints a text layer: its fills colour the glyphs, except those with a colour of their own; its strokes outline them. */
-  const drawText = (target: Ctx, node: TextNode): void => {
+  /**
+   * Paints a text layer: its fills colour the glyphs, except those with a
+   * colour of their own; its inner shadows fall inside the glyphs; its
+   * strokes outline them. Radial, angular and diamond gradients are stretched
+   * to the box, as on shapes.
+   */
+  const drawText = (target: Ctx, node: TextNode, innerShadows: readonly ShadowEffect[] = []): void => {
     const alpha = target.globalAlpha;
     const mirrored = mirrorText(target, node);
     for (const paint of node.fills) {
       if (!paint.visible || paint.opacity <= 0) continue;
+      if (isStretchedGradient(paint)) {
+        target.globalAlpha = alpha;
+        const painted = paintThroughMask(
+          target,
+          node,
+          paint,
+          (c) => {
+            c.fillStyle = '#000';
+            textRuns(c, node, (run) => run.style.color === null, (run, baseline) => fillRun(c, run, baseline));
+          },
+          0,
+        );
+        if (painted) continue;
+      }
       target.globalAlpha = alpha * paint.opacity;
       target.fillStyle = paintStyle(target, paint, node.width, node.height);
       textRuns(
@@ -266,20 +321,38 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
         fillRun(target, run, baseline);
       },
     );
+    for (const shadow of innerShadows) drawCastInnerShadow(target, node.id, node, shadow);
     if (node.strokeWeight > 0) {
-      for (const paint of node.strokes) {
-        if (!paint.visible || paint.opacity <= 0) continue;
-        target.globalAlpha = alpha * paint.opacity;
-        target.strokeStyle = paintStyle(target, paint, node.width, node.height);
-        target.lineWidth = node.strokeWeight;
-        target.lineJoin = 'round';
-        target.setLineDash([]);
+      const outlineGlyphs = (c: Ctx): void => {
+        c.lineWidth = node.strokeWeight;
+        c.lineJoin = 'round';
+        c.setLineDash([]);
         textRuns(
-          target,
+          c,
           node,
           () => true,
-          (run, baseline) => target.strokeText(run.text, run.x, baseline),
+          (run, baseline) => c.strokeText(run.text, run.x, baseline),
         );
+      };
+      for (const paint of node.strokes) {
+        if (!paint.visible || paint.opacity <= 0) continue;
+        if (isStretchedGradient(paint)) {
+          target.globalAlpha = alpha;
+          const painted = paintThroughMask(
+            target,
+            node,
+            paint,
+            (c) => {
+              c.strokeStyle = '#000';
+              outlineGlyphs(c);
+            },
+            node.strokeWeight,
+          );
+          if (painted) continue;
+        }
+        target.globalAlpha = alpha * paint.opacity;
+        target.strokeStyle = paintStyle(target, paint, node.width, node.height);
+        outlineGlyphs(target);
       }
     }
     target.globalAlpha = alpha;
@@ -321,37 +394,54 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     const rule = fillRuleOf(node);
     const heads = arrowHeads(node);
     const alpha = target.globalAlpha;
-    target.lineCap = CAPS[node.strokeCap];
-    target.lineJoin = JOINS[node.strokeJoin];
-    target.setLineDash(node.dashPattern);
-    for (const paint of node.strokes) {
-      if (!paint.visible || paint.opacity <= 0) continue;
-      target.globalAlpha = alpha * paint.opacity;
-      target.strokeStyle = paintStyle(target, paint, node.width, node.height);
+    /** Strokes the layer once with whatever stroke style the context has, arrowheads included. */
+    const strokeOnce = (c: Ctx): void => {
+      c.lineCap = CAPS[node.strokeCap];
+      c.lineJoin = JOINS[node.strokeJoin];
+      c.setLineDash(node.dashPattern);
       if (align === 'CENTER') {
-        traceStrokePath(target, node);
-        target.lineWidth = node.strokeWeight;
-        target.stroke();
-        if (heads.length > 0) {
-          drawArrowHeads(target, heads);
-          target.setLineDash(node.dashPattern);
-        }
-        continue;
+        traceStrokePath(c, node);
+        c.lineWidth = node.strokeWeight;
+        c.stroke();
+        if (heads.length > 0) drawArrowHeads(c, heads);
+        return;
       }
       // Inside and outside strokes: draw a double-width stroke and keep only
       // the half on the wanted side of the outline.
-      target.save();
-      traceLayerPath(target, node);
-      if (align === 'INSIDE') clipPath(target, rule);
+      c.save();
+      traceLayerPath(c, node);
+      if (align === 'INSIDE') clipPath(c, rule);
       else {
         const pad = node.strokeWeight * 2 + 2;
-        target.rect(-pad, -pad, node.width + pad * 2, node.height + pad * 2);
-        target.clip('evenodd');
+        c.rect(-pad, -pad, node.width + pad * 2, node.height + pad * 2);
+        c.clip('evenodd');
       }
-      traceLayerPath(target, node, 0, 'stroke');
-      target.lineWidth = node.strokeWeight * 2;
-      target.stroke();
-      target.restore();
+      traceLayerPath(c, node, 0, 'stroke');
+      c.lineWidth = node.strokeWeight * 2;
+      c.stroke();
+      c.restore();
+    };
+    // How far past the box a stroke can reach: a mitred corner, and arrowheads.
+    const reach = node.strokeWeight * 10 + heads.reduce((most, head) => Math.max(most, head.reach), 0) + 2;
+    for (const paint of node.strokes) {
+      if (!paint.visible || paint.opacity <= 0) continue;
+      if (isStretchedGradient(paint)) {
+        target.globalAlpha = alpha;
+        const painted = paintThroughMask(
+          target,
+          node,
+          paint,
+          (c) => {
+            c.strokeStyle = '#000';
+            strokeOnce(c);
+          },
+          reach,
+        );
+        if (painted) continue;
+      }
+      target.globalAlpha = alpha * paint.opacity;
+      target.strokeStyle = paintStyle(target, paint, node.width, node.height);
+      strokeOnce(target);
     }
     target.globalAlpha = alpha;
     target.setLineDash([]);
@@ -369,6 +459,19 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     }
   };
 
+  /**
+   * Casts the shadow of what a layer covers, grown or shrunk by the shadow's
+   * spread, from a scratch canvas: for text and for outlines other than boxes
+   * and ellipses. The target must already have the shadow set, offset by
+   * `away`. False when there is no scratch canvas, and nothing was cast.
+   */
+  const castSpreadShadow = (target: Ctx, id: NodeId, node: LayerNode, shadow: ShadowEffect): boolean => {
+    const shape = silhouette(id, node, shadow.spread, layerRegion(id, node, shadowReach(shadow)));
+    if (!shape) return false;
+    placeAndReturn(target, shape, -away);
+    return true;
+  };
+
   /** Draws a layer's drop shadow from its outline, without drawing the layer. */
   const drawOutlineShadow = (target: Ctx, id: NodeId, node: LayerNode, shadow: ShadowEffect): void => {
     target.save();
@@ -377,23 +480,27 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     target.fillStyle = '#000';
     target.strokeStyle = '#000';
     if (node.type === 'TEXT') {
-      const mirrored = mirrorText(target, node);
-      textRuns(
-        target,
-        node,
-        () => true,
-        (run, baseline) => target.fillText(run.text, run.x, baseline),
-      );
-      if (mirrored) target.restore();
+      if (shadow.spread === 0 || !castSpreadShadow(target, id, node, shadow)) {
+        const mirrored = mirrorText(target, node);
+        textRuns(
+          target,
+          node,
+          () => true,
+          (run, baseline) => target.fillText(run.text, run.x, baseline),
+        );
+        if (mirrored) target.restore();
+      }
     } else {
       const filled = node.type !== 'LINE' && hasVisiblePaint(node.fills);
       const bands = strokeSideBands(node);
       const stroked = strokeWidthOf(node) > 0 && hasVisiblePaint(node.strokes);
-      const boxLike = node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'FRAME';
+      const boxLike = spreadsByInset(node);
       const align = strokeAlignOf(node);
       if (filled) {
-        traceLayerPath(target, node, boxLike ? -shadow.spread : 0);
-        fillPath(target, fillRuleOf(node));
+        if (boxLike || shadow.spread === 0 || !castSpreadShadow(target, id, node, shadow)) {
+          traceLayerPath(target, node, boxLike ? -shadow.spread : 0);
+          fillPath(target, fillRuleOf(node));
+        }
       }
       // A stroke with a weight for each side casts the shadow of its bands; an inside one lies within the fill.
       if (bands && stroked && !(filled && align === 'INSIDE')) {
@@ -415,13 +522,15 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
 
   /** Draws a shadow inside the layer's outline: the shadow of everything around the outline, clipped to it. */
   const drawInnerShadow = (target: Ctx, id: NodeId, node: LayerNode, shadow: ShadowEffect): void => {
+    const boxLike = spreadsByInset(node);
+    // Spread on any other outline is drawn by shrinking the outline on a scratch canvas.
+    if (!boxLike && shadow.spread !== 0 && drawCastInnerShadow(target, id, node, shadow)) return;
     target.save();
     setLayerTransform(target, id);
     traceLayerPath(target, node);
     clipPath(target, fillRuleOf(node));
     setLayerTransform(target, id, -away);
     setShadow(target, id, shadow, away);
-    const boxLike = node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'FRAME';
     traceLayerPath(target, node, boxLike ? shadow.spread : 0);
     const pad = (Math.abs(shadow.offsetX) + Math.abs(shadow.offsetY) + shadow.blur + Math.abs(shadow.spread)) * 2 + 20;
     target.rect(-pad, -pad, node.width + pad * 2, node.height + pad * 2);
@@ -450,6 +559,184 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
     const x1 = Math.min(pixelWidth, Math.ceil((bounds.x + bounds.width - viewport.x) * scale) + 2);
     const y1 = Math.min(pixelHeight, Math.ceil((bounds.y + bounds.height - viewport.y) * scale) + 2);
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  };
+
+  /**
+   * The part of the canvas a layer's own painting can touch, for painting it
+   * by way of a scratch canvas: its render bounds, widened by `extra`, and
+   * for text by however far its lines run out of its box.
+   */
+  const layerRegion = (id: NodeId, node: LayerNode, extra = 0): PixelRegion => {
+    let reach = extra;
+    if (node.type === 'TEXT') {
+      const layout = layoutText(node, measurer);
+      reach += Math.max(0, layout.width - node.width) + Math.max(0, layout.height - node.height) + Math.max(node.fontSize, layout.lineHeight) * 2;
+    }
+    return pixelRegion(expandRect(getRenderBounds(doc, id), reach));
+  };
+
+  /** A scratch canvas cleared over a region, with its settings at their defaults, or null where there is none. */
+  const borrow = (region: PixelRegion): Scratch | null => {
+    if (!options.createCanvas || region.w <= 0 || region.h <= 0) return null;
+    const canvas = scratch.pop() ?? options.createCanvas(pixelWidth, pixelHeight);
+    const c = canvas.getContext('2d') as Ctx | null;
+    if (!c) {
+      scratch.push(canvas);
+      return null;
+    }
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    c.clearRect(region.x, region.y, region.w, region.h);
+    return { canvas, ctx: c, region };
+  };
+
+  /** Draws what a scratch canvas holds onto the target where it is, with the target's opacity and clip, and gives the canvas back. */
+  const placeAndReturn = (target: Ctx, borrowed: Scratch, shiftX = 0): void => {
+    const { canvas, region: r } = borrowed;
+    target.save();
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.drawImage(canvas, r.x, r.y, r.w, r.h, r.x + shiftX, r.y, r.w, r.h);
+    target.restore();
+    scratch.push(canvas);
+  };
+
+  /**
+   * Paints a radial, angular or diamond gradient onto what `mask` draws (in
+   * the layer's own space, in any opaque colour), stretched to the layer's box
+   * as a fill would be: the mask is drawn on a scratch canvas, the gradient is
+   * painted over it keeping only what the mask covers, and the result is
+   * placed on the target. This is how strokes and text get these gradients,
+   * since the canvas cannot clip to a stroke or to glyphs. False when there
+   * is no scratch canvas, and nothing was painted.
+   */
+  const paintThroughMask = (target: Ctx, node: LayerNode, paint: GradientPaint, mask: (c: Ctx) => void, margin: number): boolean => {
+    if (node.width <= 0 || node.height <= 0) return false;
+    const borrowed = borrow(layerRegion(node.id, node, margin));
+    if (!borrowed) return false;
+    const c = borrowed.ctx;
+    c.save();
+    setLayerTransform(c, node.id);
+    const mirrored = node.type === 'TEXT' && mirrorText(c, node);
+    c.save();
+    mask(c);
+    c.restore();
+    c.globalCompositeOperation = 'source-in';
+    c.globalAlpha = paint.opacity;
+    fillStretchedGradient(c, paint, node.width, node.height, margin);
+    if (mirrored) c.restore();
+    c.restore();
+    placeAndReturn(target, borrowed);
+    return true;
+  };
+
+  /**
+   * Paints in black, on a scratch canvas, what a layer covers: a group's
+   * children as they are painted, a text's glyphs, or a shape's fill. `grow`
+   * widens it by that many units all round, or with a negative value narrows
+   * it, by stroking its outline twice as wide and adding or taking away what
+   * that stroke covers; that is how shadow spread reaches outlines other than
+   * boxes and ellipses. A group is not grown. Null where there is no scratch canvas.
+   */
+  const silhouette = (id: NodeId, node: LayerNode, grow: number, region: PixelRegion): Scratch | null => {
+    const borrowed = borrow(region);
+    if (!borrowed) return null;
+    const c = borrowed.ctx;
+    if (node.type === 'GROUP') {
+      // The children are painted again only to see where they are: they are not counted twice.
+      const { drawn, culled } = stats;
+      drawChildren(c, id);
+      stats.drawn = drawn;
+      stats.culled = culled;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha = 1;
+      return borrowed;
+    }
+    c.save();
+    setLayerTransform(c, id);
+    c.fillStyle = '#000';
+    c.strokeStyle = '#000';
+    c.setLineDash([]);
+    c.lineWidth = Math.abs(grow) * 2;
+    if (node.type === 'TEXT') {
+      const mirrored = mirrorText(c, node);
+      textRuns(c, node, () => true, (run, baseline) => fillRun(c, run, baseline));
+      if (grow !== 0) {
+        c.lineJoin = 'round';
+        c.globalCompositeOperation = grow > 0 ? 'source-over' : 'destination-out';
+        textRuns(c, node, () => true, (run, baseline) => c.strokeText(run.text, run.x, baseline));
+      }
+      if (mirrored) c.restore();
+    } else {
+      traceLayerPath(c, node);
+      fillPath(c, fillRuleOf(node));
+      if (grow !== 0) {
+        // Sharp corners stay sharp, as they do when a rectangle's shadow spreads.
+        c.lineJoin = 'miter';
+        c.miterLimit = 10;
+        c.globalCompositeOperation = grow > 0 ? 'source-over' : 'destination-out';
+        traceLayerPath(c, node);
+        c.stroke();
+      }
+    }
+    c.restore();
+    return borrowed;
+  };
+
+  /**
+   * Paints an inner shadow by way of scratch canvases: the shadow's colour,
+   * less the offset and blurred shadow of `hole` (what the shadow does not
+   * reach into before it is blurred), kept only where `shape` paints, placed
+   * on the target. `shape` must paint in one call. Used where the outline
+   * cannot be traced as a path: text, groups, and spread on outlines other
+   * than boxes and ellipses. False when there is no scratch canvas.
+   */
+  const castInnerShadow = (target: Ctx, id: NodeId, shadow: ShadowEffect, hole: Scratch, shape: (c: Ctx) => void): boolean => {
+    const r = hole.region;
+    const borrowed = borrow(r);
+    if (!borrowed) return false;
+    const c = borrowed.ctx;
+    c.fillStyle = rgbToCss(shadow.color, shadow.opacity);
+    c.fillRect(r.x, r.y, r.w, r.h);
+    c.save();
+    c.globalCompositeOperation = 'destination-out';
+    setShadow(c, id, { ...shadow, color: { r: 0, g: 0, b: 0 }, opacity: 1 }, away);
+    c.drawImage(hole.canvas, r.x, r.y, r.w, r.h, r.x - away, r.y, r.w, r.h);
+    c.restore();
+    c.save();
+    c.globalCompositeOperation = 'destination-in';
+    shape(c);
+    c.restore();
+    placeAndReturn(target, borrowed);
+    return true;
+  };
+
+  /** How far a shadow can carry what casts it: what a scratch canvas for it must take in round the layer. */
+  const shadowReach = (shadow: ShadowEffect): number => Math.abs(shadow.offsetX) + Math.abs(shadow.offsetY) + shadow.blur + Math.abs(shadow.spread);
+
+  /** An inner shadow on a text, a group, or a shape whose shadow spreads: see `castInnerShadow`. */
+  const drawCastInnerShadow = (target: Ctx, id: NodeId, node: LayerNode, shadow: ShadowEffect): boolean => {
+    const region = layerRegion(id, node, shadowReach(shadow));
+    const outline = node.type === 'TEXT' || node.type === 'GROUP' ? silhouette(id, node, 0, region) : null;
+    const spreads = node.type !== 'GROUP' && shadow.spread !== 0;
+    const hole = spreads ? silhouette(id, node, -shadow.spread, region) : outline;
+    if (!hole) {
+      if (outline) scratch.push(outline.canvas);
+      return false;
+    }
+    const done = castInnerShadow(target, id, shadow, hole, (c) => {
+      if (outline) {
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.drawImage(outline.canvas, region.x, region.y, region.w, region.h, region.x, region.y, region.w, region.h);
+      } else {
+        setLayerTransform(c, id);
+        traceLayerPath(c, node);
+        fillPath(c, fillRuleOf(node));
+      }
+    });
+    scratch.push(hole.canvas);
+    if (outline && outline !== hole) scratch.push(outline.canvas);
+    return done;
   };
 
   /**
@@ -529,7 +816,7 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
   const paintLayer = (target: Ctx, id: NodeId, node: LayerNode, innerShadows: readonly ShadowEffect[]): void => {
     setLayerTransform(target, id);
     if (node.type === 'TEXT') {
-      drawText(target, node);
+      drawText(target, node, innerShadows);
       return;
     }
     fill(target, node);
@@ -546,6 +833,8 @@ export function renderScene(ctx: Ctx, doc: Document, pageId: NodeId, options: Re
         }
         drawChildren(target, id);
         target.restore();
+        // A group's inner shadows fall inside what its children paint, over them.
+        if (node.type === 'GROUP') for (const shadow of innerShadows) drawCastInnerShadow(target, id, node, shadow);
         setLayerTransform(target, id);
       }
     }

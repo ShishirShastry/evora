@@ -430,6 +430,16 @@ function TextSection({ layers }: { layers: TextNode[] }) {
           <option value="BULLETED">Bulleted list</option>
           <option value="NUMBERED">Numbered list</option>
         </select>
+        <div className="w-[96px] flex-none" title="Space between paragraphs">
+          <NumberField
+            label="Paragraph spacing"
+            prefix="Para"
+            min={0}
+            max={10000}
+            value={shared(layers, (l) => (l as TextNode).paragraphSpacing)}
+            onCommit={(value) => set('Change paragraph spacing', { paragraphSpacing: value })}
+          />
+        </div>
       </Row>
       <Row>
         <select

@@ -1,12 +1,12 @@
 import { isInstance, setOf } from '../components/instances';
-import { isLayer, isPage, type Action, type Document, type FrameNode, type LayerNode, type NodeId, type Reaction, type RGB, type Transition, type TriggerType, type Variable, type VariableValue } from '../document/schema';
+import { isLayer, isPage, keyComboOf, keyCombosMatch, type Action, type Document, type FrameNode, type LayerNode, type NodeId, type Reaction, type RGB, type Transition, type TriggerType, type Variable, type VariableValue } from '../document/schema';
 import { restoreLayout } from '../layout/restore';
 import type { Point, Rect } from '../math/geometry';
 import { swapInstances } from '../ops/components';
 import { hitTestDeepest } from '../scene/hitTest';
 import { getAncestorIds, getChildIds, getDescendantIds, getPageIdOf, getWorldBounds } from '../scene/tree';
 import type { TextMeasurer } from '../text/layout';
-import { resolveVariable } from '../tokens/tokens';
+import { modeFor, resolveVariable } from '../tokens/tokens';
 import { evaluate, ExpressionError, truthy, valueText, type Value } from './expression';
 import { buildStage, directionVector, ease, overlayOrigin, smartAnimate, STAGE_ID, type Size, type StagePart } from './stage';
 
@@ -95,6 +95,8 @@ export class Player {
   scene: Scene;
   /** The variable that typing goes into, while an input field has the keyboard. */
   input: string | null = null;
+  /** The layer whose interaction gave an input field the keyboard: the mode of the variable typed into is the one in effect there. */
+  private inputOwner: NodeId | null = null;
   /** Web addresses that interactions asked to open, oldest first, for the viewer to open and clear. */
   links: string[] = [];
   now = 0;
@@ -109,6 +111,8 @@ export class Player {
   private hover: Held | null = null;
   private press: Held | null = null;
   private down: { point: Point; last: Point; chain: NodeId[]; dragged: boolean; scrolling: boolean } | null = null;
+  /** What the pointer was over when it last moved, innermost first, for knowing what it has left. */
+  private under: NodeId[] = [];
   private staged: Document | null = null;
   /** When a click last found nothing to do, for showing what can be clicked. */
   missedAt = -Infinity;
@@ -305,7 +309,17 @@ export class Player {
     return null;
   }
 
-  private lookup = (name: string): Value | null => this.value(name);
+  /**
+   * How an expression run by a layer's interaction reads variables: each
+   * in the mode in effect for that layer (chosen on it, or on what it is in).
+   */
+  private lookupAt(nodeId: NodeId): (name: string) => Value | null {
+    return (name) => {
+      const variable = this.variableNamed(name);
+      if (!variable) return null;
+      return resolveVariable(this.doc, variable.id, this.doc.nodes[nodeId] ? nodeId : this.scene.screenId);
+    };
+  }
 
   /**
    * Runs the actions of an interaction, in order. `held` is for what lasts
@@ -379,18 +393,18 @@ export class Player {
           if (!variable) break;
           let value: Value;
           try {
-            value = evaluate(action.expression, this.lookup);
+            value = evaluate(action.expression, this.lookupAt(ownerId));
           } catch (error) {
             if (error instanceof ExpressionError) break;
             throw error;
           }
-          this.setVariable(variable, value);
+          this.setVariable(variable, value, ownerId);
           break;
         }
         case 'CONDITIONAL': {
           let holds: boolean;
           try {
-            holds = truthy(evaluate(action.expression, this.lookup));
+            holds = truthy(evaluate(action.expression, this.lookupAt(ownerId)));
           } catch (error) {
             if (error instanceof ExpressionError) break;
             throw error;
@@ -399,7 +413,10 @@ export class Player {
           break;
         }
         case 'INPUT':
-          if (action.variableId !== null && this.doc.variables[action.variableId]?.type === 'STRING') this.input = action.variableId;
+          if (action.variableId !== null && this.doc.variables[action.variableId]?.type === 'STRING') {
+            this.input = action.variableId;
+            this.inputOwner = ownerId;
+          }
           break;
         case 'OPEN_LINK':
           if (action.expression.trim() !== '') this.links.push(action.expression.trim());
@@ -410,8 +427,14 @@ export class Player {
     return changed;
   }
 
-  /** Gives a variable a value for the rest of the prototype, in every mode, as the type of variable it is. */
-  private setVariable(variable: Variable, value: Value): void {
+  /**
+   * Gives a variable a value for the rest of the prototype, as the type of
+   * variable it is, in the mode in effect for the layer whose interaction set
+   * it (the mode chosen for the variable's collection on that layer or what it
+   * is in, else the collection's first): other modes keep their values, as in
+   * Figma. A layer that is no longer there gives the screen's mode.
+   */
+  private setVariable(variable: Variable, value: Value, at: NodeId): void {
     let stored: VariableValue;
     if (variable.type === 'COLOR') {
       if (typeof value !== 'object') return;
@@ -422,8 +445,10 @@ export class Player {
       stored = number;
     } else if (variable.type === 'STRING') stored = valueText(value);
     else stored = truthy(value);
-    const valuesByMode: Record<string, VariableValue> = {};
-    for (const mode in variable.valuesByMode) valuesByMode[mode] = stored;
+    const mode = modeFor(this.doc, this.doc.nodes[at] ? at : this.scene.screenId, variable.collectionId);
+    const valuesByMode: Record<string, VariableValue> = { ...variable.valuesByMode };
+    if (mode === null) for (const id in valuesByMode) valuesByMode[id] = stored;
+    else valuesByMode[mode] = stored;
     const next = { ...this.doc, variables: { ...this.doc.variables, [variable.id]: { ...variable, valuesByMode } } };
     this.doc = restoreLayout(this.doc, next, this.measurer);
     this.staged = null;
@@ -467,7 +492,9 @@ export class Player {
     this.hover = null;
     this.press = null;
     this.down = null;
+    this.under = [];
     this.input = null;
+    this.inputOwner = null;
     this.staged = null;
     this.enter(startId, 0);
   }
@@ -577,6 +604,27 @@ export class Player {
     this.begin('STATE', from, held.transition ? { ...held.transition, delay: 0 } : INSTANT);
   }
 
+  /** Whether a layer is on the stage now: one of the screen and overlays, or in one. */
+  private onStage(id: NodeId): boolean {
+    if (!this.doc.nodes[id]) return false;
+    const roots = this.roots();
+    return roots.includes(id) || getAncestorIds(this.doc, id).some((ancestor) => roots.includes(ancestor));
+  }
+
+  /**
+   * The pointer is over a chain of layers now: what lasts while hovering
+   * follows it, and if it has left layers it was over, the innermost of them
+   * with a "mouse leave" interaction runs it, once, and it is kept.
+   */
+  private track(chain: readonly NodeId[]): void {
+    const left = this.under.filter((id) => !chain.includes(id));
+    this.under = [...chain];
+    this.updateHover(chain);
+    // A layer of a screen that has gone, or of a variant no longer shown, has not been left: it is not there.
+    const owner = this.owner(left.filter((id) => this.onStage(id)), 'MOUSE_LEAVE');
+    if (owner) this.run(owner.reaction.actions, owner.id);
+  }
+
   private updateHover(chain: readonly NodeId[]): void {
     if (this.hover && chain.includes(this.hover.ownerId)) return;
     if (this.hover) {
@@ -604,13 +652,13 @@ export class Player {
       down.last = point;
       return;
     }
-    this.updateHover(this.chainAt(point));
+    this.track(this.chainAt(point));
   }
 
   /** The pointer has left the screen. */
   pointerLeave(): void {
     if (this.down) return;
-    this.updateHover([]);
+    this.track([]);
   }
 
   pointerDown(point: Point): void {
@@ -640,7 +688,15 @@ export class Player {
         done = true;
       } else {
         this.input = null;
-        const owner = this.owner(chain, 'ON_CLICK');
+        // Letting go over a layer with a "mouse up" interaction runs it first: the pointer comes up before a click is complete.
+        const scene = this.scene;
+        const up = this.owner(chain, 'MOUSE_UP');
+        if (up) {
+          this.run(up.reaction.actions, up.id);
+          done = true;
+        }
+        // If that changed what is shown, what was pressed is no longer there to click.
+        const owner = this.scene === scene ? this.owner(chain, 'ON_CLICK') : null;
         const pressed = this.owner(down.chain, 'ON_CLICK');
         if (owner && pressed && owner.id === pressed.id) {
           this.run(owner.reaction.actions, owner.id);
@@ -649,7 +705,7 @@ export class Player {
       }
       if (!done) this.missedAt = this.now;
     }
-    this.updateHover(this.chainAt(point));
+    this.track(this.chainAt(point));
     return done;
   }
 
@@ -659,31 +715,35 @@ export class Player {
   }
 
   /**
-   * A key is pressed, named as the keyboard names it. While an input field
-   * has the keyboard, it types into its variable; otherwise the first
-   * interaction for that key on what is shown runs. Returns whether the key
-   * did something.
+   * A key is pressed, named as the keyboard names it, with the modifier keys
+   * held (a keyboard event will do). While an input field has the keyboard,
+   * it types into its variable; otherwise the first interaction for that key
+   * and exactly those modifiers on what is shown runs ("k" is not Ctrl+K).
+   * Returns whether the key did something.
    */
-  key(key: string): boolean {
+  key(key: string, modifiers: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean } = {}): boolean {
     if (this.input !== null) {
       const variable = this.doc.variables[this.input];
+      // A shortcut (Ctrl or Meta without Alt, which some keyboards need for ordinary characters) is not typing.
+      const shortcut = (modifiers.ctrlKey === true || modifiers.metaKey === true) && modifiers.altKey !== true;
       if (!variable) {
         this.input = null;
       } else if (key === 'Enter' || key === 'Escape' || key === 'Tab') {
         this.input = null;
         return true;
-      } else {
-        const text = valueText(resolveVariable(this.doc, variable.id, this.scene.screenId) ?? '');
-        if (key === 'Backspace') this.setVariable(variable, text.slice(0, -1));
-        else if (key.length === 1) this.setVariable(variable, text + key);
+      } else if (!shortcut) {
+        const at = this.inputOwner !== null && this.doc.nodes[this.inputOwner] ? this.inputOwner : this.scene.screenId;
+        const text = valueText(resolveVariable(this.doc, variable.id, at) ?? '');
+        if (key === 'Backspace') this.setVariable(variable, text.slice(0, -1), at);
+        else if (key.length === 1) this.setVariable(variable, text + key, at);
         else return false;
         return true;
       }
     }
-    const wanted = key.toLowerCase();
+    const pressed = keyComboOf({ key, ...modifiers });
     for (const rootId of this.roots().reverse()) {
       for (const id of [rootId, ...getDescendantIds(this.doc, rootId)]) {
-        const reaction = this.reactionsOf(id).find((entry) => entry.trigger.type === 'ON_KEY' && entry.trigger.key.toLowerCase() === wanted);
+        const reaction = this.reactionsOf(id).find((entry) => entry.trigger.type === 'ON_KEY' && keyCombosMatch(entry.trigger.key, pressed));
         if (!reaction) continue;
         this.run(reaction.actions, id);
         return true;
@@ -699,7 +759,7 @@ export class Player {
     const top = roots[roots.length - 1] as NodeId;
     const out: Rect[] = [];
     for (const id of [top, ...getDescendantIds(stage, top)]) {
-      if (this.reactionsOf(id).some((reaction) => reaction.trigger.type === 'ON_CLICK')) out.push(getWorldBounds(stage, id));
+      if (this.reactionsOf(id).some((reaction) => reaction.trigger.type === 'ON_CLICK' || reaction.trigger.type === 'MOUSE_UP')) out.push(getWorldBounds(stage, id));
     }
     return out;
   }

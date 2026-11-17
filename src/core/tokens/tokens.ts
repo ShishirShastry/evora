@@ -36,7 +36,7 @@ type Props = Record<string, unknown>;
 const same = (a: unknown, b: unknown): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /** The properties of a text layer that a text style sets. */
-export const TEXT_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'italic', 'lineHeight', 'letterSpacing', 'textDecoration', 'textCase'] as const;
+export const TEXT_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'italic', 'lineHeight', 'letterSpacing', 'textDecoration', 'textCase', 'paragraphSpacing'] as const;
 
 /** For each way a layer can refer to a style: the type of style, and the properties of the layer it sets. */
 export const STYLE_TARGETS: Record<keyof StyleRefs, { type: StyleType; keys: readonly string[] }> = {
@@ -53,7 +53,8 @@ function styleValues(style: Style, ref: keyof StyleRefs): Props {
   if (ref === 'strokes') return { strokes: style.paints };
   if (ref === 'effects') return { effects: style.effects };
   if (ref === 'grids') return { layoutGrids: style.grids };
-  return { ...style.text };
+  // A style made before it had space between paragraphs gives none.
+  return { ...style.text, paragraphSpacing: style.text.paragraphSpacing ?? 0 };
 }
 
 /** Whether a kind of style can be used on a layer: text styles are for text, grid styles for frames. */

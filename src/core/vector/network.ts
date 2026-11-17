@@ -98,6 +98,47 @@ export function handlesOf(network: VectorNetwork, vertex: number): HandleRef[] {
   return out;
 }
 
+/**
+ * The control handles shown while points are selected: every handle of the
+ * selected points, and on each segment that leaves a selected point, the
+ * handle at its other end too. So a curve next to a selected point can be
+ * shaped from either side, as in other design tools. A handle that is pulled
+ * in (of zero length) is not listed, since there is nothing to show or grab.
+ */
+export function shownHandles(network: VectorNetwork, selected: readonly number[]): HandleRef[] {
+  const chosen = new Set(selected);
+  const out: HandleRef[] = [];
+  network.segments.forEach((segment, index) => {
+    const atStart = chosen.has(segment.start);
+    const atEnd = chosen.has(segment.end);
+    if (!atStart && !atEnd) return;
+    if (!isZero(segment.tangentStart)) out.push({ segment: index, end: 'start' });
+    if (!isZero(segment.tangentEnd)) out.push({ segment: index, end: 'end' });
+  });
+  return out;
+}
+
+/** The segments of the paths that the given points are on: every segment connected to one of them, however far along. */
+export function segmentsOfPaths(network: VectorNetwork, vertices: readonly number[]): number[] {
+  const reached = new Set(vertices.filter((v) => network.vertices[v] !== undefined));
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const segment of network.segments) {
+      if (reached.has(segment.start) !== reached.has(segment.end)) {
+        reached.add(segment.start);
+        reached.add(segment.end);
+        grew = true;
+      }
+    }
+  }
+  const out: number[] = [];
+  network.segments.forEach((segment, index) => {
+    if (reached.has(segment.start)) out.push(index);
+  });
+  return out;
+}
+
 /** How many segment ends meet at a vertex. */
 export function vertexDegree(network: VectorNetwork, vertex: number): number {
   return handlesOf(network, vertex).length;

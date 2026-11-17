@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 export type IconName =
   | 'component'
@@ -182,32 +182,55 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
 }
 
 /**
- * Evora's mark, standing in until the owner's logo arrives: a raised tile with
- * a luminous "e" in it. It is drawn in this one place, so the real logo
- * replaces it here and appears everywhere the mark does.
+ * Evora's mark, the owner's logo (2026-11-17): two rounded ribbons that meet at
+ * the left in a "<", the upper one running from violet through magenta to
+ * peach, the lower one from indigo through blue to cyan. Drawn here as a
+ * vector, so it is sharp at every size; every place the mark appears uses
+ * this. Each mark has gradients of its own (by `useId`), so several on one
+ * page do not share them.
  */
 export function Logo({ size = 22 }: { size?: number }) {
+  const id = useId().replace(/:/g, '');
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+    <svg width={size} height={size} viewBox="-21.5 -7 328 328" aria-hidden="true" focusable="false">
       <defs>
-        <linearGradient id="evora-tile" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#2ba7ff" />
-          <stop offset="1" stopColor="#0b6fe0" />
+        <linearGradient id={`${id}-top`} gradientUnits="userSpaceOnUse" x1="2" y1="115" x2="283" y2="38">
+          <stop offset="0" stopColor="#5b34ff" />
+          <stop offset="0.42" stopColor="#a63cff" />
+          <stop offset="0.74" stopColor="#ef67a8" />
+          <stop offset="1" stopColor="#ff9d5c" />
+        </linearGradient>
+        <linearGradient id={`${id}-bottom`} gradientUnits="userSpaceOnUse" x1="2" y1="191" x2="283" y2="276">
+          <stop offset="0" stopColor="#3a1cf0" />
+          <stop offset="0.5" stopColor="#2a62ff" />
+          <stop offset="1" stopColor="#00e4ff" />
+        </linearGradient>
+        <linearGradient id={`${id}-fold`} gradientUnits="userSpaceOnUse" x1="0" y1="115" x2="0" y2="191">
+          <stop offset="0" stopColor="#7a3dff" />
+          <stop offset="1" stopColor="#3a1cf0" />
         </linearGradient>
       </defs>
-      <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#evora-tile)" />
-      <rect x="1.5" y="1.5" width="29" height="29" rx="8.5" fill="none" stroke="rgba(255,255,255,0.28)" />
-      <path d="M21.6 17.2H11.1c.4 3 2.5 4.9 5.4 4.9 1.9 0 3.4-.8 4.4-2.1M10.9 15.2c.4-3 2.6-5.2 5.4-5.2s5 2.1 5.3 5.2H10.9z" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
+      {/* The fold that joins the two ribbons at the left. */}
+      <rect x="2" y="115" width="38" height="76" fill={`url(#${id}-fold)`} />
+      <line x1="40" y1="115" x2="245" y2="38" stroke={`url(#${id}-top)`} strokeWidth="76" strokeLinecap="round" />
+      {/* The lower ribbon passes in front of the fold. */}
+      <line x1="40" y1="191" x2="245" y2="276" stroke={`url(#${id}-bottom)`} strokeWidth="76" strokeLinecap="round" />
     </svg>
   );
 }
 
-/** The mark with the name beside it, for the file browser and the start of things. */
+/**
+ * The mark with the name beside it, as the owner's logo sets it: "EVORA" in
+ * capitals, the A drawn without its bar (a Λ). Read out as "Evora".
+ */
 export function Wordmark({ size = 26 }: { size?: number }) {
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-center gap-2.5">
       <Logo size={size} />
-      <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink">Evora</span>
+      <span aria-hidden="true" className="text-[15px] font-bold leading-none tracking-[0.1em] text-ink">
+        EVORΛ
+      </span>
+      <span className="sr-only">Evora</span>
     </span>
   );
 }

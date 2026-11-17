@@ -351,6 +351,18 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 24, document: { ...body, nodes: upgraded } };
   },
+  // Version 25 added space between the paragraphs of text (none in older files) and two prototype triggers, which older files do not use.
+  24: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type === 'TEXT' ? { paragraphSpacing: 0, ...node } : node;
+    }
+    // A text style without one leaves it as it is set on the layer's own (it is optional in a style).
+    return { ...file, schemaVersion: 25, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

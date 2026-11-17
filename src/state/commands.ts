@@ -31,6 +31,8 @@ import {
   smoothVertex,
   canFlatten,
   canOutlineStroke,
+  canSplitIntersections,
+  splitIntersections,
   clipboardAssets,
   copyNodes,
   parseClipboard,
@@ -231,6 +233,24 @@ export function outlineStrokeSelection(store: EditorStore): void {
     return out.doc;
   });
   if (made.length > 0) store.getState().setSelection(made);
+}
+
+/**
+ * Puts a shared point wherever the selected vectors' segments cross, as one
+ * undo step. While points are being edited, only the paths of the selected
+ * points are split (all of the layer's when none is selected), and the new
+ * points at the crossings become the selected points.
+ */
+export function splitIntersectionsSelection(store: EditorStore): void {
+  const { selection, apply, vectorEdit } = store.getState();
+  const made: number[] = [];
+  apply('Split at intersections', (doc) => {
+    const out = splitIntersections(doc, vectorEdit ? [vectorEdit.id] : selection, vectorEdit?.vertices);
+    if (!out) return doc;
+    if (vectorEdit) made.push(...(out.crossings[vectorEdit.id] ?? []));
+    return out.doc;
+  });
+  if (vectorEdit && made.length > 0) store.getState().setVectorEdit({ id: vectorEdit.id, vertices: made });
 }
 
 /** Combines the selected shapes into one vector layer by a boolean operation. */
@@ -1340,6 +1360,13 @@ export const COMMANDS: readonly Command[] = [
     group: 'Object',
     enabled: (state) => (state.vectorEdit?.vertices.length ?? 0) > 0,
     run: ({ store }) => cutAtPoints(store),
+  },
+  {
+    id: 'object.splitIntersections',
+    label: 'Split at intersections',
+    group: 'Object',
+    enabled: (state) => (state.vectorEdit ? canSplitIntersections(state.doc, [state.vectorEdit.id]) : canSplitIntersections(state.doc, state.selection)),
+    run: ({ store }) => splitIntersectionsSelection(store),
   },
   {
     id: 'vector.smooth',
