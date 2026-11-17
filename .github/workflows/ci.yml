@@ -1,0 +1,126 @@
+# Continuous integration: every push to main and every pull request into it.
+#
+# - "app" (Windows): type-check, unit tests, production build and the browser
+#   acceptance tests in the Microsoft Edge that GitHub's Windows runners have
+#   (playwright.config.ts uses channel "msedge", so no browser is downloaded).
+# - "server" (Linux): the collaboration server's tests on the platform it is
+#   usually self-hosted on, and a start-up check against its health endpoint.
+#
+# The project's portable Node (.tools/node) is not in git; runners use
+# actions/setup-node with the same major version (24, which has node:sqlite and
+# type stripping, both needed by server/).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Read-only: nothing here writes to the repository, releases or packages.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The Electron binary is only needed to run or package the desktop app, not
+  # for these checks; skipping it saves a download of about 100 MB per job.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  npm_config_update_notifier: 'false'
+
+jobs:
+  app:
+    name: Type-check, unit tests, build, browser tests (Windows, Edge)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Find Microsoft Edge
+        shell: pwsh
+        run: |
+          $paths = @(
+            "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+            "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+          )
+          $edge = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $edge) { Write-Error 'Microsoft Edge is not installed on this runner; the browser tests use channel "msedge".'; exit 1 }
+          Write-Host "Edge: $edge ($((Get-Item $edge).VersionInfo.ProductVersion))"
+
+      # The list reporter of playwright.config.ts plus an HTML report to upload
+      # when something fails. The owner's private .fig sample is not in git, so
+      # e2e/figsample.spec.ts skips itself here.
+      # bash, because PowerShell's npm.ps1 swallows the "--" before the flag.
+      - name: Browser acceptance tests
+        shell: bash
+        run: npm run e2e -- --reporter=list,html
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  server:
+    name: Collaboration server tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Server unit tests
+        run: npx vitest run server
+
+      - name: Start the server and ask its health endpoint
+        run: |
+          node server/main.ts --port 8787 --data "$RUNNER_TEMP/evora-server" --fresh > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health; then ok=1; break; fi
+            sleep 1
+          done
+          kill "$pid" || true
+          cat "$RUNNER_TEMP/server.log"
+          test "$ok" = 1

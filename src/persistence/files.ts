@@ -117,6 +117,25 @@ export async function exportFileText(storage: DocumentStorage, doc: Document, me
  * stored: bytes that do not match the name they are filed under are refused,
  * because every file that uses that hash would otherwise show the wrong image.
  */
+/**
+ * How deeply a file's JSON may nest arrays and objects. A real file nests a
+ * few dozen levels at most; one nested thousands deep would overflow the
+ * stack of the code that checks and repairs it.
+ */
+export const MAX_FILE_DEPTH = 200;
+
+/** Whether a parsed JSON value nests more than `limit` deep, walked without recursion. */
+function nestedDeeperThan(value: unknown, limit: number): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const stack: [object, number][] = [[value, 1]];
+  while (stack.length > 0) {
+    const [current, depth] = stack.pop() as [object, number];
+    if (depth > limit) return true;
+    for (const child of Array.isArray(current) ? current : Object.values(current)) if (child && typeof child === 'object') stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
 export async function importFileText(storage: DocumentStorage, text: string): Promise<{ id: string; repairs: string[] }> {
   let raw: unknown;
   try {
@@ -124,6 +143,7 @@ export async function importFileText(storage: DocumentStorage, text: string): Pr
   } catch {
     throw new FileFormatError('This file is damaged or is not an Evora file (it is not valid JSON).');
   }
+  if (nestedDeeperThan(raw, MAX_FILE_DEPTH)) throw new FileFormatError(`This file is damaged or is not an Evora file: its data is nested more than ${MAX_FILE_DEPTH} levels deep.`);
   const { file, repairs } = parseFile(raw);
 
   const bundled = typeof raw === 'object' && raw !== null ? (raw as { assetData?: unknown }).assetData : undefined;

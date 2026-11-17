@@ -3,10 +3,17 @@
  * deflate with and without the zlib wrapper. Nothing is bundled for it.
  */
 
-async function through(bytes: Uint8Array, stream: { readable: ReadableStream<Uint8Array>; writable: WritableStream<BufferSource> }): Promise<Uint8Array> {
+/** The most bytes decompressing is allowed to give (1 GiB): a few megabytes of deflate can stand for many gigabytes. */
+export const MAX_INFLATED_BYTES = 2 ** 30;
+
+export class InflateLimitError extends Error {}
+
+async function through(bytes: Uint8Array, stream: { readable: ReadableStream<Uint8Array>; writable: WritableStream<BufferSource> }, limit = Infinity): Promise<Uint8Array> {
   const writer = stream.writable.getWriter();
   // Writing and reading go on together: a stream holds only so much before it has to be read from.
   const written = writer.write(bytes as unknown as BufferSource).then(() => writer.close());
+  // Damaged data fails both sides: the error is reported by the read below, so this one must not go unhandled.
+  written.catch(() => undefined);
   const chunks: Uint8Array[] = [];
   const reader = stream.readable.getReader();
   let total = 0;
@@ -15,6 +22,12 @@ async function through(bytes: Uint8Array, stream: { readable: ReadableStream<Uin
     if (done) break;
     chunks.push(value);
     total += value.length;
+    if (total > limit) {
+      // Stopped at once: nothing more is decompressed or kept.
+      written.catch(() => undefined);
+      await reader.cancel().catch(() => undefined);
+      throw new InflateLimitError(`The compressed data comes to more than ${Math.round(limit / 2 ** 20)} MB, which is more than is read.`);
+    }
   }
   await written;
   const out = new Uint8Array(total);
@@ -37,5 +50,6 @@ export const canCompress = (): boolean => typeof CompressionStream === 'function
 export const deflateZlib = (bytes: Uint8Array): Promise<Uint8Array> => through(bytes, pack('deflate'));
 /** Deflate with no wrapper: what a ZIP entry holds. */
 export const deflateRaw = (bytes: Uint8Array): Promise<Uint8Array> => through(bytes, pack('deflate-raw'));
-export const inflateRaw = (bytes: Uint8Array): Promise<Uint8Array> => through(bytes, unpack('deflate-raw'));
-export const inflateZlib = (bytes: Uint8Array): Promise<Uint8Array> => through(bytes, unpack('deflate'));
+/** Undoes raw deflate, refusing (InflateLimitError) to give more than `limit` bytes. */
+export const inflateRaw = (bytes: Uint8Array, limit = MAX_INFLATED_BYTES): Promise<Uint8Array> => through(bytes, unpack('deflate-raw'), limit);
+export const inflateZlib = (bytes: Uint8Array, limit = MAX_INFLATED_BYTES): Promise<Uint8Array> => through(bytes, unpack('deflate'), limit);

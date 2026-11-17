@@ -32,3 +32,6 @@ Thumbs.db
 !.env.example
 # The collaboration server's data (accounts, shared files) when run locally.
 .evora-server/
+# The desktop app's build output (Phase 10): compiled main process and preload, and the installers.
+dist-electron/
+release/

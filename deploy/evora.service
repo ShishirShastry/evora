@@ -1,0 +1,57 @@
+# Evora as a systemd service, on a Linux machine with Node 24.
+#
+#   sudo useradd --system --home /var/lib/evora --shell /usr/sbin/nologin evora
+#   sudo mkdir -p /opt/evora /var/lib/evora && sudo chown evora:evora /var/lib/evora
+#   # Copy the release into /opt/evora: package.json, server/, src/collab/protocol.ts,
+#   # src/plugins/manifest.ts and the built app in dist/ (docs/self-hosting.md, "Plain Node").
+#   sudo cp deploy/evora.service /etc/systemd/system/evora.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now evora
+#   journalctl -u evora -f
+#
+# Settings go in /etc/evora/evora.env (one VARIABLE=value per line, readable
+# by root only: it may hold EVORA_GOOGLE_CLIENT_SECRET), e.g.
+#   EVORA_PUBLIC_URL=https://evora.example.com
+#   EVORA_TRUST_PROXY=loopback
+#
+# Change the path of node below if it is not /usr/bin/node (`command -v node`).
+
+[Unit]
+Description=Evora collaboration server and app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=evora
+Group=evora
+WorkingDirectory=/opt/evora
+Environment=NODE_ENV=production
+Environment=EVORA_HOST=127.0.0.1
+Environment=EVORA_PORT=8787
+Environment=EVORA_DATA=/var/lib/evora
+Environment=EVORA_SERVE=/opt/evora/dist
+EnvironmentFile=-/etc/evora/evora.env
+ExecStart=/usr/bin/node server/main.ts
+# SIGTERM stops gracefully (live connections reconnect, the database is closed cleanly).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=2
+
+# Hardening: the service may write only its data folder.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/evora
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# Node's JIT needs writable and executable memory, so MemoryDenyWriteExecute is left off.
+
+[Install]
+WantedBy=multi-user.target

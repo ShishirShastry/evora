@@ -108,8 +108,8 @@ export function keyOf(codes: readonly number[]): string {
 export class FigError extends Error {}
 
 export interface FigEnvironment {
-  /** Undoes raw deflate (for ZIP entries and older chunks). */
-  inflateRaw(bytes: Uint8Array): Promise<Uint8Array>;
+  /** Undoes raw deflate (for ZIP entries and older chunks), giving no more than `limit` bytes when one is given (it throws beyond). */
+  inflateRaw(bytes: Uint8Array, limit?: number): Promise<Uint8Array>;
   /** Compresses with raw deflate, for writing. */
   deflateRaw(bytes: Uint8Array): Promise<Uint8Array>;
   /** The SHA-256 of bytes, as hex: how this application names its images. */
@@ -372,7 +372,10 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
     const parent = obj(change.parentIndex);
     if (!parent.guid) continue;
     const key = guidKey(parent.guid);
-    children.set(key, [...(children.get(key) ?? []), change]);
+    // Added in place: copying the list for each child made a parent with 100,000 children take billions of steps.
+    const siblings = children.get(key);
+    if (siblings) siblings.push(change);
+    else children.set(key, [change]);
   }
   for (const list of children.values()) list.sort((a, b) => (str(obj(a.parentIndex).position) < str(obj(b.parentIndex).position) ? -1 : str(obj(a.parentIndex).position) > str(obj(b.parentIndex).position) ? 1 : 0));
 
@@ -554,6 +557,8 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
 
   const nodes: Record<NodeId, DesignNode> = {};
   const pages: NodeId[] = [];
+  /** The nodes made into layers so far, by their key in the file. */
+  const madeLayers = new Set<string>();
   const root = changes.find((change) => str(change.type) === 'DOCUMENT');
   const documentKey = root ? guidKey(root.guid) : '0:0';
   const canvases = (children.get(documentKey) ?? []).filter((change) => str(change.type) === 'CANVAS');
@@ -828,6 +833,13 @@ async function convert(message: KiwiObject, zipped: Map<string, Uint8Array>, nam
 
   // `pre` is laid over a layer's own transform: what a flipped frame or group passes to what is in it, as it is kept unflipped itself.
   const layer = async (change: KiwiObject, parentId: NodeId, order: string, parentChange: KiwiObject | null, pageId: NodeId, pre: Matrix | null = null): Promise<void> => {
+    // A layer is made once: a file that lists a node twice, or a node inside itself (a cycle of parents), would otherwise be walked for ever.
+    const guidOfLayer = guidKey(change.guid);
+    if (madeLayers.has(guidOfLayer)) {
+      miss('Layers listed more than once, or inside themselves (each was kept once)');
+      return;
+    }
+    madeLayers.add(guidOfLayer);
     const kind = str(change.type);
     // A frame that fits round what is in it and does not clip is how newer files keep a group.
     const isGroup = kind === 'GROUP' || (kind === 'FRAME' && change.resizeToFit === true && change.frameMaskDisabled !== false && !change.fillPaints && !change.stackMode);

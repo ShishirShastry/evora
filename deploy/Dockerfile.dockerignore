@@ -1,0 +1,25 @@
+# What the Docker build does not need (read by BuildKit for deploy/Dockerfile).
+# The build stage runs "npm ci" and "vite build" itself.
+.git
+.github
+.tools
+.claude
+.vscode
+.idea
+node_modules
+dist
+dist-ssr
+release
+coverage
+test-results
+playwright-report
+blob-report
+.vitest-cache
+.evora-server
+wip
+*.log
+.env
+.env.*
+!.env.example
+**/*.tsbuildinfo
+evora-backup-*

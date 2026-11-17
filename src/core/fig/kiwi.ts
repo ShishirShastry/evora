@@ -11,6 +11,9 @@
 
 export class KiwiError extends Error {}
 
+/** How deeply messages and structs may be nested in data that is read. */
+export const MAX_NESTING = 1000;
+
 export interface KiwiField {
   name: string;
   /** A built-in type (bool, byte, int, uint, float, string, int64, uint64) or the name of a definition. Unused for an enum's fields. */
@@ -54,6 +57,23 @@ export class KiwiBuffer {
 
   get atEnd(): boolean {
     return this.at >= this.length;
+  }
+
+  /** How many bytes are left to read. */
+  get remaining(): number {
+    return this.length - this.at;
+  }
+
+  /**
+   * Reads the length of an array. Every element takes at least one byte
+   * (only a struct with no fields takes none, and no real file has an array
+   * of those), so a length greater than what is left is damage, or a hostile
+   * file asking for billions of elements: it is refused at once.
+   */
+  readArrayLength(): number {
+    const count = this.readVarUint();
+    if (count > this.remaining) throw new KiwiError('An array in the data is longer than the data itself.');
+    return count;
   }
 
   /** What has been written. */
@@ -349,13 +369,24 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
     if (!field.isArray) return readOne(field.type, input);
     // Bytes together are kept together.
     if (field.type === 'byte') return input.readByteArray();
-    const count = input.readVarUint();
+    const count = input.readArrayLength();
     const out: KiwiValue[] = [];
     for (let i = 0; i < count; i++) out.push(readOne(field.type, input));
     return out;
   };
 
   let skipping: ReadonlySet<string> = new Set();
+
+  /**
+   * How deeply messages and structs are nested where the data is being read.
+   * A real file nests a few dozen levels; a hostile schema can make a struct
+   * hold itself, which takes no bytes at all, so without a limit reading it
+   * would recurse until the stack overflows.
+   */
+  let nesting = 0;
+  const enter = (): void => {
+    if (++nesting > MAX_NESTING) throw new KiwiError(`The data is nested more than ${MAX_NESTING} levels deep.`);
+  };
 
   const skipOne = (type: string, input: KiwiBuffer): void => {
     switch (type) {
@@ -384,17 +415,22 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
       input.readVarUint();
       return;
     }
-    if (definition.kind === 'STRUCT') {
-      for (const field of definition.fields) skipField(field, input);
-      return;
-    }
-    const fields = byNumber.get(definition.name) as Map<number, KiwiField>;
-    for (;;) {
-      const number = input.readVarUint();
-      if (number === 0) return;
-      const field = fields.get(number);
-      if (!field) throw new KiwiError(`The data has a field (number ${number} of "${definition.name}") that its schema does not have.`);
-      skipField(field, input);
+    enter();
+    try {
+      if (definition.kind === 'STRUCT') {
+        for (const field of definition.fields) skipField(field, input);
+        return;
+      }
+      const fields = byNumber.get(definition.name) as Map<number, KiwiField>;
+      for (;;) {
+        const number = input.readVarUint();
+        if (number === 0) return;
+        const field = fields.get(number);
+        if (!field) throw new KiwiError(`The data has a field (number ${number} of "${definition.name}") that its schema does not have.`);
+        skipField(field, input);
+      }
+    } finally {
+      nesting--;
     }
   };
 
@@ -403,7 +439,7 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
       skipOne(field.type, input);
       return;
     }
-    const count = input.readVarUint();
+    const count = input.readArrayLength();
     if (field.type === 'byte') {
       input.skip(count);
       return;
@@ -413,18 +449,27 @@ export function compileSchema(schema: KiwiSchema): KiwiCodec {
 
   function readObject(definition: KiwiDefinition, input: KiwiBuffer): KiwiObject {
     const out: KiwiObject = {};
-    if (definition.kind === 'STRUCT') {
-      for (const field of definition.fields) out[field.name] = readField(field, input);
-      return out;
-    }
-    const fields = byNumber.get(definition.name) as Map<number, KiwiField>;
-    for (;;) {
-      const number = input.readVarUint();
-      if (number === 0) return out;
-      const field = fields.get(number);
-      if (!field) throw new KiwiError(`The data has a field (number ${number} of "${definition.name}") that its schema does not have.`);
-      if (skipping.has(field.name)) skipField(field, input);
-      else out[field.name] = readField(field, input);
+    enter();
+    try {
+      if (definition.kind === 'STRUCT') {
+        for (const field of definition.fields) {
+          // A field named __proto__ (only a hostile schema has one) would give the object a prototype: it is read past.
+          if (field.name === '__proto__') skipField(field, input);
+          else out[field.name] = readField(field, input);
+        }
+        return out;
+      }
+      const fields = byNumber.get(definition.name) as Map<number, KiwiField>;
+      for (;;) {
+        const number = input.readVarUint();
+        if (number === 0) return out;
+        const field = fields.get(number);
+        if (!field) throw new KiwiError(`The data has a field (number ${number} of "${definition.name}") that its schema does not have.`);
+        if (skipping.has(field.name) || field.name === '__proto__') skipField(field, input);
+        else out[field.name] = readField(field, input);
+      }
+    } finally {
+      nesting--;
     }
   }
 

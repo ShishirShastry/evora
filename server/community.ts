@@ -78,7 +78,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, createReadStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ApiExtension, ApiKit, Ctx } from './api.ts';
-import { readBody } from './http.ts';
+import { looksLike, readBody, uploadType } from './http.ts';
 import { TRASH_WORKSPACE, invalidRegisters, newId, now, type BranchFields, type DocRow, type Identity, type Store, type TrashRow, type UserRow } from './store.ts';
 import { canEdit, type DocInfo, type Register, type Role, type UserRef } from '../src/collab/protocol.ts';
 
@@ -625,7 +625,8 @@ export const extension: ApiExtension = (kit: ApiKit) => {
         args.push(tag.trim().toLowerCase());
       }
       // Every word must be found in the title, the description, a tag or the author's name.
-      const words = (params.get('q') ?? '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5);
+      // At most five words of at most 100 characters each: a search is never an expensive pattern.
+      const words = (params.get('q') ?? '').slice(0, 1000).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5).map((word) => word.slice(0, 100));
       for (const word of words) {
         const like = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
         where.push(
@@ -757,6 +758,8 @@ export const extension: ApiExtension = (kit: ApiKit) => {
       if (!COVER_TYPES.includes(type)) throw new HttpError(400, 'A cover must be a PNG, JPEG or WebP picture');
       const bytes = await readBody(ctx.req, MAX_COVER_BYTES);
       if (bytes.length === 0) throw new HttpError(400, 'The cover is empty');
+      // The bytes must be the picture they are said to be.
+      if (!looksLike(type, bytes)) throw new HttpError(400, 'The cover is not the picture its type says it is');
       writeWhole(join(communityDir(store, resource.id), 'cover'), bytes);
       store.run(`UPDATE community_resources SET cover_type = ?, cover_at = ? WHERE id = ?`, type, now(), resource.id);
       return {};
@@ -777,7 +780,8 @@ export const extension: ApiExtension = (kit: ApiKit) => {
       if (!(JSON.parse(latest.assets) as string[]).includes(hash)) throw new HttpError(400, 'The resource’s latest version does not use this image');
       const bytes = await readBody(ctx.req, kit.maxUploadBytes);
       if (createHash('sha256').update(bytes).digest('hex') !== hash) throw new HttpError(400, 'The bytes do not match their hash');
-      const type = String(ctx.req.headers['content-type'] ?? 'application/octet-stream').slice(0, 200);
+      // Only image types are kept as declared: anything else is served as bytes, never as a page or a script.
+      const type = uploadType(ctx.req.headers['content-type']);
       writeWhole(join(communityDir(store, resource.id), hash), bytes);
       store.run(
         `INSERT INTO community_assets (resource_id, hash, content_type, size, created_at) VALUES (?, ?, ?, ?, ?)
@@ -799,7 +803,7 @@ export const extension: ApiExtension = (kit: ApiKit) => {
         : undefined;
       const path = join(communityDir(store, resource.id), hash);
       if (!asset || !existsSync(path)) throw new HttpError(404, 'There is no such image in this resource');
-      return sendFile(ctx, path, asset.content_type, Number(asset.size), 'public, max-age=31536000, immutable');
+      return sendFile(ctx, path, uploadType(asset.content_type), Number(asset.size), 'public, max-age=31536000, immutable');
     }),
 
     route('GET', '/api/community/resources/:id/versions/:number', (_ctx, params) => {

@@ -1,0 +1,73 @@
+# Evora with Docker Compose. From the repository's root:
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# then open http://localhost:8787 (only this computer: see "ports" below).
+#
+# For HTTPS on a domain of your own, uncomment the "caddy" service, the
+# "caddy-data" and "caddy-config" volumes, set EVORA_DOMAIN (in a .env file
+# next to this one, or in the environment), point the domain's DNS at this
+# machine, and open ports 80 and 443. Caddy gets and renews the certificate
+# itself (Let's Encrypt). Then remove Evora's own "ports" so it is reached only
+# through Caddy, and keep EVORA_TRUST_PROXY so rate limits see real clients.
+#
+# Backups while it runs (docs/self-hosting.md):
+#   docker compose -f deploy/docker-compose.yml exec evora node server/backup.ts --data /data --out /backups/evora-$(date +%F)
+# (into the evora-backups volume; a backup inside the data folder itself is refused).
+
+name: evora
+
+services:
+  evora:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: evora:latest
+    restart: unless-stopped
+    # Longer than EVORA_SHUTDOWN_SECONDS, so a stop is graceful.
+    stop_grace_period: 20s
+    environment:
+      # Every setting is listed in docs/self-hosting.md. The image already sets
+      # EVORA_HOST=0.0.0.0, EVORA_PORT=8787, EVORA_DATA=/data, EVORA_SERVE=/app/dist.
+      EVORA_PUBLIC_URL: ${EVORA_PUBLIC_URL:-}
+      EVORA_GOOGLE_CLIENT_ID: ${EVORA_GOOGLE_CLIENT_ID:-}
+      EVORA_GOOGLE_CLIENT_SECRET: ${EVORA_GOOGLE_CLIENT_SECRET:-}
+      EVORA_MAX_UPLOAD_MB: ${EVORA_MAX_UPLOAD_MB:-50}
+      # Off unless something is in front. With the Caddy service below, the proxy
+      # is on Compose's private network: "private" trusts exactly that.
+      EVORA_TRUST_PROXY: ${EVORA_TRUST_PROXY:-0}
+    ports:
+      # This computer only. For other machines without a proxy, "8787:8787";
+      # with Caddy below, remove this.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - evora-data:/data
+      - evora-backups:/backups
+
+  # caddy:
+  #   image: caddy:2
+  #   restart: unless-stopped
+  #   depends_on:
+  #     evora:
+  #       condition: service_healthy
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #     - "443:443/udp"
+  #   environment:
+  #     EVORA_DOMAIN: ${EVORA_DOMAIN:?set EVORA_DOMAIN to your domain, e.g. evora.example.com}
+  #     EVORA_UPSTREAM: evora:8787
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy-data:/data
+  #     - caddy-config:/config
+  #
+  # With Caddy, also set on the evora service:
+  #   EVORA_TRUST_PROXY: private
+  #   EVORA_PUBLIC_URL: https://${EVORA_DOMAIN}
+
+volumes:
+  evora-data:
+  evora-backups:
+  # caddy-data:
+  # caddy-config:

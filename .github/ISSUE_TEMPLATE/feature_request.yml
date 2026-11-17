@@ -1,0 +1,19 @@
+name: Feature request
+description: Something Evora should do that it does not do yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you are trying to do
+      description: The task or design problem, in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How you would like it to work
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: How other tools do it (optional)

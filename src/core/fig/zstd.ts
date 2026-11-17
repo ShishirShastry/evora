@@ -277,13 +277,17 @@ interface FrameState {
 class Output {
   bytes: Uint8Array;
   length = 0;
-  constructor(size: number) {
-    this.bytes = new Uint8Array(Math.max(1024, size));
+  private readonly limit: number;
+  constructor(size: number, limit: number) {
+    this.limit = limit;
+    this.bytes = new Uint8Array(Math.min(limit, Math.max(1024, size)));
   }
 
   private room(extra: number): void {
     if (this.length + extra <= this.bytes.length) return;
-    const bigger = new Uint8Array(Math.max(this.bytes.length * 2, this.length + extra));
+    // A few bytes can stand for gigabytes (a run of one byte, or a match repeated): what comes out is limited.
+    if (this.length + extra > this.limit) throw new ZstdError(`The compressed data comes to more than ${Math.round(this.limit / 2 ** 20)} MB, which is more than a file is read to.`);
+    const bigger = new Uint8Array(Math.min(this.limit, Math.max(this.bytes.length * 2, this.length + extra)));
     bigger.set(this.bytes.subarray(0, this.length));
     this.bytes = bigger;
   }
@@ -490,9 +494,12 @@ export function isZstd(bytes: Uint8Array): boolean {
 }
 
 /** Undoes Zstandard compression. Throws a `ZstdError` when the data is damaged or uses what is not supported. */
-export function zstdDecompress(bytes: Uint8Array): Uint8Array {
+/** The most bytes compressed data is read to (1 GiB): beyond that it is refused as damaged or hostile. */
+export const MAX_DECOMPRESSED_BYTES = 2 ** 30;
+
+export function zstdDecompress(bytes: Uint8Array, maxOutput: number = MAX_DECOMPRESSED_BYTES): Uint8Array {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const out = new Output(bytes.length * 4);
+  const out = new Output(bytes.length * 4, maxOutput);
   let at = 0;
   while (at < bytes.length) {
     if (at + 4 > bytes.length) throw new ZstdError('The compressed data ends too soon.');

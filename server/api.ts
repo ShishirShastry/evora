@@ -29,7 +29,7 @@ import {
   type Register,
   type Role,
 } from '../src/collab/protocol.ts';
-import { HttpError, clientAddress, match, readBody, readJson, route, sendError, sendJson, type Route } from './http.ts';
+import { HttpError, clientAddress, match, readBody, readJson, route, securityHeaders, sendError, sendJson, uploadType, type Route } from './http.ts';
 import { RateLimiter, decoyHash, hashPassword, hashToken, newToken, verifyPassword } from './auth.ts';
 import {
   DocumentLockedError,
@@ -75,10 +75,28 @@ export interface Limits {
   guests: number;
   /** Requests to the routes that count something (plugin installs, Community copies) from one address in a window. */
   counted: number;
+  /** Wrong passwords allowed per address in a window, whatever the email (against trying one password on many accounts). */
+  loginAddressFailures: number;
+  /** Comments (new threads, replies and edits) one person may post in a window. */
+  comments: number;
+  /** Invitations (by email or as links, to workspaces and documents) one account may make in a window. */
+  invites: number;
+  /** Images one person may upload in a window. */
+  uploads: number;
   windowMs: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { loginFailures: 10, signups: 100, guests: 200, counted: 300, windowMs: 15 * 60 * 1000 };
+export const DEFAULT_LIMITS: Limits = {
+  loginFailures: 10,
+  signups: 100,
+  guests: 200,
+  counted: 300,
+  loginAddressFailures: 100,
+  comments: 600,
+  invites: 300,
+  uploads: 5000,
+  windowMs: 15 * 60 * 1000,
+};
 
 /** A document in a list: its info, and its branches (a branch is listed only with its main file). */
 export type ListedDoc = DocInfo & BranchFields;
@@ -214,11 +232,34 @@ function commentBody(body: Record<string, unknown>): string {
 
 // ------------------------------------------------------------------ the API
 
-export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
-  const loginFailures = new RateLimiter(options.limits.loginFailures, options.limits.windowMs);
-  const signups = new RateLimiter(options.limits.signups, options.limits.windowMs);
-  const guests = new RateLimiter(options.limits.guests, options.limits.windowMs);
-  const counted = new RateLimiter(options.limits.counted, options.limits.windowMs);
+/** The API: a request handler, with its routes (which the security tests walk, every one of them). */
+export type ApiHandler = ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & { readonly routes: readonly Route<Ctx>[] };
+
+export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandler {
+  const limits: Limits = { ...DEFAULT_LIMITS, ...options.limits };
+  const loginFailures = new RateLimiter(limits.loginFailures, limits.windowMs);
+  const loginAddressFailures = new RateLimiter(limits.loginAddressFailures, limits.windowMs);
+  const signups = new RateLimiter(limits.signups, limits.windowMs);
+  const guests = new RateLimiter(limits.guests, limits.windowMs);
+  const counted = new RateLimiter(limits.counted, limits.windowMs);
+  const commentLimit = new RateLimiter(limits.comments, limits.windowMs);
+  const inviteLimit = new RateLimiter(limits.invites, limits.windowMs);
+  const uploadLimit = new RateLimiter(limits.uploads, limits.windowMs);
+
+  /** Counts one more of something limited for `key`, refusing it (429) beyond the limit. */
+  function limited(limiter: RateLimiter, key: string, message: string): void {
+    if (!limiter.allowed(key)) throw new HttpError(429, message);
+    limiter.hit(key);
+  }
+
+  /** Ends the sessions of an account (all, or all but `keep`) and closes the live connections made with them. */
+  function endSessions(userId: string, keep: string | null): void {
+    for (const session of store.all<{ token_hash: string }>(`SELECT token_hash FROM sessions WHERE user_id = ?`, userId)) {
+      if (session.token_hash === keep) continue;
+      store.run(`DELETE FROM sessions WHERE token_hash = ?`, session.token_hash);
+      hub.endSession(session.token_hash);
+    }
+  }
 
   // -------------------------------------------------------------- who is asking
 
@@ -425,13 +466,14 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const address = email(body);
       const secret = typeof body.password === 'string' ? body.password : '';
       const key = `${ctx.ip}|${address}`;
-      if (!loginFailures.allowed(key)) throw new HttpError(429, 'Too many wrong attempts: try again later');
+      if (!loginFailures.allowed(key) || !loginAddressFailures.allowed(ctx.ip)) throw new HttpError(429, 'Too many wrong attempts: try again later');
       const user = store.userByEmail(address);
       // An unknown email, or an account made with Google that has no password, is checked against a decoy,
       // so it takes as long as a wrong password and gets the same answer.
       const ok = (await verifyPassword(secret, user?.password ? user.password : await decoyHash())) && !!user?.password;
       if (!ok || !user) {
         loginFailures.hit(key);
+        loginAddressFailures.hit(ctx.ip);
         throw new HttpError(401, 'Wrong email or password');
       }
       loginFailures.reset(key);
@@ -443,6 +485,12 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         store.run(`DELETE FROM sessions WHERE token_hash = ?`, ctx.who.sessionHash);
         hub.endSession(ctx.who.sessionHash);
       }
+      return {};
+    }),
+
+    // Signing out everywhere: every session of the account ends, this one too, and the live connections made with them are closed.
+    route('POST', '/api/auth/logout-all', (ctx) => {
+      endSessions(requireUser(ctx).id, null);
       return {};
     }),
 
@@ -537,6 +585,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       if (!EMAIL.test(address) || address.length > 254) return fail('Google gave an email address that cannot be used');
 
       let user: UserRow;
+      let linkedSessions: string[] = [];
       try {
         user = store.tx(() => {
           const bySub = store.userByGoogle(profile.sub);
@@ -546,6 +595,10 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
             if (byEmail.google_sub) throw new HttpError(409, 'The account with this email is linked to another Google account');
             // Google has verified that the address is theirs: the account is linked to this Google account.
             store.run(`UPDATE users SET google_sub = ? WHERE id = ?`, profile.sub, byEmail.id);
+            // Accounts are made without checking the email, so whoever made this one may not be the address's owner:
+            // every session started before Google proved who owns it ends now (their live connections are closed below).
+            linkedSessions = store.all<{ token_hash: string }>(`SELECT token_hash FROM sessions WHERE user_id = ?`, byEmail.id).map((row) => row.token_hash);
+            store.run(`DELETE FROM sessions WHERE user_id = ?`, byEmail.id);
             return { ...byEmail, google_sub: profile.sub };
           }
           if (!signups.allowed(ctx.ip)) throw new HttpError(429, 'Too many accounts made from here: try again later');
@@ -557,6 +610,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         if (error instanceof HttpError) return fail(error.message);
         throw error;
       }
+      for (const hash of linkedSessions) hub.endSession(hash);
 
       // Started from an invite link: joined at once, as accepting it does.
       if (found.invite) {
@@ -619,14 +673,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         if (color !== undefined) store.run(`UPDATE users SET color = ? WHERE id = ?`, color, user.id);
         if (hashed !== undefined) store.run(`UPDATE users SET password = ? WHERE id = ?`, hashed, user.id);
       });
-      if (hashed !== undefined && ctx.who.kind === 'user') {
-        // A new password ends every other session: whoever knew the old one is signed out.
-        const current = ctx.who.sessionHash;
-        for (const session of store.all<{ token_hash: string }>(`SELECT token_hash FROM sessions WHERE user_id = ? AND token_hash != ?`, user.id, current)) {
-          store.run(`DELETE FROM sessions WHERE token_hash = ?`, session.token_hash);
-          hub.endSession(session.token_hash);
-        }
-      }
+      // A new password ends every other session: whoever knew the old one is signed out.
+      if (hashed !== undefined && ctx.who.kind === 'user') endSessions(user.id, ctx.who.sessionHash);
       const updated = store.userById(user.id) as UserRow;
       if (name !== undefined || color !== undefined) hub.renamePerson(updated);
       return store.userDto(updated);
@@ -663,6 +711,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const address = email(body);
       const wanted = role(body);
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
+      limited(inviteLimit, user.id, 'Too many invitations: try again later');
       const invitee = store.userByEmail(address);
       store.tx(() => {
         if (invitee) {
@@ -714,6 +763,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const { workspace, role: mine, user } = workspaceOf(ctx, params.id as string, 'editor');
       const wanted = role(await ctx.json());
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
+      limited(inviteLimit, user.id, 'Too many invitations: try again later');
       const token = newToken();
       store.run(`INSERT INTO invite_links (token_hash, workspace_id, role, created_by, created_at) VALUES (?, ?, ?, ?, ?)`, hashToken(token), workspace.id, wanted, user.id, now());
       return { token };
@@ -817,6 +867,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const address = email(body);
       const wanted = role(body);
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
+      limited(inviteLimit, user.id, 'Too many invitations: try again later');
       const invitee = store.userByEmail(address);
       store.tx(() => {
         if (invitee) {
@@ -875,9 +926,11 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       requireChangeable(doc);
       const hash = params.hash as string;
       if (!ASSET_HASH.test(hash)) throw new HttpError(400, 'An image is named by the SHA-256 of its bytes, in lowercase hex');
+      limited(uploadLimit, personId(ctx.who) ?? ctx.ip, 'Too many images uploaded: try again later');
       const bytes = await readBody(ctx.req, options.maxUploadBytes);
       if (createHash('sha256').update(bytes).digest('hex') !== hash) throw new HttpError(400, 'The bytes do not match their hash');
-      const type = String(ctx.req.headers['content-type'] ?? 'application/octet-stream').slice(0, 200);
+      // Only image types are kept as they were declared: anything else is served as bytes, never as a page or a script.
+      const type = uploadType(ctx.req.headers['content-type']);
       const path = store.assetPath(doc.id, hash);
       mkdirSync(dirname(path), { recursive: true });
       // Written beside it first and then renamed, so a reader never sees half a file.
@@ -904,7 +957,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
         : undefined;
       if (!asset) throw new HttpError(404, 'There is no such image in this document');
       ctx.res.writeHead(200, {
-        'Content-Type': asset.content_type,
+        // Rows kept before uploads were checked may hold any type: they are served by the same rule.
+        'Content-Type': uploadType(asset.content_type),
         'Content-Length': Number(asset.size),
         'Cache-Control': 'private, max-age=31536000, immutable',
         'X-Content-Type-Options': 'nosniff',
@@ -924,6 +978,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
     route('POST', '/api/documents/:id/threads', async (ctx, params) => {
       const { doc } = docOf(ctx, params.id as string);
       const author = requirePerson(ctx);
+      limited(commentLimit, author.id, 'Too many comments: try again later');
       const body = await ctx.json();
       const pageId = text(body, 'pageId', 200);
       const x = finite(body, 'x');
@@ -942,6 +997,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
     route('POST', '/api/threads/:id/comments', async (ctx, params) => {
       const { thread, doc } = threadOf(ctx, params.id as string);
       const author = requirePerson(ctx);
+      limited(commentLimit, author.id, 'Too many comments: try again later');
       const words = commentBody(await ctx.json());
       store.tx(() => {
         const comment = store.addComment(thread.id, author, words);
@@ -979,6 +1035,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       const { thread, doc } = threadOf(ctx, comment.thread_id);
       requirePerson(ctx);
       if (!isAuthor(ctx, { id: comment.author_id, guest: comment.author_guest === 1 })) throw new HttpError(403, 'Only its author can change a comment');
+      limited(commentLimit, comment.author_id, 'Too many comments: try again later');
       const words = commentBody(await ctx.json());
       const before = JSON.parse(comment.mentions) as string[];
       store.tx(() => {
@@ -1041,7 +1098,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
   };
   for (const extension of options.extensions ?? []) routes.push(...extension(kit));
 
-  return async (req, res) => {
+  const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    securityHeaders(req, res);
     const url = new URL(req.url ?? '/', 'http://localhost');
     try {
       const found = match(routes, req.method ?? 'GET', url.pathname);
@@ -1074,4 +1132,5 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       }
     }
   };
+  return Object.assign(handler, { routes: routes as readonly Route<Ctx>[] });
 }

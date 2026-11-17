@@ -1,0 +1,30 @@
+# Caddy in front of Evora: automatic HTTPS (certificates from Let's Encrypt,
+# renewed by Caddy) and the WebSocket at /ws passed through (Caddy does that
+# without extra settings).
+#
+# On a machine of its own (systemd, Evora on 127.0.0.1:8787): replace
+# {$EVORA_DOMAIN} with your domain or set EVORA_DOMAIN, then
+#   caddy run --config /etc/caddy/Caddyfile
+# and start Evora with
+#   EVORA_TRUST_PROXY=loopback EVORA_PUBLIC_URL=https://evora.example.com
+#
+# Caddy sets X-Forwarded-For (appending the address it saw), X-Forwarded-Proto
+# and X-Forwarded-Host itself.
+
+{$EVORA_DOMAIN} {
+	encode zstd gzip
+
+	# Uploads up to Evora's own limit (EVORA_MAX_UPLOAD_MB, 50 by default).
+	request_body {
+		max_size 64MB
+	}
+
+	# Where Evora is: 127.0.0.1:8787 on the same machine; docker-compose.yml sets evora:8787.
+	reverse_proxy {$EVORA_UPSTREAM:127.0.0.1:8787} {
+		# Long-lived WebSocket connections are kept through a reload of Caddy for a while.
+		stream_close_delay 5m
+	}
+}
+
+# With docker-compose.yml, EVORA_UPSTREAM=evora:8787 points it at the evora service,
+# and EVORA_TRUST_PROXY=private on that service trusts Caddy on Compose's network.

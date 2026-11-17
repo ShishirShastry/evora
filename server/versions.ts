@@ -503,7 +503,8 @@ export function setup(store: Store): void {
 function resolutionsOf(body: Record<string, unknown>, HttpError: ApiKit['HttpError']): Record<string, Resolution> {
   const raw = body.resolutions ?? {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, 'resolutions must map register keys to "main" or "branch"');
-  const out: Record<string, Resolution> = {};
+  // No prototype: a register key such as "constructor" or "__proto__" is only ever a key here.
+  const out = Object.create(null) as Record<string, Resolution>;
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (value !== 'main' && value !== 'branch') throw new HttpError(400, 'Each resolution must be "main" or "branch"');
     out[key] = value;

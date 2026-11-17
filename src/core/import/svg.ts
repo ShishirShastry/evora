@@ -159,6 +159,9 @@ function rectangleOf(layer: ImportedLayer): (Box & { radius: number }) | null {
 }
 
 /** Reads an SVG file. Throws an `SvgImportError` when it is not one. */
+/** The most elements an SVG file is read to, its repeats (<use>) counted each time. */
+export const MAX_SVG_ELEMENTS = 50_000;
+
 export function readSvg(source: string, measurer?: TextMeasurer): ImportedSvg {
   let root: XmlElement;
   try {
@@ -181,7 +184,9 @@ export function readSvg(source: string, measurer?: TextMeasurer): ImportedSvg {
     }
     return out;
   };
-  const index = (element: XmlElement): void => {
+  const index = (element: XmlElement, depth = 0): void => {
+    // Deeper than anything is imported (walk stops at 64): not looked into, so a hostile file cannot overflow the stack here.
+    if (depth > 256) return;
     if (element.attributes.id) byId.set(element.attributes.id, element);
     if (localName(element.name) === 'style') {
       // Rules of the simple kinds exported files have: a class, an ID, or an element's name.
@@ -189,7 +194,7 @@ export function readSvg(source: string, measurer?: TextMeasurer): ImportedSvg {
         for (const selector of (rule[1] as string).split(',')) rules.push({ selector: selector.trim(), style: declarations(rule[2] as string) });
       }
     }
-    for (const child of elements(element)) index(child);
+    for (const child of elements(element)) index(child, depth + 1);
   };
   index(root);
 
@@ -371,7 +376,9 @@ export function readSvg(source: string, measurer?: TextMeasurer): ImportedSvg {
     let first: { x: number; y: number } | null = null;
     // The element the first words are in: a text layer has one style, and it is theirs.
     let source: XmlElement | null = null;
-    const walk = (node: XmlElement, x: number | undefined, y: number | undefined): void => {
+    const walk = (node: XmlElement, x: number | undefined, y: number | undefined, depth = 0): void => {
+      // Text in spans nested deeper than this is left out: a hostile file could nest them until the stack overflows.
+      if (depth > 64) return;
       for (const child of node.children) {
         if (typeof child === 'string') {
           const content = child.replace(/\s+/g, ' ');
@@ -384,7 +391,7 @@ export function readSvg(source: string, measurer?: TextMeasurer): ImportedSvg {
           const cy = child.attributes.y !== undefined ? length(child.attributes.y) : undefined;
           if ((cy !== undefined || child.attributes.dy !== undefined) && lines.length > 0 && (lines[lines.length - 1] as string).trim() !== '') lines.push('');
           if (first === null && cx !== undefined && cy !== undefined) first = { x: cx, y: cy };
-          walk(child, cx ?? x, cy ?? y);
+          walk(child, cx ?? x, cy ?? y, depth + 1);
         }
       }
     };
@@ -430,9 +437,13 @@ export function readSvg(source: string, measurer?: TextMeasurer): ImportedSvg {
   const SHAPES = new Set(['path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon']);
   const SKIPPED = new Set(['defs', 'style', 'title', 'desc', 'metadata', 'linearGradient', 'radialGradient', 'symbol', 'namedview', 'script']);
 
+  // Elements visited, against a file whose <use>s repeat groups of <use>s of groups (a "billion laughs"):
+  // each level multiplies what is made, so a few kilobytes could ask for billions of layers.
+  let visited = 0;
   const walk = (element: XmlElement, context: Context, depth: number): ImportedLayer[] => {
     const kind = localName(element.name);
     if (SKIPPED.has(kind) || depth > 64) return [];
+    if (++visited > MAX_SVG_ELEMENTS) throw new SvgImportError(`This SVG file has more than ${MAX_SVG_ELEMENTS.toLocaleString('en')} shapes once its repeats are counted, which is more than is imported.`);
     const { style, own } = styleOf(element, context.style);
     if (own.display === 'none' || style.visibility === 'hidden') return [];
     const clipped = own['clip-path'] !== undefined && own['clip-path'] !== 'none';

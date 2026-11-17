@@ -21,7 +21,8 @@ function decode(text: string): string {
       const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
     }
-    return ENTITIES[body] ?? whole;
+    // Only the entities named here: "&constructor;" is not one, whatever an object's prototype has.
+    return Object.hasOwn(ENTITIES, body) ? (ENTITIES[body] as string) : whole;
   });
 }
 
@@ -122,7 +123,15 @@ export function elements(element: XmlElement): XmlElement[] {
 
 /** All the text in an element and what is in it. */
 export function textOf(element: XmlElement): string {
-  return element.children.map((child) => (typeof child === 'string' ? child : textOf(child))).join('');
+  // Walked without recursion: a hostile file can nest elements a hundred thousand deep.
+  const out: string[] = [];
+  const stack: (XmlElement | string)[] = [...element.children].reverse();
+  while (stack.length > 0) {
+    const child = stack.pop() as XmlElement | string;
+    if (typeof child === 'string') out.push(child);
+    else for (let i = child.children.length - 1; i >= 0; i--) stack.push(child.children[i] as XmlElement | string);
+  }
+  return out.join('');
 }
 
 /** The name of an element or attribute without its namespace prefix. */

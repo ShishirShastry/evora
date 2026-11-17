@@ -1,4 +1,5 @@
 import { currentAuth, type Auth } from './account';
+import { linkOrigin } from './endpoint';
 import {
   API_BASE,
   type AuthProviders,
@@ -224,7 +225,7 @@ export function createApi(options: ApiOptions = {}) {
     notifications: () => json<Notification[]>('GET', '/notifications'),
     markNotificationsRead: (ids: string[]) => json<Record<string, never>>('POST', '/notifications/read', { ids }),
 
-    health: () => json<{ ok: true; version: string }>('GET', '/health'),
+    health: () => json<{ ok: true; version: string; uptime: number; db: 'ok' }>('GET', '/health'),
   };
 }
 
@@ -234,12 +235,12 @@ export type EvoraApi = ReturnType<typeof createApi>;
 export const api: EvoraApi = createApi();
 
 /** A link that opens a shared document, to copy and send. */
-export function documentLink(docId: string, origin: string = typeof location === 'undefined' ? '' : `${location.origin}${location.pathname}`): string {
+export function documentLink(docId: string, origin: string = linkOrigin()): string {
   return `${origin}#/doc/${docId}`;
 }
 
 /** A link that invites whoever follows it into a workspace. */
-export function inviteLink(token: string, origin: string = typeof location === 'undefined' ? '' : `${location.origin}${location.pathname}`): string {
+export function inviteLink(token: string, origin: string = linkOrigin()): string {
   return `${origin}#/invite/${token}`;
 }
 

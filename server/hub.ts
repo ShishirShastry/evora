@@ -18,7 +18,7 @@
 import type { Store, Identity, DocRow, UserRow } from './store.ts';
 import { DocumentLockedError, IN_TRASH_MESSAGE, invalidRegisters, personId } from './store.ts';
 import { hashToken } from './auth.ts';
-import { CLOSE_GOING_AWAY, type WebSocketConnection } from './websocket.ts';
+import { CLOSE_GOING_AWAY, CLOSE_POLICY, type WebSocketConnection } from './websocket.ts';
 import {
   SOCKET_CLOSE,
   canEdit,
@@ -44,6 +44,13 @@ export const CLOSE_REPLACED = SOCKET_CLOSE.replaced;
 
 /** How long a connection may stay without saying hello. */
 const HELLO_TIMEOUT_MS = 30_000;
+/** The largest message a connection may send before its hello is accepted (a hello is a few hundred bytes). */
+export const MAX_HELLO_BYTES = 64 * 1024;
+/** How many messages one connection may send in MESSAGE_WINDOW_MS; more closes it (1008), against floods. */
+export const MAX_MESSAGES_PER_WINDOW = 20_000;
+export const MESSAGE_WINDOW_MS = 10_000;
+/** The longest layer ID kept in presence (a selection), so that presence passed on to everyone stays small. */
+const MAX_PRESENCE_ID = 200;
 
 interface Client {
   conn: WebSocketConnection;
@@ -55,6 +62,10 @@ interface Client {
   linkAccess: LinkAccess;
   presence: Presence | null;
   helloTimer: ReturnType<typeof setTimeout> | null;
+  /** The largest message this connection may send once it has said hello. */
+  maxMessageBytes: number;
+  /** Messages counted in the current window, against floods. */
+  window: { start: number; count: number };
 }
 
 export interface HubOptions {
@@ -78,7 +89,7 @@ export function cleanPresence(value: unknown): Presence | null {
     if (!isFiniteNumber(c.x) || !isFiniteNumber(c.y)) return null;
     cursor = { x: c.x, y: c.y };
   }
-  const selection = Array.isArray(p.selection) ? p.selection.filter((id): id is string => typeof id === 'string').slice(0, 10_000) : [];
+  const selection = Array.isArray(p.selection) ? p.selection.filter((id): id is string => typeof id === 'string' && id.length <= MAX_PRESENCE_ID).slice(0, 10_000) : [];
   let viewport: Presence['viewport'] = null;
   if (p.viewport !== null && p.viewport !== undefined) {
     const v = p.viewport as Record<string, unknown>;
@@ -116,7 +127,11 @@ export class Hub {
       linkAccess: 'none',
       presence: null,
       helloTimer: null,
+      maxMessageBytes: conn.maxMessageBytes,
+      window: { start: Date.now(), count: 0 },
     };
+    // Until it says who it is, a connection may send only small messages: nobody unknown can make the server hold megabytes.
+    conn.maxMessageBytes = Math.min(conn.maxMessageBytes, MAX_HELLO_BYTES);
     client.helloTimer = setTimeout(() => {
       if (!client.docId) this.refuse(client, 'bad-request', 'No hello was sent', CLOSE_BAD_REQUEST);
     }, HELLO_TIMEOUT_MS);
@@ -172,6 +187,15 @@ export class Hub {
   // -------------------------------------------------------------- receiving
 
   private receive(client: Client, data: string | Buffer, binary: boolean): void {
+    const nowMs = Date.now();
+    if (nowMs - client.window.start >= MESSAGE_WINDOW_MS) client.window = { start: nowMs, count: 0 };
+    if (++client.window.count > MAX_MESSAGES_PER_WINDOW) {
+      if (client.window.count === MAX_MESSAGES_PER_WINDOW + 1) {
+        this.send(client, { t: 'error', code: 'bad-request', message: 'Too many messages: slow down' });
+        client.conn.close(CLOSE_POLICY, 'Too many messages');
+      }
+      return;
+    }
     if (binary) {
       this.send(client, { t: 'error', code: 'bad-request', message: 'Messages are JSON text' });
       return;
@@ -250,6 +274,7 @@ export class Hub {
     }
     if (client.helloTimer) clearTimeout(client.helloTimer);
     client.helloTimer = null;
+    client.conn.maxMessageBytes = client.maxMessageBytes;
     client.docId = doc.id;
     client.clientId = clientId;
     client.identity = identity;

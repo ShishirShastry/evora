@@ -6,6 +6,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
+import { securityHeaders } from './http.ts';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -33,6 +34,44 @@ const TYPES: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 
+/**
+ * The Content-Security-Policy of the served app, for `host` (the Host the
+ * page was asked for, so that its WebSocket at /ws on the same host is
+ * allowed).
+ *
+ * - Scripts: the app's own files. `'unsafe-inline'` is there for plugins: a
+ *   plugin runs in a sandboxed `srcdoc` frame (src/plugins/runtime.ts), and a
+ *   `srcdoc` document inherits this policy, so without it the plugin's inline
+ *   scripts could not run. The app itself has no inline script and renders
+ *   text only through React (no `dangerouslySetInnerHTML`). No `eval`.
+ * - Network: only this server (`connect-src 'self'` and its WebSocket).
+ *   Plugin frames add their own `connect-src 'none'`, and a plugin frame that
+ *   tries to navigate itself to another site (to carry data out) is stopped
+ *   by `frame-src`, which allows only this site and local frames.
+ * - Never framed by another site (`frame-ancestors 'none'`), no plugins
+ *   (`object-src 'none'`), no `<base>` elsewhere, forms only to this site.
+ */
+export function appCsp(host: string | undefined): string {
+  const safeHost = host && /^[A-Za-z0-9.\-:[\]]+$/.test(host) ? host : null;
+  const sockets = safeHost ? ` ws://${safeHost} wss://${safeHost}` : '';
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "media-src 'self' data: blob:",
+    `connect-src 'self'${sockets}`,
+    "worker-src 'self' blob:",
+    "frame-src 'self' blob: data:",
+    "child-src 'self' blob: data:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
+
 function fileAt(path: string): { size: number } | null {
   try {
     const stats = statSync(path);
@@ -44,6 +83,8 @@ function fileAt(path: string): { size: number } | null {
 
 /** Answers a request for the built app from `root`. */
 export function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): void {
+  securityHeaders(req, res);
+  res.setHeader('Content-Security-Policy', appCsp(req.headers.host));
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Method not allowed');

@@ -11,6 +11,7 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlit
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHmac, randomBytes } from 'node:crypto';
+import { MAX_JSON_DEPTH, tooDeep } from './http.ts';
 import {
   PEOPLE_COLORS,
   mentionsIn,
@@ -199,14 +200,22 @@ export function excerpt(body: string, length = 140): string {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
-const CLOCK_PATTERN = /^[0-9a-z]{9}\.[0-9a-z]{4,}\.[^\s]{1,64}$/;
+/**
+ * A clock: 9 base-36 digits of milliseconds, a counter of 4 to 11 digits (11
+ * hold every counter up to Number.MAX_SAFE_INTEGER; a longer one would be
+ * read as a rounded number or as Infinity by every client that sees it, and
+ * would make each clock a client makes after it invalid), and a client ID.
+ */
+const CLOCK_PATTERN = /^[0-9a-z]{9}\.[0-9a-z]{4,11}\.[^\s]{1,64}$/;
 /** How far ahead of the server's own clock a change's clock may be: further than this, it would win over every later change. */
 export const MAX_CLOCK_LEAD_MS = 24 * 60 * 60 * 1000;
 export const MAX_KEY_LENGTH = 1024;
 
 /**
  * Checks changes sent by a client. Returns a reason when one is not valid:
- * the key must be a non-empty string, the clock a clock, the value present.
+ * the key must be a non-empty string with no `__proto__` part (the app
+ * builds objects from the parts of keys), the clock a clock whose counter is
+ * a safe integer, the value present and nested at most MAX_JSON_DEPTH deep.
  */
 export function invalidRegisters(ops: unknown, nowMs: number): string | null {
   if (!Array.isArray(ops)) return 'ops must be a list';
@@ -214,10 +223,13 @@ export function invalidRegisters(ops: unknown, nowMs: number): string | null {
     if (!op || typeof op !== 'object') return 'a change must be an object';
     const { k, c } = op as { k?: unknown; c?: unknown };
     if (typeof k !== 'string' || k.length === 0 || k.length > MAX_KEY_LENGTH) return 'a change needs a key';
+    if (k.split(':').includes('__proto__')) return 'a key may not have a part named __proto__';
     if (!('v' in op)) return `the change to ${k} has no value`;
     if (typeof c !== 'string' || !CLOCK_PATTERN.test(c)) return `the change to ${k} has no valid clock`;
     const ms = parseInt(c.slice(0, 9), 36);
     if (ms > nowMs + MAX_CLOCK_LEAD_MS) return `the change to ${k} has a clock too far in the future`;
+    if (parseInt(c.slice(10, c.indexOf('.', 10)), 36) > Number.MAX_SAFE_INTEGER) return `the change to ${k} has a clock whose counter is too large`;
+    if (tooDeep((op as { v: unknown }).v)) return `the value of ${k} is nested more than ${MAX_JSON_DEPTH} levels deep`;
   }
   return null;
 }
@@ -408,6 +420,8 @@ const SCHEMA_VERSION = 2;
 
 /** A session ends when it has not been used for this long. */
 export const SESSION_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
+/** A session ends this long after it started, however often it is used: a stolen token does not work for ever. */
+export const SESSION_MAX_MS = 365 * 24 * 60 * 60 * 1000;
 
 const ROLE_RANK: Record<Role, number> = { owner: 3, editor: 2, viewer: 1 };
 
@@ -562,14 +576,15 @@ export class Store {
 
   /** The user a session token (by its hash) belongs to; a session not used for SESSION_IDLE_MS has ended. */
   sessionUser(tokenHash: string): UserRow | undefined {
-    const row = this.one<UserRow & { last_used: number }>(
-      `SELECT u.id, u.email, u.name, u.color, u.password, u.created_at, s.last_used FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
+    const row = this.one<UserRow & { last_used: number; started: string }>(
+      `SELECT u.id, u.email, u.name, u.color, u.password, u.created_at, s.last_used, s.created_at AS started FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
       tokenHash,
     );
     if (!row) return undefined;
     const nowMs = Date.now();
     const idle = nowMs - Number(row.last_used);
-    if (idle > SESSION_IDLE_MS) {
+    const age = nowMs - Date.parse(row.started);
+    if (idle > SESSION_IDLE_MS || age > SESSION_MAX_MS) {
       this.run(`DELETE FROM sessions WHERE token_hash = ?`, tokenHash);
       return undefined;
     }

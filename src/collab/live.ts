@@ -1,6 +1,7 @@
 import { getAncestorIds, type Document, type NodeId } from '../core';
 import type { DocumentStorage, StoredAsset } from '../persistence/storage';
 import type { EditorStore } from '../state/editorStore';
+import { configuredSocketUrl } from './endpoint';
 import { defaultOfflineStore, type OfflineStore } from './offline';
 import {
   API_BASE,
@@ -291,6 +292,9 @@ const SILENCE_LIMIT = 60_000;
 const PENDING_DELAY = 100;
 
 function defaultSocketUrl(): string {
+  // The desktop app names its server (src/collab/endpoint.ts); a browser uses its own origin.
+  const configured = configuredSocketUrl();
+  if (configured !== null) return configured;
   if (typeof location === 'undefined') return `ws://localhost:${DEFAULT_SERVER_PORT}${SOCKET_PATH}`;
   return `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${SOCKET_PATH}`;
 }

@@ -1,0 +1,22 @@
+{
+  // The desktop app's main process and preload (Phase 10), compiled to dist-electron/ by "desktop:build".
+  // The main process is an ES module (package.json "type": "module"); the preload is CommonJS (.cts → .cjs),
+  // because a sandboxed preload cannot load modules.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "..",
+    "outDir": "../dist-electron",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["./*.ts", "./*.cts", "../src/persistence/desktopContract.ts"],
+  "exclude": ["./*.test.ts"]
+}

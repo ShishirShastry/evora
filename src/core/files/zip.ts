@@ -94,7 +94,10 @@ export function isZip(bytes: Uint8Array): boolean {
  * Reads an archive. `inflate` undoes raw deflate, for the entries that are
  * compressed. Throws when the bytes are not an archive it can read.
  */
-export async function readZip(bytes: Uint8Array, inflate: (bytes: Uint8Array) => Promise<Uint8Array>): Promise<ZipEntry[]> {
+/** The most bytes the entries of an archive may come to when read (1 GiB): a ZIP bomb is refused, not unpacked. */
+export const MAX_ZIP_BYTES = 2 ** 30;
+
+export async function readZip(bytes: Uint8Array, inflate: (bytes: Uint8Array, limit?: number) => Promise<Uint8Array>, maxTotal: number = MAX_ZIP_BYTES): Promise<ZipEntry[]> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let end = -1;
   for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 22 - 65535; i--) {
@@ -107,6 +110,7 @@ export async function readZip(bytes: Uint8Array, inflate: (bytes: Uint8Array) =>
   const count = view.getUint16(end + 10, true);
   let at = view.getUint32(end + 16, true);
   const out: ZipEntry[] = [];
+  let total = 0;
   for (let i = 0; i < count; i++) {
     if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) throw new Error('The ZIP archive is damaged.');
     const method = view.getUint16(at + 10, true);
@@ -119,12 +123,18 @@ export async function readZip(bytes: Uint8Array, inflate: (bytes: Uint8Array) =>
     at += 46 + nameLength + extraLength + commentLength;
     if (local + 30 > bytes.length || view.getUint32(local, true) !== 0x04034b50) throw new Error('The ZIP archive is damaged.');
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    if (start + packed > bytes.length) throw new Error('The ZIP archive is damaged: an entry runs past its end.');
     const data = bytes.subarray(start, start + packed);
     // A name that ends in a slash is a folder, which holds nothing itself.
     if (name.endsWith('/')) continue;
-    if (method === 0) out.push({ name, bytes: data });
-    else if (method === 8) out.push({ name, bytes: await inflate(data) });
+    let entry: Uint8Array;
+    if (method === 0) entry = data;
+    else if (method === 8) entry = await inflate(data, maxTotal - total);
     else throw new Error(`The ZIP archive uses a kind of compression (${method}) that cannot be read.`);
+    // Entries may all point at the same bytes, and deflate packs a thousand to one: what they come to is limited.
+    total += entry.length;
+    if (total > maxTotal) throw new Error(`The ZIP archive unpacks to more than ${Math.round(maxTotal / 2 ** 20)} MB, which is more than is read.`);
+    out.push({ name, bytes: entry });
   }
   return out;
 }

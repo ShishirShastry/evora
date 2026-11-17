@@ -17,7 +17,7 @@ describe('accounts', () => {
   it('answers the health check with the version', async () => {
     const answer = await call(server, 'GET', '/api/health');
     expect(answer.status).toBe(200);
-    expect(answer.body).toEqual({ ok: true, version: expect.any(String) });
+    expect(answer.body).toEqual({ ok: true, version: expect.any(String), uptime: expect.any(Number), db: 'ok' });
   });
 
   it('signs up with an email, a name and a password, and gives a personal workspace', async () => {

@@ -1,0 +1,315 @@
+# Release: pushing a tag vX.Y.Z builds the desktop installers on Windows, macOS
+# and Linux and the self-hosting bundle, and puts them on a DRAFT GitHub Release
+# for that tag. Nothing is published to users until the draft is published by
+# hand (see RELEASING.md). electron-updater in installed copies reads
+# latest.yml (Windows), latest-mac.yml and latest-linux.yml from the newest
+# published release.
+#
+# Run it by hand (Actions -> Release -> Run workflow) to build everything
+# without a tag: nothing is published then, and the files are kept as workflow
+# artifacts for 14 days instead.
+#
+# Code signing turns itself on when its secrets exist (see RELEASING.md); with
+# none, every installer is unsigned.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  npm_config_update_notifier: 'false'
+
+jobs:
+  prepare:
+    name: Check the version and open a draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the draft release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the version and compare it with the tag
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::The tag is $GITHUB_REF_NAME but package.json says $version. Tag v$version, or change package.json first."
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Run by hand on $GITHUB_REF_NAME: building $version without publishing."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Take the release notes from CHANGELOG.md
+        if: steps.version.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # The section headed "## [X.Y.Z]" up to the next "## " heading.
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::CHANGELOG.md has no section headed \"## [$VERSION]\". Add one before tagging (see RELEASING.md)."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Open the draft release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # electron-builder finds this draft by its tag and uploads into it, so
+          # the three platform jobs never race to create three drafts.
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "A release for v$VERSION exists already; the builds add to it."
+          else
+            gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft \
+              --verify-tag --title "Evora $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+
+  desktop:
+    name: Desktop installers (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write # electron-builder uploads into the draft release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ''
+          # One job for both Mac architectures, so a single latest-mac.yml
+          # lists the arm64 and the x64 files (two jobs would overwrite it).
+          - name: macOS
+            os: macos-latest
+            args: '--x64 --arm64'
+          - name: Linux
+            os: ubuntu-latest
+            args: ''
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Cache Electron and electron-builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Signing is on only when the secrets exist. They are copied into the
+      # environment of the following steps only when set, because
+      # electron-builder treats a variable that is set but empty as a value.
+      - name: Turn on code signing if its secrets exist
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          put() { # name, value: multi-line safe
+            d="EOF_$(openssl rand -hex 8)"
+            { echo "$1<<$d"; echo "$2"; echo "$d"; } >> "$GITHUB_ENV"
+          }
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            echo "Linux packages are not code-signed."
+          elif [ -n "$CSC_LINK" ]; then
+            put CSC_LINK "$CSC_LINK"
+            [ -n "$CSC_KEY_PASSWORD" ] && put CSC_KEY_PASSWORD "$CSC_KEY_PASSWORD"
+            echo "Code signing: ON ($RUNNER_OS)."
+          else
+            echo "Code signing: OFF. No CSC_LINK secret, so this build is unsigned."
+            if [ "$RUNNER_OS" = "macOS" ]; then
+              # Without this electron-builder looks for any identity in the keychain.
+              echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            fi
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              put APPLE_ID "$APPLE_ID"
+              put APPLE_APP_SPECIFIC_PASSWORD "$APPLE_APP_SPECIFIC_PASSWORD"
+              put APPLE_TEAM_ID "$APPLE_TEAM_ID"
+              echo "Notarization: ON."
+            else
+              echo "Notarization: OFF (needs CSC_LINK, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID)."
+            fi
+          fi
+
+      - name: Build and publish the installers
+        if: needs.prepare.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EP_DRAFT: 'true' # upload into the draft; never publish from here
+        run: npm run dist:desktop -- --publish always ${{ matrix.args }}
+
+      - name: Build the installers without publishing
+        if: needs.prepare.outputs.publish != 'true'
+        shell: bash
+        run: npm run dist:desktop -- --publish never ${{ matrix.args }}
+
+      - name: Keep the installers as workflow artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evora-${{ needs.prepare.outputs.version }}-${{ runner.os }}
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.tar.gz
+            release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  self-host:
+    name: Self-hosting bundle and container image
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # attach the bundle to the draft release
+      packages: write # push the image to GitHub Container Registry
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web app
+        run: npm run build
+
+      # The server has no npm dependencies (Node built-ins only); it imports two
+      # files from src/ that it shares with the app.
+      - name: Make the bundle
+        run: |
+          name="evora-server-$VERSION"
+          stage="$RUNNER_TEMP/$name"
+          mkdir -p "$stage/src/collab" "$stage/src/plugins"
+          cp -R dist "$stage/dist"
+          cp -R server "$stage/server"
+          find "$stage/server" \( -name '*.test.ts' -o -name 'testing.ts' \) -delete
+          cp src/collab/protocol.ts "$stage/src/collab/"
+          cp src/plugins/manifest.ts "$stage/src/plugins/"
+          cp package.json LICENSE THIRD_PARTY_NOTICES.md README.md "$stage/"
+          [ -d deploy ] && cp -R deploy "$stage/deploy"
+          printf '%s\n' \
+            "Evora $VERSION: the web app and the collaboration server, to run on your own machine." \
+            "" \
+            "Needs Node.js 24 or later; nothing to install with npm." \
+            "" \
+            "  node server/main.ts --serve dist --host 0.0.0.0 --port 8787 --data ./evora-data" \
+            "" \
+            "Then open http://<this machine>:8787. Put it behind a reverse proxy with TLS for the internet." \
+            "See README.md and deploy/ for more." > "$stage/RUN.txt"
+          # Check that the bundle starts and answers before shipping it.
+          # Started directly (not in a subshell) so that $! is the server itself.
+          node "$stage/server/main.ts" --serve "$stage/dist" --port 8799 --data "$RUNNER_TEMP/smoke" > "$RUNNER_TEMP/smoke.log" 2>&1 &
+          pid=$!
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8799/api/health && curl -fsS -o /dev/null http://127.0.0.1:8799/; then ok=1; break; fi
+            sleep 1
+          done
+          kill "$pid" || true
+          cat "$RUNNER_TEMP/smoke.log"
+          test "$ok" = 1
+          mkdir -p out
+          tar -czf "out/$name.tar.gz" -C "$RUNNER_TEMP" "$name"
+          ( cd out && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
+          ls -l out
+
+      - name: Attach the bundle to the draft release
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v$VERSION" out/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Keep the bundle as a workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evora-server-${{ needs.prepare.outputs.version }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+      # Optional: only when deploy/Dockerfile exists, the run is for a tag, and
+      # the repository variable PUBLISH_CONTAINER_IMAGE is not "false".
+      - name: Build and push the container image
+        if: needs.prepare.outputs.publish == 'true' && hashFiles('deploy/Dockerfile') != '' && vars.PUBLISH_CONTAINER_IMAGE != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker build -f deploy/Dockerfile \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            -t "$image:$VERSION" -t "$image:latest" .
+          docker push "$image:$VERSION"
+          docker push "$image:latest"
+          docker logout ghcr.io

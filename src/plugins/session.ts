@@ -69,6 +69,20 @@ export function documentChanges(before: Document, after: Document): { id: NodeId
 
 const sameIds = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((id, i) => id === b[i]);
 
+/**
+ * Limits on what a plugin's sandbox may send, so that a plugin cannot wear
+ * the app out: a plugin that sends more than MAX_MESSAGES in MESSAGE_WINDOW_MS,
+ * or has more than MAX_IN_FLIGHT calls unanswered at once, is stopped with a
+ * message saying why; a line of its console is cut to MAX_CONSOLE_TEXT.
+ */
+export const PLUGIN_LIMITS = { MAX_MESSAGES: 20_000, MESSAGE_WINDOW_MS: 10_000, MAX_IN_FLIGHT: 2_000, MAX_CONSOLE_TEXT: 10_000 } as const;
+
+/** A line for the plugin's console: text, cut to PLUGIN_LIMITS.MAX_CONSOLE_TEXT. */
+function consoleText(value: unknown, fallback: string): string {
+  const text = typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value);
+  return text.length > PLUGIN_LIMITS.MAX_CONSOLE_TEXT ? `${text.slice(0, PLUGIN_LIMITS.MAX_CONSOLE_TEXT)}… (cut)` : text;
+}
+
 export class PluginSession {
   readonly api: PluginApi;
   readonly ready: Promise<void>;
@@ -83,6 +97,9 @@ export class PluginSession {
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
   private unwatch: (() => void) | null = null;
   private closedFlag = false;
+  /** Messages from the sandbox in the current window, and calls not yet answered. */
+  private window = { start: 0, count: 0 };
+  private inFlight = 0;
 
   constructor(api: PluginApi, channel: PluginChannel, options: SessionOptions = {}) {
     this.api = api;
@@ -114,6 +131,12 @@ export class PluginSession {
 
   private receive(message: Record<string, unknown>): void {
     if (this.closedFlag) return;
+    const nowMs = Date.now();
+    if (nowMs - this.window.start >= PLUGIN_LIMITS.MESSAGE_WINDOW_MS) this.window = { start: nowMs, count: 0 };
+    if (++this.window.count > PLUGIN_LIMITS.MAX_MESSAGES) {
+      this.stop(`${this.api.manifest.name} was stopped: it sent too many messages.`);
+      return;
+    }
     switch (message.kind) {
       case 'ready':
         if (this.readyTimer) clearTimeout(this.readyTimer);
@@ -123,9 +146,20 @@ export class PluginSession {
         const id = message.id;
         const method = typeof message.method === 'string' ? message.method : '';
         const args = Array.isArray(message.args) ? message.args : [];
+        if (this.inFlight >= PLUGIN_LIMITS.MAX_IN_FLIGHT) {
+          this.stop(`${this.api.manifest.name} was stopped: it made too many calls at once.`);
+          return;
+        }
+        this.inFlight++;
         this.api.call(method, args).then(
-          (value) => this.post({ kind: 'reply', id, ok: true, value: value === undefined ? null : value }),
-          (error: unknown) => this.post({ kind: 'reply', id, ok: false, error: error instanceof Error ? error.message : String(error) }),
+          (value) => {
+            this.inFlight--;
+            this.post({ kind: 'reply', id, ok: true, value: value === undefined ? null : value });
+          },
+          (error: unknown) => {
+            this.inFlight--;
+            this.post({ kind: 'reply', id, ok: false, error: error instanceof Error ? error.message : String(error) });
+          },
         );
         return;
       }
@@ -156,13 +190,19 @@ export class PluginSession {
       }
       case 'console': {
         const level = message.level === 'warn' || message.level === 'error' || message.level === 'info' ? message.level : 'log';
-        this.options.onConsole?.(level, String(message.text ?? ''));
+        this.options.onConsole?.(level, consoleText(message.text, ''));
         return;
       }
       case 'error':
-        this.options.onConsole?.('error', String(message.text ?? 'An error'));
+        this.options.onConsole?.('error', consoleText(message.text, 'An error'));
         return;
     }
+  }
+
+  /** Stops a plugin that broke a limit: the reason goes to its console and to whoever closes it. */
+  private stop(reason: string): void {
+    this.options.onConsole?.('error', reason);
+    this.close(reason);
   }
 
   /** Tells the plugin of an event, if it listens for it. */

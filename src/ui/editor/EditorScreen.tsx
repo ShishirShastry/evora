@@ -42,6 +42,7 @@ import { applyTheme } from '../theme';
 import { CanvasView } from './CanvasView';
 import { EditorContext, type EditorContextValue } from './EditorContext';
 import { shortcutGroups } from './menus';
+import { useDesktopEditor } from '../desktop/useDesktopEditor';
 import { FileHeader, ToolDock, ViewControls } from './TopBar';
 
 interface EditorScreenProps {
@@ -458,6 +459,9 @@ function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) 
     }),
     [store, meta, storage, placeFiles, images, session, sharedId],
   );
+
+  // The desktop app (Phase 10): Save to a file on disk, unsaved-changes and recovery, its menus. Nothing in a browser.
+  useDesktopEditor({ store, app, storage, saver, meta, sharedId, placeFiles });
 
   const context = useMemo<EditorContextValue>(
     () => ({ store, app, controller, storage, images, placeFiles, pickImage }),

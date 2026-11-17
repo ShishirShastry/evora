@@ -30,7 +30,7 @@ Evora is a standalone design tool that aims at the traditional Figma Design work
 | 7 | Export, developer handoff and Figma files | Built and tested |
 | 8 | Collaboration (free, unlimited) | Built and tested |
 | 9 | Ecosystem: version history, branching, plugins and widgets, community, file management | Built and tested |
-| 10 | Desktop apps and production release | Not started |
+| 10 | Desktop apps and production release | Mostly built: desktop app, self-hosting, security, release pipeline; performance testing next |
 
 Every change is checked by more than eleven hundred unit tests (Vitest) and more than seventy-five browser acceptance tests (Playwright, in Microsoft Edge), including tests in which several people edit the same file at once. What each feature does not do yet is listed honestly in [HANDOFF.md](HANDOFF.md) under "Known limitations".
 
@@ -87,6 +87,10 @@ Every change is checked by more than eleven hundred unit tests (Vitest) and more
 - Publish a file as a design file, template, UI kit, component library or icon library, with versions; browse, search, and duplicate what others published.
 - Projects, moving files, favourites, recents, search across all your files, sorting, grid and list views, and a trash that keeps deleted files for 30 days (deleting a shared file always goes to the trash first).
 
+## Desktop app
+
+Evora runs as a desktop app on Windows, macOS and Linux (Electron), fully offline, with files opened and saved on disk, native menus, crash recovery and automatic updates; it can also connect to a collaboration server or host one for your team. No release has been published yet: build it yourself with `npm run dist:desktop` (installers in `release/`). The installers are not signed yet, so Windows shows an "unknown publisher" warning (More info ▸ Run anyway) and macOS asks you to allow the app in Privacy & Security. Details: [electron/README.md](electron/README.md).
+
 ## Getting started
 
 Evora needs Node.js 20.19 or newer (Node 24 for the collaboration server, which uses its built-in SQLite and runs its TypeScript directly).
@@ -118,6 +122,9 @@ npm run dev
 Sign up in the app, then share a file or invite people to a workspace. The server keeps its data in `.evora-server/` (SQLite and images).
 
 ### Self-host for a team
+
+The full guide, with Docker, systemd, reverse proxies, HTTPS, backups and settings, is [docs/self-hosting.md](docs/self-hosting.md).
+
 
 ```bash
 npm start
@@ -153,7 +160,11 @@ npm run build       # production build into dist/
 | `src/ui` | The React interface: file browser, editor chrome, panels, dialogs, collaboration, version history, plugins and community screens. |
 | `plugins` | The plugin developer guide (`PLUGINS.md`) and four example plugins. |
 | `server` | The collaboration server: HTTP API, WebSocket rooms, accounts, sharing, comments, Google sign-in, versions and branches, the plugin directory, the community library. Node built-ins only. |
-| `e2e` | Browser acceptance tests. |
+| `e2e` | Browser acceptance tests, and the desktop app's tests (`desktop.spec.ts`). |
+| `electron` | The desktop app's main process, preload and menus. |
+| `deploy` | Docker, compose, systemd and reverse-proxy files for self-hosting. |
+| `docs` | Guides: self-hosting. |
+| `.github` | CI and the release workflow. |
 
 ## Roadmap
 
@@ -164,6 +175,8 @@ Version history, branching, and plugins and widgets (the first three items of an
 3. **Production hardening:** security review, performance benchmarks, large-document and multiplayer load tests, file migration testing.
 
 Also open: sections as a layer type of their own, text on a path, variable-width strokes, video in prototypes, audio and cursor chat, shared team fonts, library analytics, finer permission policies, and character-level merging of text edited by two people at once.
+
+Security: [SECURITY.md](SECURITY.md). Releases: [RELEASING.md](RELEASING.md), [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 

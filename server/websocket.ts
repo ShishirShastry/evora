@@ -156,6 +156,13 @@ export interface ConnectionOptions {
   maxBufferedBytes?: number;
 }
 
+/**
+ * The most frames one message may come in. Each frame is kept until the
+ * message is whole, so without a limit a stream of empty continuation frames
+ * (6 bytes each on the wire) would grow that list without end.
+ */
+export const MAX_FRAGMENTS = 1024;
+
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
 /**
@@ -179,9 +186,13 @@ export class WebSocketConnection {
   private closeReason = '';
   private failed = false;
 
+  /** The largest message accepted now; the hub lowers it until a connection has said who it is. */
+  maxMessageBytes: number;
+
   constructor(socket: Duplex, head: Buffer, options: ConnectionOptions) {
     this.socket = socket;
     this.options = options;
+    this.maxMessageBytes = options.maxMessageBytes;
     const net = socket as Duplex & { setNoDelay?: (on: boolean) => void; setTimeout?: (ms: number) => void };
     net.setNoDelay?.(true);
     net.setTimeout?.(0);
@@ -289,14 +300,15 @@ export class WebSocketConnection {
       } else if (length === 127) {
         if (this.queue.length < 10) return;
         const big = this.queue.peek(10).readBigUInt64BE(2);
-        if (big > BigInt(this.options.maxMessageBytes)) return this.fail(CLOSE_TOO_BIG, 'Message too big');
+        if (big > BigInt(this.maxMessageBytes)) return this.fail(CLOSE_TOO_BIG, 'Message too big');
         length = Number(big);
         offset = 10;
       }
       if (!control) {
         if (opcode === OP_CONTINUATION && this.fragmentOpcode === 0) return this.fail(CLOSE_PROTOCOL_ERROR, 'Continuation without a message');
         if (opcode !== OP_CONTINUATION && this.fragmentOpcode !== 0) return this.fail(CLOSE_PROTOCOL_ERROR, 'A new message inside a fragmented one');
-        if (this.fragmentBytes + length > this.options.maxMessageBytes) return this.fail(CLOSE_TOO_BIG, 'Message too big');
+        if (this.fragmentBytes + length > this.maxMessageBytes) return this.fail(CLOSE_TOO_BIG, 'Message too big');
+        if (this.fragments.length >= MAX_FRAGMENTS) return this.fail(CLOSE_TOO_BIG, 'A message in too many pieces');
       }
       if (this.queue.length < offset + 4 + length) return;
       this.queue.take(offset);
