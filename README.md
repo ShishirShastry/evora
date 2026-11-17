@@ -1,115 +1,84 @@
 <p align="center">
-  <img src="public/favicon.svg" width="96" height="96" alt="Evora logo" />
+  <img src="public/favicon.svg" width="112" height="112" alt="Evora logo" />
 </p>
 
 <h1 align="center">Evora</h1>
 
 <p align="center">
-  A free, open-source, local-first design and prototyping application.<br />
-  The full design workflow, from vectors to real-time collaboration, with no paid plans, no seat limits and no AI generation.
+  <b>Design, prototype and build together. Free, open and yours.</b>
+</p>
+
+<p align="center">
+  The all-in-one design tool for interfaces, products and ideas:<br />
+  an infinite canvas, real-time teamwork and interactive prototypes, with nothing behind a paywall.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7c5cff" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/price-free%20forever-22c55e" alt="Free forever" />
+  <img src="https://img.shields.io/badge/seats-unlimited-0ea5e9" alt="Unlimited seats" />
+  <img src="https://img.shields.io/badge/runs%20on-web%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-f97316" alt="Web, Windows, macOS, Linux" />
 </p>
 
 ---
 
-Evora is a standalone design tool that aims at the traditional Figma Design workflow: design on an infinite canvas, build design systems with components and variables, lay out with Auto Layout, prototype interactions, hand off to developers, open and save Figma files, and work together in real time. Everything in it is free, including collaboration: there are no plans, no seats to buy and no locked features. It runs in the browser on your own machine, keeps your files on your own device, and can be self-hosted for a team with one command.
+Evora is where screens, flows and design systems come to life. Sketch an idea, shape it with real layout and components, click through it as a working prototype, and hand it to developers, alone or with your whole team on the same canvas at once.
 
-- **Specification:** [EVORA_MASTER_SPEC.md](EVORA_MASTER_SPEC.md), the product brief the project is built against.
-- **Current state, limits and next steps:** [HANDOFF.md](HANDOFF.md).
-- **Architecture:** [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). **File format:** [DOCUMENT_SCHEMA.md](DOCUMENT_SCHEMA.md) (schema version 26, with a migration and a test for every version).
+It is **free for everyone, for good**: no plans, no seats to count, no "upgrade to unlock". Your files live on **your** device, work offline, and can be shared through a server **you** run. And because it is open source, you can see how it works, change it, and extend it with plugins.
 
-## Status
+## Why Evora
 
-| Phase | Area | State |
-|---|---|---|
-| 1 | Editor foundation | Built and tested |
-| 2 | Design (appearance, text, layout aids) | Built and tested |
-| 3 | Vector editing | Built and tested |
-| 4 | Auto Layout and responsive design | Built and tested |
-| 5 | Components and design systems | Built and tested |
-| 6 | Prototyping | Built and tested |
-| 7 | Export, developer handoff and Figma files | Built and tested |
-| 8 | Collaboration (free, unlimited) | Built and tested |
-| 9 | Ecosystem: version history, branching, plugins and widgets, community, file management | Built and tested |
-| 10 | Desktop apps and production release | Mostly built: desktop app, self-hosting, security, release pipeline; performance testing next |
+| | |
+|---|---|
+| **Everything included** | Vectors, layout, components, variables, prototyping, developer handoff, collaboration, version history and plugins. All of it, for everyone. |
+| **Truly collaborative** | Edit together live with cursors, comments and @mentions. Invite as many people as you like; every seat is free. |
+| **Yours to keep** | Local-first: files stay on your device and keep working offline. Host your own team server with one command. No lock-in. |
+| **Fast on big files** | A canvas renderer built for the job, and a layers panel that stays quick with thousands of layers. |
+| **Made to be extended** | Sandboxed plugins and live widgets with a documented API, plus a community library of templates and UI kits. |
+| **Open source** | MIT licensed. Read the code, fork it, improve it. |
 
-Every change is checked by more than eleven hundred unit tests (Vitest) and more than seventy-five browser acceptance tests (Playwright, in Microsoft Edge), including tests in which several people edit the same file at once. What each feature does not do yet is listed honestly in [HANDOFF.md](HANDOFF.md) under "Known limitations".
+## What you can do
 
-## Features
+**🎨 Design anything.** Frames, shapes, pen and pencil, boolean shapes that stay editable, rich text with any font, gradients, image fills, shadows, blurs and blend modes, on an infinite canvas with smart guides, snapping and measurements.
 
-### Files and the canvas
-- Files kept on your device (IndexedDB), with autosave, validation and repair on open, and "Save a copy" as an `.evora` file.
-- An infinite canvas drawn by Evora's own renderer, with pan, zoom, rulers, guides, layout grids, snapping (to layers, guides, grids, even spacing and pixels) and distance measurement.
-- Pages, a layers panel that stays fast on very large files, groups, align and distribute, flip, masks, undo and redo for everything, menus and keyboard shortcuts generated from one command table, a dark and a light theme.
+**📐 Lay out like real code.** Responsive auto layout with wrapping rows and columns, padding, gaps, hug and fill sizing, constraints and nesting: designs that resize the way the finished product will.
 
-### Shapes, appearance and text
-- Frames, rectangles, ellipses with arcs and rings, lines with arrowheads, polygons, stars and images (PNG, JPEG, WebP, GIF, SVG).
-- Solid, linear, radial, angular and diamond gradient and image fills; strokes with ends, joins, dashes and a weight for each side; per-corner radii; drop and inner shadows with spread, layer and background blur; sixteen blend modes.
-- Text with any installed font (Inter is bundled), styles on parts of a text, lists, paragraph spacing, justified text, auto-width, auto-height and fixed boxes.
+**🧩 Build design systems.** Components and variants with overrides, component properties, colour, text and effect styles, and variables with modes for themes such as light and dark. Publish a library and reuse it across files.
 
-### Vectors
-- Pen and Pencil tools, point and handle editing, flatten to vector, outline stroke, split at intersections, and boolean groups (union, subtract, intersect, exclude) that stay editable.
+**▶️ Prototype interactions.** Link screens with clicks, hovers, key presses and timers; open overlays, scroll, switch component states, set variables and branch on conditions; animate between screens with smart transitions; present on phone, tablet or desktop frames.
 
-### Layout
-- Constraints, and Auto Layout: rows and columns that wrap, padding, spacing (fixed or automatic), alignment including text baseline, hug, fill and fixed sizing, minimum and maximum sizes, absolute positioning and nested layouts.
+**👩‍💻 Hand off to developers.** Inspect any layer, copy CSS, SwiftUI or Jetpack Compose code, export assets as PNG, JPG, SVG or PDF, and mark what is ready to build.
 
-### Design systems
-- Components and instances with overrides, reset, detach and swap; variants and component properties (boolean, text, instance swap).
-- Colour, text, effect and grid styles; variables (colour, number, text, boolean) with collections, modes, aliases, scopes and bindings.
-- Libraries: publish a file and use its components, styles and variables in another.
+**🤝 Work as a team.** Workspaces, roles and share links (guests welcome), live co-editing that merges even offline changes, cursors, following, and comments pinned to the canvas.
 
-### Prototyping
-- Connections and flows; triggers (click, hover, press, mouse leave, mouse up, delay, drag, keys with modifiers); actions (navigate, overlays, scroll to, back, change component state, set variable, conditions, type into a variable, open a link); transitions including Smart Animate; scrolling, fixed and sticky layers; presentation on phone, tablet and desktop frames.
+**🕓 Never lose work.** Automatic and named versions, side-by-side and overlay comparison, one-click restore, and branches you can merge back with every conflict laid out for you.
 
-### Export and handoff
-- Export as PNG, JPG, SVG or PDF at any scale, in batches as a ZIP; copy as PNG, SVG or CSS; import SVG as editable layers.
-- Developer mode: inspection, measurements, CSS, SwiftUI and Jetpack Compose code for a layer or a whole frame (HTML and CSS with flexbox), assets, ready-for-development status, notes, links and component code mapping.
-- **Figma files:** open `.fig` files (every kind of layer, Auto Layout, constraints, components and the changes made in instances, variants, styles, variables, prototype interactions and flows; anything that cannot be converted is listed) and save a copy as `.fig`.
+**🔌 Extend it.** Install plugins that run safely in a sandbox with only the permissions you grant, drop interactive widgets on the canvas, and browse the community library for templates, UI kits and icon sets.
 
-### Collaboration (free and unlimited)
-- Accounts with email and password, or **Continue with Google** once it is configured (see below); guests without an account through a link.
-- Workspaces with unlimited members and roles (owner, editor, viewer, and viewers can comment); invites by email or by link; "Shared with me".
-- Per-file sharing: people and roles, and link access (no one, anyone can view, anyone can edit).
-- Real-time co-editing: every property of every layer is merged last-writer-wins with hybrid logical clocks, so everyone converges to the same document; edits made offline are kept and merged on reconnect; undo undoes only your own changes.
-- Live cursors with names, other people's selections, avatars and following someone's view.
-- Comments pinned to the canvas or to a layer, with replies, @mentions, notifications, resolve and reopen, and a Comments panel.
+**📂 Bring your work with you.** Open `.fig` and SVG files as fully editable layers, and save your work as an open `.evora` file.
 
-### Version history and branching
-- Named versions and automatic ones, for files on your device and shared files alike; view any version read-only, rename it, restore it (one undo step), or delete it.
-- Compare two versions, or a version with the file as it is: side by side, overlaid with an opacity slider, and a list of the layers added, removed and changed.
-- Branches of shared files: update from main, merge into main with every conflict shown and resolved per layer, and roll a merge back.
+## Get Evora
 
-### Plugins and widgets
-- Plugins run in a sandbox and can do only what you allowed when installing them (read, write, export, a window, stored data); every change a plugin makes is one undo step. See [plugins/PLUGINS.md](plugins/PLUGINS.md) to write one; four examples are in [plugins/examples](plugins/examples).
-- A plugin manager (install from a `.evora-plugin` file, enable, disable, uninstall, a console, reload while developing) and a plugin directory on the server.
-- Widgets: interactive objects on the canvas, drawn by a plugin and shared live with everyone in the file.
+### 💻 Desktop app (Windows, macOS, Linux)
 
-### Community and file management
-- Publish a file as a design file, template, UI kit, component library or icon library, with versions; browse, search, and duplicate what others published.
-- Projects, moving files, favourites, recents, search across all your files, sorting, grid and list views, and a trash that keeps deleted files for 30 days (deleting a shared file always goes to the trash first).
+A native app that works fully offline, opens and saves files on disk, recovers your work after a crash, keeps itself up to date once releases are published, and can host a team server for your office.
 
-## Desktop app
+> **No release has been published yet.** Until the first release, build the installer yourself with `npm run dist:desktop` (see below). Early builds are not code-signed, so Windows shows an "unknown publisher" notice (**More info → Run anyway**) and macOS asks you to allow the app in **Privacy & Security**. [More about the desktop app](electron/README.md).
 
-Evora runs as a desktop app on Windows, macOS and Linux (Electron), fully offline, with files opened and saved on disk, native menus, crash recovery and automatic updates; it can also connect to a collaboration server or host one for your team. No release has been published yet: build it yourself with `npm run dist:desktop` (installers in `release/`). The installers are not signed yet, so Windows shows an "unknown publisher" warning (More info ▸ Run anyway) and macOS asks you to allow the app in Privacy & Security. Details: [electron/README.md](electron/README.md).
+### 🌐 In your browser
 
-## Getting started
-
-Evora needs Node.js 20.19 or newer (Node 24 for the collaboration server, which uses its built-in SQLite and runs its TypeScript directly).
+You need [Node.js](https://nodejs.org) 24.
 
 ```bash
 npm install
-```
-
-### Design on your own device
-
-```bash
 npm run dev
 ```
 
-Open http://localhost:5173. Files are kept in the browser on this device; nothing needs a server or an account.
+Open http://localhost:5173 and start designing. No account, no server: files are kept on your device.
 
-### Work together
+### 👥 With your team
 
-Run the collaboration server beside the app, in a second terminal:
+Start the collaboration server beside the app:
 
 ```bash
 npm run server
@@ -119,65 +88,79 @@ npm run server
 npm run dev
 ```
 
-Sign up in the app, then share a file or invite people to a workspace. The server keeps its data in `.evora-server/` (SQLite and images).
+Sign up, then invite your team to a workspace or share a file by link.
 
-### Self-host for a team
+### 🏢 Self-host for everyone
 
-The full guide, with Docker, systemd, reverse proxies, HTTPS, backups and settings, is [docs/self-hosting.md](docs/self-hosting.md).
-
+One process serves both the app and the collaboration server:
 
 ```bash
 npm start
 ```
 
-This builds the app and serves it from the collaboration server at http://localhost:8787, in one process. Options: `--port`, `--data <folder>`, `--host 0.0.0.0` to accept other machines, `--public-url https://your.domain`. The server has no TLS of its own: put it behind a reverse proxy with HTTPS for use over the internet.
+It runs at http://localhost:8787. For Docker, systemd, HTTPS behind nginx or Caddy, backups and every setting, see the **[self-hosting guide](docs/self-hosting.md)**.
 
-### Continue with Google (optional)
+<details>
+<summary><b>Sign in with Google (optional)</b></summary>
 
-1. In Google Cloud Console, configure the OAuth consent screen (scopes `openid`, `email`, `profile`; add test users while it is in Testing).
-2. Create an OAuth client ID of type **Web application**, with the authorised redirect URI `<app address>/api/auth/google/callback`, for example `http://localhost:5173/api/auth/google/callback`.
-3. Start the server with the environment variables `EVORA_GOOGLE_CLIENT_ID` and `EVORA_GOOGLE_CLIENT_SECRET` (and `EVORA_PUBLIC_URL` for an address other than localhost). The button appears in the sign-in and sign-up dialogs. Never commit these values.
+1. In Google Cloud Console, set up the OAuth consent screen (scopes `openid`, `email`, `profile`).
+2. Create an OAuth client ID of type **Web application** with the redirect URI `<app address>/api/auth/google/callback`, for example `http://localhost:5173/api/auth/google/callback`.
+3. Start the server with `EVORA_GOOGLE_CLIENT_ID` and `EVORA_GOOGLE_CLIENT_SECRET` (and `EVORA_PUBLIC_URL` for an address other than localhost). Never commit these values.
 
-## Checks
+</details>
+
+## Where Evora is today
+
+Evora is young and moving fast. The editor, design systems, prototyping, handoff, collaboration, version history, plugins and community library are built, and more than eleven hundred automated tests and dozens of real-browser tests check them. The desktop app, self-hosting and release pipeline are new and being polished toward the **first public release**. Every known gap is listed openly in [HANDOFF.md](HANDOFF.md).
+
+**Coming next:** the first release with installers for every platform, performance tuning for very large files, a VS Code extension and public REST API, and integrations with GitHub, Storybook and Jira. Also on the list: text on a path, variable-width strokes, video in prototypes, and audio and cursor chat.
+
+## Build with us
+
+Evora is open source and contributions are welcome: bug reports, ideas, plugins, and code.
+
+- **Write a plugin:** [plugin guide](plugins/PLUGINS.md), with four examples in [plugins/examples](plugins/examples).
+- **Report a security issue:** [SECURITY.md](SECURITY.md).
+- **Ship a release:** [RELEASING.md](RELEASING.md) and [CHANGELOG.md](CHANGELOG.md).
+- **Understand the code:** [architecture](PROJECT_ARCHITECTURE.md), [file format](DOCUMENT_SCHEMA.md), [product specification](EVORA_MASTER_SPEC.md) and the [handoff notes](HANDOFF.md).
+
+<details>
+<summary><b>Checks</b></summary>
 
 ```bash
-npm run typecheck   # TypeScript: the app, the tooling and the server
-npm test            # unit tests (Vitest), the server's included
-npm run e2e         # browser acceptance tests (Playwright, Microsoft Edge)
-npm run build       # production build into dist/
+npm run typecheck      # TypeScript: the app, the tooling, the server and the desktop app
+npm test               # unit tests (Vitest), the server's included
+npm run e2e            # browser tests (Playwright, Microsoft Edge)
+npm run build          # production build into dist/
+npm run desktop        # the desktop app in development
+npm run dist:desktop   # desktop installers for this system, into release/
 ```
 
-## Project layout
+</details>
+
+<details>
+<summary><b>Project layout</b></summary>
 
 | Folder | What it holds |
 |---|---|
-| `src/core` | The document model and every operation on it, the `.fig` reader and writer, layout, text layout, vectors, prototyping logic. Pure TypeScript: no React, no browser APIs. |
-| `src/engine` | The canvas renderer, overlays, viewport maths, interaction tools, and SVG/PDF/PNG export. |
-| `src/state` | The editor store (document, selection, per-person undo history) and the command table shared by menus and shortcuts. |
-| `src/persistence` | Local storage (IndexedDB), autosave, file import and export. |
-| `src/collab` | The collaboration contract (`protocol.ts`), the sync engine, the offline queue and the API client. |
-| `src/plugins` | The plugin runtime: manifest checks, the sandbox, the `evora.*` API, widgets, the installed-plugin store. No React. |
-| `src/ui` | The React interface: file browser, editor chrome, panels, dialogs, collaboration, version history, plugins and community screens. |
-| `plugins` | The plugin developer guide (`PLUGINS.md`) and four example plugins. |
-| `server` | The collaboration server: HTTP API, WebSocket rooms, accounts, sharing, comments, Google sign-in, versions and branches, the plugin directory, the community library. Node built-ins only. |
-| `e2e` | Browser acceptance tests, and the desktop app's tests (`desktop.spec.ts`). |
-| `electron` | The desktop app's main process, preload and menus. |
-| `deploy` | Docker, compose, systemd and reverse-proxy files for self-hosting. |
-| `docs` | Guides: self-hosting. |
-| `.github` | CI and the release workflow. |
+| `src/core` | The document model and every operation on it, file import and export, layout, text, vectors and prototyping logic. Pure TypeScript. |
+| `src/engine` | The canvas renderer, overlays, viewport, interaction tools, and SVG, PDF and PNG export. |
+| `src/state` | The editor store (document, selection, per-person undo) and the command table behind menus and shortcuts. |
+| `src/persistence` | Local storage, autosave, file import and export, and the desktop bridge. |
+| `src/collab` | The sync protocol, the sync engine, the offline queue and the API client. |
+| `src/plugins` | The plugin runtime: manifests, the sandbox, the `evora.*` API and widgets. |
+| `src/ui` | The interface: file browser, editor, panels, dialogs, collaboration, version history, plugins and community. |
+| `server` | The collaboration server: API, live rooms, accounts, sharing, comments, versions, plugins and community. Node built-ins only. |
+| `electron` | The desktop app: windows, menus, files on disk, updates. |
+| `plugins` | The plugin guide and examples. |
+| `deploy`, `docs` | Self-hosting files and guides. |
+| `e2e` | Browser and desktop tests. |
+| `.github` | Continuous integration and the release workflow. |
 
-## Roadmap
-
-Version history, branching, and plugins and widgets (the first three items of an outside review of the project) were built in Phase 9. What comes next, Phase 10 of the specification and the rest of that review:
-
-1. **Developer integrations:** a VS Code extension, component-to-code mapping, a public REST API, GitHub, Storybook and Jira.
-2. **Desktop apps:** Windows, macOS and Linux builds, signed installers, automatic updates and crash recovery.
-3. **Production hardening:** security review, performance benchmarks, large-document and multiplayer load tests, file migration testing.
-
-Also open: sections as a layer type of their own, text on a path, variable-width strokes, video in prototypes, audio and cursor chat, shared team fonts, library analytics, finer permission policies, and character-level merging of text edited by two people at once.
-
-Security: [SECURITY.md](SECURITY.md). Releases: [RELEASING.md](RELEASING.md), [CHANGELOG.md](CHANGELOG.md).
+</details>
 
 ## Licence
 
 Evora is released under the [MIT License](LICENSE). The bundled Inter font is under the SIL Open Font License 1.1; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+<sub>Evora is an independent project, not affiliated with or endorsed by any other design tool's maker. Other product names and file formats mentioned belong to their owners.</sub>
