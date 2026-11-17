@@ -113,6 +113,77 @@ const BOOLEAN_BUTTONS: { id: string; icon: IconName }[] = [
   { id: 'object.flatten', icon: 'vector' },
 ];
 
+/**
+ * How each strip of buttons is split into wells, Figma's way: horizontal
+ * alignment, vertical alignment and distribution; the four boolean operations
+ * and flattening. The buttons keep their order; only the wells are drawn.
+ */
+const ARRANGE_GROUPS = [3, 3, 2] as const;
+const BOOLEAN_GROUPS = [4, 1] as const;
+
+/** Consecutive groups of the given sizes, in order. */
+function inGroups<T>(items: readonly T[], sizes: readonly number[]): T[][] {
+  const groups: T[][] = [];
+  let at = 0;
+  for (const size of sizes) {
+    groups.push(items.slice(at, at + size));
+    at += size;
+  }
+  return groups;
+}
+
+/** A pressed-in well holding a group of icon buttons. Its share of the strip follows its number of buttons, so every button is as wide as the next. */
+const WELL = 'flex min-w-0 basis-0 rounded-[8px] bg-field shadow-[var(--ev-sunk)]';
+/** An icon button that fills its share of a well. */
+const WELL_BUTTON = 'ev-icon-button !h-7 !w-auto min-w-0 !flex-1';
+
+/** The icon of a layer, as the layers panel shows it. */
+const TYPE_ICONS: Record<LayerNode['type'], IconName> = {
+  FRAME: 'frame',
+  GROUP: 'group',
+  RECTANGLE: 'rectangle',
+  ELLIPSE: 'ellipse',
+  LINE: 'line',
+  POLYGON: 'polygon',
+  STAR: 'star',
+  TEXT: 'text',
+  VECTOR: 'vector',
+  BOOLEAN_OPERATION: 'union',
+};
+
+function layerIcon(layer: LayerNode): IconName {
+  if (layer.isMask) return 'mask';
+  if (layer.type === 'BOOLEAN_OPERATION') return ({ UNION: 'union', SUBTRACT: 'subtract', INTERSECT: 'intersect', EXCLUDE: 'exclude' } as const)[layer.operation];
+  if (layer.type === 'FRAME') {
+    if (layer.kind === 'COMPONENT' || layer.kind === 'COMPONENT_SET') return 'component';
+    if (layer.kind === 'INSTANCE') return 'instance';
+    if (layer.layoutMode !== 'NONE') return layer.layoutMode === 'VERTICAL' ? 'layoutColumn' : 'layoutRow';
+  }
+  return TYPE_ICONS[layer.type];
+}
+
+/** A row's label, Figma's way: small and quiet, in a fixed column so the controls beside it line up. */
+const LABEL = 'w-[72px] flex-none truncate text-[11px] text-dim';
+
+/** A checkbox drawn as a small pressed-in well that fills with the accent when it is checked. */
+const CHECKBOX =
+  'peer m-0 block h-3.5 w-3.5 flex-none cursor-pointer appearance-none rounded-[4px] bg-field shadow-[var(--ev-sunk)] transition-[background-color,box-shadow] duration-150 hover:bg-hover checked:bg-accent checked:bg-[image:var(--ev-primary)] checked:shadow-[var(--ev-primary-shadow)]';
+/** The label of a checkbox: the whole row is the target, the words are small. */
+const CHECK_LABEL = 'flex h-6 cursor-pointer items-center gap-2 text-[11px] text-ink';
+
+/** The tick drawn over a checked CHECKBOX. It follows the input, so the input's state can show it. */
+function Tick() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="pointer-events-none absolute inset-0 h-3.5 w-3.5 text-accent-ink opacity-0 transition-opacity duration-150 peer-checked:opacity-100"
+    >
+      <path d="M4.3 8.4l2.4 2.4 5-5.4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** Buttons for combining shapes. They run the same commands as the Object menu and its shortcuts. */
 function BooleanBar() {
   const run = useRunCommand();
@@ -122,23 +193,27 @@ function BooleanBar() {
   void doc;
   void selection;
   return (
-    <div role="toolbar" aria-label="Combine shapes" className="flex h-10 items-center gap-1 border-b border-line px-2">
-      {BOOLEAN_BUTTONS.map(({ id, icon }) => {
-        const command = getCommand(id) as Command;
-        return (
-          <button
-            key={id}
-            type="button"
-            className="od-icon-button !h-7 !w-7"
-            aria-label={command.label}
-            title={`${command.label} (${command.shortcut})`}
-            disabled={command.enabled ? !command.enabled(state) : false}
-            onClick={() => run(command)}
-          >
-            <Icon name={icon} />
-          </button>
-        );
-      })}
+    <div role="toolbar" aria-label="Combine shapes" className="flex items-center gap-1">
+      {inGroups(BOOLEAN_BUTTONS, BOOLEAN_GROUPS).map((group) => (
+        <div key={group[0]?.id} className={WELL} style={{ flexGrow: group.length }}>
+          {group.map(({ id, icon }) => {
+            const command = getCommand(id) as Command;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={WELL_BUTTON}
+                aria-label={command.label}
+                title={`${command.label} (${command.shortcut})`}
+                disabled={command.enabled ? !command.enabled(state) : false}
+                onClick={() => run(command)}
+              >
+                <Icon name={icon} />
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -149,23 +224,27 @@ function ArrangeBar() {
   // Re-render when anything that affects availability changes.
   const state = useEditor((s) => s);
   return (
-    <div role="toolbar" aria-label="Align and distribute" className="flex h-10 items-center justify-between border-b border-line px-2">
-      {ARRANGE_BUTTONS.map(({ id, icon }) => {
-        const command = getCommand(id) as Command;
-        return (
-          <button
-            key={id}
-            type="button"
-            className="od-icon-button !h-7 !w-7"
-            aria-label={command.label}
-            title={`${command.label} (${command.shortcut})`}
-            disabled={command.enabled ? !command.enabled(state) : false}
-            onClick={() => run(command)}
-          >
-            <Icon name={icon} />
-          </button>
-        );
-      })}
+    <div role="toolbar" aria-label="Align and distribute" className="flex items-center gap-1">
+      {inGroups(ARRANGE_BUTTONS, ARRANGE_GROUPS).map((group) => (
+        <div key={group[0]?.id} className={WELL} style={{ flexGrow: group.length }}>
+          {group.map(({ id, icon }) => {
+            const command = getCommand(id) as Command;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={WELL_BUTTON}
+                aria-label={command.label}
+                title={`${command.label} (${command.shortcut})`}
+                disabled={command.enabled ? !command.enabled(state) : false}
+                onClick={() => run(command)}
+              >
+                <Icon name={icon} />
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -194,7 +273,7 @@ function ToggleGroup<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-1 gap-0.5 rounded-[5px] bg-field p-0.5">
+    <div role="radiogroup" aria-label={label} className="ev-segmented min-w-0 flex-1">
       {options.map((option) => (
         <button
           key={option.value}
@@ -203,8 +282,10 @@ function ToggleGroup<T extends string>({
           aria-checked={value === option.value}
           aria-label={option.label}
           title={option.label}
-          className={`flex h-[22px] flex-1 items-center justify-center rounded border-0 ${
-            value === option.value ? 'bg-hover text-ink' : 'bg-transparent text-dim hover:text-ink'
+          className={`flex h-6 min-w-0 flex-1 cursor-pointer items-center justify-center rounded-[7px] border-0 transition-[color,background-color,box-shadow] duration-150 ${
+            value === option.value
+              ? 'bg-[image:var(--ev-button)] text-ink shadow-[var(--ev-raise)]'
+              : 'bg-transparent text-dim hover:text-ink'
           }`}
           onClick={() => onChange(option.value)}
         >
@@ -257,7 +338,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
       <Row>
         <select
           aria-label="Font family"
-          className="od-field flex-1"
+          className="ev-field flex-1"
           value={family}
           onChange={(event) => style('Change font', { fontFamily: event.currentTarget.value })}
         >
@@ -272,7 +353,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
       <Row>
         <select
           aria-label="Font weight"
-          className="od-field flex-1"
+          className="ev-field flex-1"
           value={weight}
           onChange={(event) => style('Change font weight', { fontWeight: Number(event.currentTarget.value) })}
         >
@@ -297,7 +378,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
         />
         <button
           type="button"
-          className="od-icon-button !h-[26px] !w-12 text-[11px]"
+          className="ev-icon-button !w-12 text-[11px] font-medium"
           aria-label="Automatic line height"
           aria-pressed={autoLine}
           title="Automatic line height (1.2 × font size)"
@@ -340,7 +421,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
       <Row>
         <select
           aria-label="List"
-          className="od-field flex-1"
+          className="ev-field flex-1"
           value={shared(layers, (l) => (l as TextNode).listType)}
           onChange={(event) => set('Change list', { listType: event.currentTarget.value as TextListType })}
         >
@@ -353,7 +434,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
       <Row>
         <select
           aria-label="Text box sizing"
-          className="od-field flex-1"
+          className="ev-field flex-1"
           value={shared(layers, (l) => (l as TextNode).textAutoResize)}
           onChange={(event) => set('Change text sizing', { textAutoResize: event.currentTarget.value as TextAutoResize })}
         >
@@ -366,7 +447,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
       <Row>
         <select
           aria-label="Letter case"
-          className="od-field flex-1"
+          className="ev-field flex-1"
           value={shared(layers, (l) => (l as TextNode).textCase)}
           onChange={(event) => set('Change letter case', { textCase: event.currentTarget.value as TextCase })}
         >
@@ -378,7 +459,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
         </select>
         <select
           aria-label="Text decoration"
-          className="od-field flex-1"
+          className="ev-field flex-1"
           value={decoration}
           onChange={(event) => style('Change text decoration', { textDecoration: event.currentTarget.value as TextDecoration })}
         >
@@ -393,7 +474,7 @@ function TextSection({ layers }: { layers: TextNode[] }) {
           <ColorField label="Selected text colour" value={partColour} onChange={(color, phase) => phase === 'commit' && style('Change text colour', { color })} />
           <button
             type="button"
-            className="od-icon-button !h-[26px] !w-14 text-[11px]"
+            className="ev-icon-button !w-14 text-[11px] font-medium"
             aria-label="Use the layer's fill for the selected text"
             title="Use the layer's fill for the selected text"
             disabled={ownColour === null}
@@ -403,13 +484,16 @@ function TextSection({ layers }: { layers: TextNode[] }) {
           </button>
         </Row>
       )}
-      <label className="flex cursor-pointer items-center gap-2">
-        <input
-          type="checkbox"
-          className="accent-[var(--od-accent)]"
-          checked={font((s) => s.italic) === true}
-          onChange={(event) => style('Change italic', { italic: event.currentTarget.checked })}
-        />
+      <label className={CHECK_LABEL}>
+        <span className="relative flex flex-none">
+          <input
+            type="checkbox"
+            className={CHECKBOX}
+            checked={font((s) => s.italic) === true}
+            onChange={(event) => style('Change italic', { italic: event.currentTarget.checked })}
+          />
+          <Tick />
+        </span>
         Italic
       </label>
     </Section>
@@ -425,7 +509,7 @@ function PageProperties() {
   return (
     <Section title="Page">
       <Row>
-        <span className="w-20 flex-none text-dim">Background</span>
+        <span className={LABEL}>Background</span>
         <ColorField
           label="Page background"
           value={page.backgroundColor}
@@ -436,19 +520,19 @@ function PageProperties() {
       </Row>
       {page.guides.length > 0 && (
         <Row>
-          <span className="flex-1 text-dim">
+          <span className="min-w-0 flex-1 text-[11px] text-dim">
             {page.guides.length} {page.guides.length === 1 ? 'ruler guide' : 'ruler guides'}
           </span>
           <button
             type="button"
-            className="od-button !h-[26px] flex-none !px-2"
+            className="ev-button !h-7 flex-none !px-2.5 text-[11px]"
             onClick={() => store.getState().apply('Remove all guides', (d) => patchNodes(d, { [pageId]: { guides: [] } }))}
           >
             Remove all
           </button>
         </Row>
       )}
-      <p className="m-0 mt-1 text-faint">Select a layer to see its properties.</p>
+      <p className="m-0 text-[11px] text-faint">Select a layer to see its properties.</p>
     </Section>
   );
 }
@@ -537,12 +621,25 @@ export function DesignPanel() {
   };
 
   const title = layers.length === 1 ? TYPE_LABELS[first.type] : `${layers.length} layers`;
+  // The heading shows the kind of the selected layers as the layers panel draws it, or a stack where kinds differ.
+  const icons = layers.map(layerIcon);
+  const icon = icons.every((name) => name === icons[0]) ? (icons[0] as IconName) : 'group';
 
   return (
-    <aside aria-label="Design properties" className="h-full overflow-y-auto" data-text-tools>
-      <div className="flex h-9 items-center border-b border-line px-3 font-medium">{title}</div>
-      <ArrangeBar />
-      <BooleanBar />
+    <aside aria-label="Design properties" className="h-full overflow-y-auto pb-2" data-text-tools>
+      <div className="flex h-11 items-center gap-2 px-3">
+        <span
+          aria-hidden="true"
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-[7px] bg-[image:var(--ev-button)] text-dim shadow-[var(--ev-raise)]"
+        >
+          <Icon name={icon} size={13} />
+        </span>
+        <span className="min-w-0 truncate text-[12px] font-semibold text-ink">{title}</span>
+      </div>
+      <div className="flex flex-col gap-2 border-b border-line px-3 pb-3">
+        <ArrangeBar />
+        <BooleanBar />
+      </div>
 
       <Section title="Position and size">
         <Row>
@@ -577,7 +674,8 @@ export function DesignPanel() {
             onCommit={(rotation) => set('Rotate', { rotation: clean(rotation) })}
           />
           {allHaveRadius ? (
-            <>
+            // The radius and its per-corner switch share the second column, so the columns line up with X and Y above.
+            <div className="flex min-w-0 flex-1 items-center gap-1">
               <NumberField
                 label="Corner radius"
                 prefix="R"
@@ -588,7 +686,7 @@ export function DesignPanel() {
               />
               <button
                 type="button"
-                className="od-icon-button !h-[26px] !w-[26px]"
+                className="ev-icon-button"
                 aria-label="Separate corner radii"
                 aria-pressed={perCorner}
                 title="Set each corner separately"
@@ -600,13 +698,13 @@ export function DesignPanel() {
               >
                 <Icon name="corners" size={14} />
               </button>
-            </>
+            </div>
           ) : (
             <div className="flex-1" />
           )}
         </Row>
         {perCorner && (
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-2 gap-2">
             {/* Shown in reading order: top row, then bottom row. */}
             {[0, 1, 3, 2].map((corner) => (
               <NumberField
@@ -688,24 +786,27 @@ export function DesignPanel() {
           </>
         )}
         {frames.length === layers.length && (
-          <label className="mt-0.5 flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              className="accent-[var(--od-accent)]"
-              checked={frames.every((frame) => frame.clipsContent)}
-              onChange={(event) => set('Change clip content', { clipsContent: event.currentTarget.checked })}
-            />
+          <label className={CHECK_LABEL}>
+            <span className="relative flex flex-none">
+              <input
+                type="checkbox"
+                className={CHECKBOX}
+                checked={frames.every((frame) => frame.clipsContent)}
+                onChange={(event) => set('Change clip content', { clipsContent: event.currentTarget.checked })}
+              />
+              <Tick />
+            </span>
             Clip content
           </label>
         )}
         {layers.length === 1 && first.type === 'FRAME' && first.guides.length > 0 && (
           <Row>
-            <span className="min-w-0 flex-1 text-dim">
+            <span className="min-w-0 flex-1 text-[11px] text-dim">
               {first.guides.length} {first.guides.length === 1 ? 'guide' : 'guides'} in this frame
             </span>
             <button
               type="button"
-              className="od-button !h-[26px] flex-none !px-2"
+              className="ev-button !h-7 flex-none !px-2.5 text-[11px]"
               aria-label="Remove all guides of this frame"
               onClick={() => store.getState().apply('Remove all guides', (d) => patchNodes(d, { [first.id]: { guides: [] } }))}
             >
@@ -732,7 +833,7 @@ export function DesignPanel() {
       {booleans.length === layers.length && (
         <Section title="Boolean group">
           <Row>
-            <span className="w-20 flex-none text-dim">Operation</span>
+            <span className={LABEL}>Operation</span>
             <SelectField<BooleanOperation>
               label="Boolean operation"
               value={shared(booleans, (l) => (l.type === 'BOOLEAN_OPERATION' ? l.operation : 'UNION'))}
@@ -751,7 +852,7 @@ export function DesignPanel() {
 
       <Section title="Layer">
         <Row>
-          <span className="w-20 flex-none text-dim">Opacity</span>
+          <span className={LABEL}>Opacity</span>
           <NumberField
             label="Layer opacity"
             suffix="%"
@@ -762,7 +863,7 @@ export function DesignPanel() {
           />
         </Row>
         <Row>
-          <span className="w-20 flex-none text-dim">Blend</span>
+          <span className={LABEL}>Blend</span>
           <SelectField<BlendMode>
             label="Blend mode"
             value={shared(layers, (l) => l.blendMode)}
@@ -770,13 +871,16 @@ export function DesignPanel() {
             onChange={(blendMode) => set('Change blend mode', { blendMode })}
           />
         </Row>
-        <label className="mt-0.5 flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="accent-[var(--od-accent)]"
-            checked={layers.every((layer) => layer.isMask)}
-            onChange={(event) => set(event.currentTarget.checked ? 'Use as mask' : 'Remove mask', { isMask: event.currentTarget.checked })}
-          />
+        <label className={CHECK_LABEL}>
+          <span className="relative flex flex-none">
+            <input
+              type="checkbox"
+              className={CHECKBOX}
+              checked={layers.every((layer) => layer.isMask)}
+              onChange={(event) => set(event.currentTarget.checked ? 'Use as mask' : 'Remove mask', { isMask: event.currentTarget.checked })}
+            />
+            <Tick />
+          </span>
           Mask the layers above
         </label>
       </Section>
@@ -804,7 +908,7 @@ export function DesignPanel() {
           {!anyLine && (
             <select
               aria-label="Stroke position"
-              className="od-field flex-1"
+              className="ev-field flex-1"
               value={shared(layers, (l) => l.strokeAlign)}
               onChange={(event) => set('Change stroke position', { strokeAlign: event.currentTarget.value as StrokeAlign })}
             >
@@ -817,23 +921,26 @@ export function DesignPanel() {
         </Row>
         {layers.every((l) => l.type === 'FRAME' || l.type === 'RECTANGLE') && (
           <>
-            <label className="mt-0.5 flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                className="accent-[var(--od-accent)]"
-                checked={layers.every((l) => l.strokeSides !== null)}
-                onChange={(event) => {
-                  if (!event.currentTarget.checked) return set('Same stroke on every side', { strokeSides: null });
-                  // Each side starts at the weight the stroke has all round.
-                  const patches: Record<NodeId, LayerPatch> = {};
-                  for (const l of layers) if (l.strokeSides === null) patches[l.id] = { strokeSides: { top: l.strokeWeight, right: l.strokeWeight, bottom: l.strokeWeight, left: l.strokeWeight } };
-                  store.getState().apply('Stroke each side', (doc) => patchNodes(doc, patches));
-                }}
-              />
+            <label className={CHECK_LABEL}>
+              <span className="relative flex flex-none">
+                <input
+                  type="checkbox"
+                  className={CHECKBOX}
+                  checked={layers.every((l) => l.strokeSides !== null)}
+                  onChange={(event) => {
+                    if (!event.currentTarget.checked) return set('Same stroke on every side', { strokeSides: null });
+                    // Each side starts at the weight the stroke has all round.
+                    const patches: Record<NodeId, LayerPatch> = {};
+                    for (const l of layers) if (l.strokeSides === null) patches[l.id] = { strokeSides: { top: l.strokeWeight, right: l.strokeWeight, bottom: l.strokeWeight, left: l.strokeWeight } };
+                    store.getState().apply('Stroke each side', (doc) => patchNodes(doc, patches));
+                  }}
+                />
+                <Tick />
+              </span>
               A weight for each side
             </label>
             {layers.every((l) => l.strokeSides !== null) && (
-              <Row>
+              <div className="grid grid-cols-4 gap-1.5">
                 {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
                   <NumberField
                     key={side}
@@ -848,7 +955,7 @@ export function DesignPanel() {
                     }}
                   />
                 ))}
-              </Row>
+              </div>
             )}
           </>
         )}

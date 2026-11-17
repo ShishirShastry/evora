@@ -1,4 +1,4 @@
-# OPEN DESIGN — Document Schema
+# Evora — Document Schema
 
 Current schema version: **24**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping), and version 24 a stroke weight for each side of a box, links in prototypes and Auto Layout rows aligned on the baseline of their text (all needed to open Figma files faithfully). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
@@ -18,11 +18,11 @@ The TypeScript source of truth is `src/core/document/schema.ts`. If this documen
 
 ## 2. File container
 
-The native file extension is `.opendesign`. The content is UTF-8 JSON:
+The native file extension is `.evora`. The content is UTF-8 JSON:
 
 ```jsonc
 {
-  "format": "open-design",       // constant; identifies the file type
+  "format": "evora",             // constant; identifies the file type ("open-design" in files saved before the rename)
   "schemaVersion": 1,            // integer; see Migrations
   "meta": {
     "createdAt": "2026-11-15T10:00:00.000Z",   // ISO 8601, UTC
@@ -803,7 +803,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.
-- A file with a missing or non-integer `schemaVersion`, or a `format` other than `open-design`, is refused as not an OPEN DESIGN file.
+- A file with a missing or non-integer `schemaVersion`, or a `format` other than `evora`, is refused as not an Evora file. The one exception is `open-design`, what files were called before the application was renamed Evora (2026-11-17): they are opened as they always were and saved again as `evora`; their extension, `.opendesign`, is accepted wherever `.evora` is. The schema itself did not change with the name, so this is not a schema version.
 - Every migration has a unit test with a stored fixture of the older version.
 - Migrations are pure and idempotent on already-migrated data.
 

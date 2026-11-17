@@ -32,20 +32,21 @@ export function ColorField({ label, value, onChange }: ColorFieldProps) {
   };
 
   return (
-    <div className="flex h-[26px] min-w-0 flex-1 items-center rounded-[5px] border border-transparent bg-field focus-within:border-accent hover:border-line">
+    // Figma's fill row: one pressed-in field, the swatch set into its left end and the HEX value after it.
+    <div className="ev-input-shell !pl-[5px]">
       <button
         ref={swatch}
         type="button"
         aria-label={`${label} picker`}
         aria-haspopup="dialog"
         aria-expanded={anchor !== null}
-        className="ml-1.5 h-4 w-4 flex-none cursor-pointer rounded-[3px] border border-line p-0"
+        className="h-[18px] w-[18px] flex-none cursor-pointer rounded-[5px] border-0 p-0 shadow-[var(--ev-sunk)] transition-[box-shadow,scale] duration-150 ease-[var(--ev-ease)] hover:shadow-[var(--ev-sunk),0_0_0_1px_var(--ev-line)] active:scale-90 aria-expanded:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.25),0_0_0_2px_var(--ev-accent)]"
         style={{ background: `#${hex}` }}
         onClick={() => setAnchor(swatch.current?.getBoundingClientRect() ?? null)}
       />
       <input
         aria-label={`${label} hex`}
-        className="h-full w-full min-w-0 border-0 bg-transparent px-2 uppercase outline-none"
+        className="h-full w-full min-w-0 border-0 bg-transparent px-2 uppercase text-ink tabular-nums tracking-[0.02em] outline-none"
         spellCheck={false}
         maxLength={7}
         // As in NumberField: the document's value, directly, while nobody is typing.

@@ -31,7 +31,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   rightPanelWidth: 252,
 };
 
-const KEY = 'open-design:preferences';
+const KEY = 'evora:preferences';
+/** Where preferences were kept before the application was renamed Evora; read until they are saved under the new name. */
+const LEGACY_KEY = 'open-design:preferences';
 
 function safeLocalStorage(): Storage | undefined {
   try {
@@ -50,7 +52,7 @@ export function clampPanelWidth(value: unknown, fallback: number): number {
 export function loadPreferences(storage: Storage | undefined = safeLocalStorage()): Preferences {
   if (!storage) return { ...DEFAULT_PREFERENCES };
   try {
-    const parsed = JSON.parse(storage.getItem(KEY) ?? '{}') as Record<string, unknown>;
+    const parsed = JSON.parse(storage.getItem(KEY) ?? storage.getItem(LEGACY_KEY) ?? '{}') as Record<string, unknown>;
     const flag = (key: 'snapping' | 'pixelSnap' | 'showLayoutGrids' | 'showRulers'): boolean =>
       typeof parsed[key] === 'boolean' ? (parsed[key] as boolean) : DEFAULT_PREFERENCES[key];
     return {

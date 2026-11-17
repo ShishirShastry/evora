@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -30,7 +30,7 @@ import { applyTheme } from '../theme';
 import { CanvasView } from './CanvasView';
 import { EditorContext, type EditorContextValue } from './EditorContext';
 import { shortcutGroups } from './menus';
-import { TopBar } from './TopBar';
+import { FileHeader, ToolDock, ViewControls } from './TopBar';
 
 interface EditorScreenProps {
   storage: DocumentStorage;
@@ -96,7 +96,7 @@ export function EditorScreen({ storage, fileId, onExit }: EditorScreenProps) {
         </p>
       )}
       {load.status !== 'loading' && (
-        <button type="button" className="od-button" onClick={onExit}>
+        <button type="button" className="ev-button" onClick={onExit}>
           Back to files
         </button>
       )}
@@ -388,7 +388,8 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     const onPaste = (event: ClipboardEvent): void => {
       if (isTyping(event.target) || overlayOpen()) return;
       event.preventDefault();
-      const layers = event.clipboardData?.getData(CLIPBOARD_MIME) ?? '';
+      // Layers copied by Evora, or by this application before it was renamed.
+      const layers = event.clipboardData?.getData(CLIPBOARD_MIME) || event.clipboardData?.getData(LEGACY_CLIPBOARD_MIME) || '';
       if (layers !== '' && pasteClipboardText(store, layers)) return;
       const files = [...(event.clipboardData?.files ?? [])].filter((file) => imageTypeOf(file) !== null);
       if (files.length > 0) void placeFiles(files);
@@ -432,7 +433,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   // Show the file name in the browser tab.
   useEffect(() => {
     const setTitle = (): void => {
-      document.title = `${store.getState().doc.name} – OPEN DESIGN`;
+      document.title = `${store.getState().doc.name} – Evora`;
     };
     setTitle();
     const unsubscribe = store.subscribe((state, previous) => {
@@ -440,16 +441,33 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     });
     return () => {
       unsubscribe();
-      document.title = 'OPEN DESIGN';
+      document.title = 'Evora';
     };
   }, [store]);
 
   return (
     <EditorContext.Provider value={context}>
-      <div className="flex h-full flex-col">
-        <TopBar />
+      {/* Figma's arrangement: the panels float beside the canvas, each a card of its own on the window's dark ground. */}
+      <div className="flex h-full gap-1.5 bg-bg p-1.5">
+        <nav aria-label="Pages and layers" className="ev-panel relative z-10 flex flex-none flex-col overflow-hidden" style={{ width: panels.left }}>
+          <FileHeader />
+          <PagesPanel />
+          <ComponentsPanel />
+          <LayersPanel />
+          <PanelResizer
+            label="Resize the layers panel"
+            side="left"
+            width={panels.left}
+            min={PANEL_WIDTH_MIN}
+            max={PANEL_WIDTH_MAX}
+            reset={DEFAULT_PREFERENCES.leftPanelWidth}
+            onChange={(left) => setPanels((current) => ({ ...current, left }))}
+            onCommit={(left) => savePreferences({ leftPanelWidth: left })}
+          />
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         {notice && (
-          <div role="alert" className="flex flex-none items-start gap-3 border-b border-line bg-field px-3 py-2">
+          <div role="alert" className="ev-panel flex flex-none items-start gap-3 px-3 py-2.5">
             <div className="min-w-0 flex-1">
               <strong>{notice.title}</strong>
               <ul className="m-0 mt-1 pl-4 text-dim">
@@ -458,41 +476,29 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
                 ))}
               </ul>
             </div>
-            <button type="button" className="od-button" onClick={() => setNotice(null)}>
+            <button type="button" className="ev-button" onClick={() => setNotice(null)}>
               Dismiss
             </button>
           </div>
         )}
-        <div className="flex min-h-0 flex-1">
-          <nav aria-label="Pages and layers" className="relative z-10 flex flex-none flex-col border-r border-line bg-panel" style={{ width: panels.left }}>
-            <PagesPanel />
-            <ComponentsPanel />
-            <LayersPanel />
-            <PanelResizer
-              label="Resize the layers panel"
-              side="left"
-              width={panels.left}
-              min={PANEL_WIDTH_MIN}
-              max={PANEL_WIDTH_MAX}
-              reset={DEFAULT_PREFERENCES.leftPanelWidth}
-              onChange={(left) => setPanels((current) => ({ ...current, left }))}
-              onCommit={(left) => savePreferences({ leftPanelWidth: left })}
-            />
-          </nav>
-          <CanvasView />
-          <div className="relative z-10 flex flex-none flex-col border-l border-line bg-panel" style={{ width: panels.right }}>
-            <PanelResizer
-              label="Resize the design panel"
-              side="right"
-              width={panels.right}
-              min={PANEL_WIDTH_MIN}
-              max={PANEL_WIDTH_MAX}
-              reset={DEFAULT_PREFERENCES.rightPanelWidth}
-              onChange={(right) => setPanels((current) => ({ ...current, right }))}
-              onCommit={(right) => savePreferences({ rightPanelWidth: right })}
-            />
-            <RightSidebar />
+          <div className="ev-panel relative flex min-h-0 flex-1 overflow-hidden">
+            <CanvasView />
+            <ToolDock />
           </div>
+        </div>
+        <div className="ev-panel relative z-10 flex flex-none flex-col overflow-hidden" style={{ width: panels.right }}>
+          <PanelResizer
+            label="Resize the design panel"
+            side="right"
+            width={panels.right}
+            min={PANEL_WIDTH_MIN}
+            max={PANEL_WIDTH_MAX}
+            reset={DEFAULT_PREFERENCES.rightPanelWidth}
+            onChange={(right) => setPanels((current) => ({ ...current, right }))}
+            onCommit={(right) => savePreferences({ rightPanelWidth: right })}
+          />
+          <ViewControls />
+          <RightSidebar />
         </div>
       </div>
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
@@ -501,7 +507,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       {saveAsOpen && (
         <SaveCopyDialog
           onClose={() => setSaveAsOpen(false)}
-          saveOpenDesign={() => {
+          saveEvora={() => {
             const state = store.getState();
             const fileMeta = saver.current?.meta() ?? meta;
             void exportFileText(storage, state.doc, fileMeta).then((text) => saveTextToDisk(exportFileName(state.doc.name), text));
@@ -518,8 +524,8 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   );
 }
 
-/** "Save a copy to disk": as an OPEN DESIGN file, or as a Figma file, with what a Figma file cannot hold said. */
-function SaveCopyDialog({ onClose, saveOpenDesign, saveFig }: { onClose: () => void; saveOpenDesign: () => void; saveFig: () => Promise<string[]> }) {
+/** "Save a copy to disk": as an Evora file, or as a Figma file, with what a Figma file cannot hold said. */
+function SaveCopyDialog({ onClose, saveEvora, saveFig }: { onClose: () => void; saveEvora: () => void; saveFig: () => Promise<string[]> }) {
   const [figResult, setFigResult] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -529,20 +535,20 @@ function SaveCopyDialog({ onClose, saveOpenDesign, saveFig }: { onClose: () => v
           <button
             type="button"
             data-autofocus
-            className="od-button flex-none"
+            className="ev-button flex-none"
             onClick={() => {
-              saveOpenDesign();
+              saveEvora();
               onClose();
             }}
           >
-            OPEN DESIGN (.opendesign)
+            Evora (.evora)
           </button>
-          <p className="m-0 text-dim">Everything in the file, exactly. It opens in OPEN DESIGN on any device.</p>
+          <p className="m-0 text-dim">Everything in the file, exactly. It opens in Evora on any device.</p>
         </div>
         <div className="flex items-start gap-3">
           <button
             type="button"
-            className="od-button flex-none"
+            className="ev-button flex-none"
             disabled={busy}
             onClick={() => {
               setBusy(true);

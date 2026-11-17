@@ -1,6 +1,8 @@
 import type { SessionState } from '../state/editorStore';
 
-const PREFIX = 'open-design:session:';
+const PREFIX = 'evora:session:';
+/** Where the view of each file was kept before the application was renamed Evora. */
+const LEGACY_PREFIX = 'open-design:session:';
 
 /**
  * Remembers, per file, which page was open and where each page was scrolled
@@ -10,7 +12,7 @@ const PREFIX = 'open-design:session:';
 export function loadSession(docId: string, storage: Storage | undefined = safeLocalStorage()): Partial<SessionState> {
   if (!storage) return {};
   try {
-    const raw = storage.getItem(PREFIX + docId);
+    const raw = storage.getItem(PREFIX + docId) ?? storage.getItem(LEGACY_PREFIX + docId);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<SessionState>;
     const viewports: SessionState['viewports'] = {};
@@ -37,6 +39,7 @@ export function saveSession(docId: string, session: SessionState, storage: Stora
 export function clearSession(docId: string, storage: Storage | undefined = safeLocalStorage()): void {
   try {
     storage?.removeItem(PREFIX + docId);
+    storage?.removeItem(LEGACY_PREFIX + docId);
   } catch {
     // Ignore.
   }

@@ -68,6 +68,55 @@ const LINES: readonly (readonly [CounterAxisAlignContent, string])[] = [
   ['SPACE_BETWEEN', 'Space between'],
 ];
 
+/** Display only: a checkbox with its words beside it, as one target. */
+const CHECK_ROW = 'flex min-h-6 cursor-pointer select-none items-center gap-2';
+const CHECKBOX = 'h-3.5 w-3.5 flex-none cursor-pointer accent-[var(--ev-accent)]';
+/** Display only: a note that explains a setting, set into the panel as a soft well. */
+const NOTE = 'm-0 rounded-[var(--ev-radius)] bg-field px-2.5 py-2 text-[11px] leading-[1.45] text-dim shadow-[var(--ev-sunk)]';
+/** Display only: a short caption above a field. */
+const CAPTION = 'text-[11px] leading-none text-dim';
+
+const PREVIEW_JUSTIFY: Record<PrimaryAxisAlign, string> = { MIN: 'flex-start', CENTER: 'center', MAX: 'flex-end', SPACE_BETWEEN: 'space-between' };
+// Bars have no text, so a baseline is their bottom edge; a column has no baseline and keeps to the start.
+const PREVIEW_ALIGN: Record<CounterAxisAlign, string> = { MIN: 'flex-start', CENTER: 'center', MAX: 'flex-end', STRETCH: 'stretch', BASELINE: 'flex-end' };
+const PREVIEW_SIZES = [0.45, 0.8, 0.6] as const;
+
+/**
+ * Display only: a small picture of the layout, Figma's alignment box, set in
+ * a well beside the alignment fields. It shows which way the items run and
+ * how they line up along and across; it is not a control, and the fields
+ * beside it are what change the layout.
+ */
+function LayoutPreview({ direction, along, across }: { direction: Direction | Mixed; along: PrimaryAxisAlign | Mixed; across: CounterAxisAlign | Mixed }) {
+  const column = direction === 'VERTICAL';
+  const known = direction !== MIXED && along !== MIXED && across !== MIXED;
+  const stretch = across === 'STRETCH';
+  return (
+    <div
+      aria-hidden="true"
+      className="flex w-[72px] flex-none cursor-default self-stretch rounded-[var(--ev-radius)] bg-field p-2 shadow-[var(--ev-sunk)]"
+      style={{
+        flexDirection: column ? 'column' : 'row',
+        justifyContent: along === MIXED ? 'center' : PREVIEW_JUSTIFY[along],
+        alignItems: across === MIXED ? 'center' : across === 'BASELINE' && column ? 'flex-start' : PREVIEW_ALIGN[across],
+        gap: 4,
+      }}
+    >
+      {PREVIEW_SIZES.map((size, index) => (
+        <span
+          key={index}
+          className={`flex-none rounded-[2px] transition-[width,height,background-color] duration-150 ${known ? 'bg-accent' : 'bg-faint'}`}
+          style={{
+            [column ? 'height' : 'width']: 7,
+            [column ? 'width' : 'height']: stretch ? 'auto' : `${size * 100}%`,
+            boxShadow: known ? 'inset 0 1px 0 rgba(255, 255, 255, 0.28)' : undefined,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 interface SpacingFieldProps {
   /** Accessible name of the field; the button beside it is "Automatic" followed by it. */
   label: string;
@@ -111,12 +160,12 @@ function SpacingField({ label, prefix, value, fixed, onCommit }: SpacingFieldPro
   };
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      <label className="flex h-[26px] min-w-0 flex-1 items-center rounded-[5px] border border-transparent bg-field pl-2 focus-within:border-accent hover:border-line">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <label className="ev-input-shell">
         <span className="mr-1.5 flex-none text-dim">{prefix}</span>
         <input
           aria-label={label}
-          className="h-full w-full min-w-0 border-0 bg-transparent p-0 outline-none"
+          className="h-full w-full min-w-0 border-0 bg-transparent p-0 outline-none placeholder:text-faint"
           spellCheck={false}
           placeholder={value === MIXED ? 'Mixed' : undefined}
           value={editing ? text : shown}
@@ -151,9 +200,10 @@ function SpacingField({ label, prefix, value, fixed, onCommit }: SpacingFieldPro
           }}
         />
       </label>
+      {/* A toggle key: quiet with a hairline while off, lit in the accent while the spacing is automatic. */}
       <button
         type="button"
-        className="od-icon-button !h-[26px] !w-10 flex-none text-[11px]"
+        className="ev-icon-button !w-11 flex-none !text-[11px] !font-medium shadow-[inset_0_0_0_1px_var(--ev-line)]"
         aria-label={`Automatic ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
         aria-pressed={value === 'AUTO'}
         title="Automatic spacing: spread from end to end, with whatever is left over as the gaps"
@@ -187,13 +237,13 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
         action={
           // "Add" on a single frame switches its layout on; on several it would put them into a new frame together.
           frames.length === 1 ? (
-            <button type="button" className="od-icon-button !h-6 !w-6" aria-label={add.label} title={`${add.label} (${add.shortcut})`} onClick={() => run(add)}>
+            <button type="button" className="ev-icon-button !h-6 !w-6" aria-label={add.label} title={`${add.label} (${add.shortcut})`} onClick={() => run(add)}>
               <Icon name="plus" size={14} />
             </button>
           ) : undefined
         }
       >
-        <p className="m-0 text-faint">
+        <p className="m-0 text-[11px] leading-[1.45] text-faint">
           {active.length === 0 ? 'No auto layout' : 'Some of the selected frames lay out their children and some do not.'}
         </p>
       </Section>
@@ -229,7 +279,7 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
     <Section
       title="Auto layout"
       action={
-        <button type="button" className="od-icon-button !h-6 !w-6" aria-label={remove.label} title={`${remove.label} (${remove.shortcut})`} onClick={() => run(remove)}>
+        <button type="button" className="ev-icon-button !h-6 !w-6" aria-label={remove.label} title={`${remove.label} (${remove.shortcut})`} onClick={() => run(remove)}>
           <Icon name="minus" size={14} />
         </button>
       }
@@ -245,10 +295,10 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
           }
         />
       </Row>
-      <label className="flex cursor-pointer items-center gap-2">
+      <label className={CHECK_ROW}>
         <input
           type="checkbox"
-          className="accent-[var(--od-accent)]"
+          className={CHECKBOX}
           aria-label="Wrap"
           checked={wraps}
           onChange={(event) => {
@@ -280,7 +330,7 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
         </Row>
       )}
       {foursome ? (
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-2 gap-2">
           <NumberField label="Left padding" prefix="L" min={0} max={100000} value={value('paddingLeft')} onCommit={(paddingLeft) => set('Change padding', { paddingLeft })} />
           <NumberField label="Right padding" prefix="R" min={0} max={100000} value={value('paddingRight')} onCommit={(paddingRight) => set('Change padding', { paddingRight })} />
           <NumberField label="Top padding" prefix="T" min={0} max={100000} value={value('paddingTop')} onCommit={(paddingTop) => set('Change padding', { paddingTop })} />
@@ -306,10 +356,10 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
           />
         </Row>
       )}
-      <label className="flex cursor-pointer items-center gap-2">
+      <label className={`${CHECK_ROW} has-[:disabled]:cursor-default has-[:disabled]:text-faint`}>
         <input
           type="checkbox"
-          className="accent-[var(--od-accent)]"
+          className={`${CHECKBOX} disabled:cursor-default`}
           aria-label="Separate padding"
           checked={foursome}
           // With sides that differ there is nothing to go back to until they are made equal.
@@ -318,27 +368,35 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
         />
         Padding for each side
       </label>
-      <Row>
-        <span className="w-20 flex-none text-dim">Along</span>
-        <SelectField<PrimaryAxisAlign>
-          label="Alignment along the layout"
-          value={along}
-          options={names.along}
-          onChange={(primaryAxisAlignItems) => set('Change alignment', { primaryAxisAlignItems })}
-        />
-      </Row>
-      <Row>
-        <span className="w-20 flex-none text-dim">Across</span>
-        <SelectField<CounterAxisAlign>
-          label="Alignment across the layout"
-          value={value('counterAxisAlignItems')}
-          options={names.across}
-          onChange={(counterAxisAlignItems) => set('Change alignment', { counterAxisAlignItems })}
-        />
-      </Row>
+      {/* Figma's alignment block: a picture of the layout in a well, the two alignments beside it. */}
+      <div className="flex gap-2">
+        <LayoutPreview direction={direction} along={along} across={value('counterAxisAlignItems')} />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className={CAPTION}>Along</span>
+            <SelectField<PrimaryAxisAlign>
+              label="Alignment along the layout"
+              value={along}
+              options={names.along}
+              className="w-full"
+              onChange={(primaryAxisAlignItems) => set('Change alignment', { primaryAxisAlignItems })}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className={CAPTION}>Across</span>
+            <SelectField<CounterAxisAlign>
+              label="Alignment across the layout"
+              value={value('counterAxisAlignItems')}
+              options={names.across}
+              className="w-full"
+              onChange={(counterAxisAlignItems) => set('Change alignment', { counterAxisAlignItems })}
+            />
+          </div>
+        </div>
+      </div>
       {value('counterAxisAlignItems') === 'STRETCH' && (
         // Stretch overrides what each item says about its own size across the layout, so that is said here.
-        <p role="note" aria-label="What Stretch does" className="m-0 text-faint">
+        <p role="note" aria-label="What Stretch does" className={NOTE}>
           {direction === 'VERTICAL'
             ? 'Every item is as wide as the frame has room (in a wrapping column, as wide as its column). An item’s own horizontal sizing, “Fill container” included, is not used while Stretch is on. Rotated items and text that sets its own width keep their width.'
             : 'Every item is as tall as the frame has room (in a wrapping row, as tall as its line). An item’s own vertical sizing, “Fill container” included, is not used while Stretch is on. Rotated items, lines and text that sets its own height keep their height.'}
@@ -355,10 +413,10 @@ export function AutoLayoutSection({ frames }: { frames: FrameNode[] }) {
           />
         </Row>
       )}
-      <label className="flex cursor-pointer items-center gap-2">
+      <label className={CHECK_ROW}>
         <input
           type="checkbox"
-          className="accent-[var(--od-accent)]"
+          className={CHECKBOX}
           checked={frames.every((frame) => frame.itemsReversed)}
           onChange={(event) => set('Reverse order', { itemsReversed: event.currentTarget.checked })}
         />
@@ -405,11 +463,11 @@ function LimitField({ label, prefix, value, onCommit }: LimitFieldProps) {
   };
 
   return (
-    <label className="flex h-[26px] min-w-0 flex-1 items-center rounded-[5px] border border-transparent bg-field pl-2 focus-within:border-accent hover:border-line">
-      <span className="mr-1.5 flex-none text-dim">{prefix}</span>
+    <label className="ev-input-shell">
+      <span className="mr-1.5 flex-none text-[11px] text-dim">{prefix}</span>
       <input
         aria-label={label}
-        className="h-full w-full min-w-0 border-0 bg-transparent p-0 outline-none"
+        className="h-full w-full min-w-0 border-0 bg-transparent p-0 outline-none placeholder:text-faint"
         inputMode="decimal"
         spellCheck={false}
         placeholder={value === MIXED ? 'Mixed' : 'None'}
@@ -494,13 +552,13 @@ export function ResizingSection({ layers }: { layers: LayerNode[] }) {
         />
       </Row>
       {(stretched === 'horizontal' || stretched === 'vertical') && (
-        <p role="note" aria-label="Stretched by the frame" className="m-0 text-faint">
+        <p role="note" aria-label="Stretched by the frame" className={NOTE}>
           {stretched === 'horizontal' ? 'Width' : 'Height'}: stretched by the frame’s alignment across its layout. The {stretched} sizing above is not used while
           that alignment is Stretch.
         </p>
       )}
       {limited && (
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-2 gap-2">
           <LimitField label="Minimum width" prefix="Min W" value={shared(layers, (layer) => layer.minWidth)} onCommit={(minWidth) => set('Change size limit', { minWidth })} />
           <LimitField label="Maximum width" prefix="Max W" value={shared(layers, (layer) => layer.maxWidth)} onCommit={(maxWidth) => set('Change size limit', { maxWidth })} />
           <LimitField label="Minimum height" prefix="Min H" value={shared(layers, (layer) => layer.minHeight)} onCommit={(minHeight) => set('Change size limit', { minHeight })} />
@@ -508,10 +566,10 @@ export function ResizingSection({ layers }: { layers: LayerNode[] }) {
         </div>
       )}
       {inLayout && (
-        <label className="flex cursor-pointer items-center gap-2">
+        <label className={CHECK_ROW}>
           <input
             type="checkbox"
-            className="accent-[var(--od-accent)]"
+            className={CHECKBOX}
             checked={layers.every((layer) => layer.layoutPositioning === 'ABSOLUTE')}
             onChange={(event) =>
               set(event.currentTarget.checked ? 'Take out of the layout' : 'Put back into the layout', {

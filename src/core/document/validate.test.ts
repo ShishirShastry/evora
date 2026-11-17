@@ -139,13 +139,22 @@ describe('file format', () => {
     expect(parsed.file.document).toEqual(doc);
     expect(parsed.file.meta).toEqual(meta);
     expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
-    expect(parsed.file.format).toBe('open-design');
+    expect(parsed.file.format).toBe('evora');
   });
 
-  it('refuses data that is not an OPEN DESIGN file', () => {
+  it('opens a file saved before the application was renamed Evora, and saves it under the new name', () => {
+    const { doc } = sample();
+    const old = { ...toFile(doc, meta), format: 'open-design' };
+    const parsed = parseFileText(JSON.stringify(old));
+    expect(parsed.repairs).toEqual([]);
+    expect(parsed.file.document).toEqual(doc);
+    expect(parsed.file.format).toBe('evora');
+  });
+
+  it('refuses data that is not an Evora file', () => {
     expect(() => parseFileText('{{{')).toThrow(FileFormatError);
-    expect(() => migrateFile(null)).toThrow('not an OPEN DESIGN file');
-    expect(() => migrateFile({ format: 'something-else', schemaVersion: 1 })).toThrow('not an OPEN DESIGN file');
+    expect(() => migrateFile(null)).toThrow('not an Evora file');
+    expect(() => migrateFile({ format: 'something-else', schemaVersion: 1 })).toThrow('not an Evora file');
     expect(() => migrateFile({ format: 'open-design' })).toThrow('which version');
     expect(() => migrateFile({ format: 'open-design', schemaVersion: 1.5 })).toThrow('which version');
   });

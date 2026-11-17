@@ -1,7 +1,9 @@
-# OPEN DESIGN
+# Evora
 ## Master Product, Engineering & Implementation Prompt for Claude Code
 
-You are acting as the principal software architect, senior frontend engineer, graphics-engine engineer, product designer, backend engineer and technical lead for a major open-source software project called **OPEN DESIGN**.
+> The product was renamed from OPEN DESIGN to Evora by the owner on 2026-11-17 ("change name from Open Design to Evora change name everywhere"). The name has been changed throughout this specification; nothing else in it has.
+
+You are acting as the principal software architect, senior frontend engineer, graphics-engine engineer, product designer, backend engineer and technical lead for a major open-source software project called **Evora**.
 
 Your mission is to build a complete, professional-grade, standalone design and prototyping application that aims to achieve functional feature parity with Figma Design.
 
@@ -19,7 +21,7 @@ All traditional manual design, vector, layout, component, prototyping, collabora
 
 # 1. PRODUCT IDENTITY AND CORE REQUIREMENTS
 
-**Product name:** OPEN DESIGN
+**Product name:** Evora
 
 **Product category:** Open-source collaborative vector and interface design platform.
 
@@ -81,7 +83,7 @@ Do not implement Figma Make or AI-based design generation.
 
 # 2. APPLICATION ARCHITECTURE
 
-Build OPEN DESIGN as a standalone application with a complete desktop-quality editing experience.
+Build Evora as a standalone application with a complete desktop-quality editing experience.
 
 The application should support:
 
@@ -321,7 +323,7 @@ Implement a complete document-management system.
 
 ### Persistence
 
-Create a robust native OPEN DESIGN document format.
+Create a robust native Evora document format.
 
 The format must support:
 
@@ -1385,7 +1387,7 @@ The Dev Mode must inspect the actual document model rather than display hardcode
 
 # 23. PLUGINS, WIDGETS AND EXTENSIBILITY
 
-Build a plugin architecture that allows external developers to extend OPEN DESIGN.
+Build a plugin architecture that allows external developers to extend Evora.
 
 ### Plugin functionality
 - Plugin marketplace
@@ -1536,7 +1538,7 @@ Implement:
 
 # 27. PERFORMANCE AND QUALITY REQUIREMENTS
 
-OPEN DESIGN must be engineered for professional workloads.
+Evora must be engineered for professional workloads.
 
 ### Performance
 - Smooth canvas navigation
@@ -1587,7 +1589,7 @@ OPEN DESIGN must be engineered for professional workloads.
 
 # 28. STANDALONE APPLICATION AND DEPLOYMENT
 
-OPEN DESIGN must not depend on Figma or any Figma account.
+Evora must not depend on Figma or any Figma account.
 
 ### Deployment modes
 
@@ -1664,7 +1666,7 @@ All panels must interact with the real document model.
 
 Avoid unnecessary animations that interfere with the design workflow.
 
-Create an original OPEN DESIGN visual identity rather than copying proprietary Figma branding.
+Create an original Evora visual identity rather than copying proprietary Figma branding.
 
 ---
 
@@ -1878,7 +1880,7 @@ Build:
 - Merging
 - Advanced file management
 
-Acceptance criterion: External developers can extend OPEN DESIGN and users can manage complex collaborative projects.
+Acceptance criterion: External developers can extend Evora and users can manage complex collaborative projects.
 
 ### Phase 10 — Desktop and production release
 
@@ -1893,7 +1895,7 @@ Build:
 - Performance testing
 - Release pipeline
 
-Acceptance criterion: OPEN DESIGN can be installed and operated independently of Figma.
+Acceptance criterion: Evora can be installed and operated independently of Figma.
 
 ---
 
@@ -2028,7 +2030,7 @@ All tests must verify real application behavior.
 
 # 34. PROJECT COMPLETION CRITERIA
 
-OPEN DESIGN should not be declared complete simply because the editor looks good.
+Evora should not be declared complete simply because the editor looks good.
 
 The project is complete only when:
 
@@ -2070,7 +2072,7 @@ Do not mark a feature complete merely because its UI exists.
 
 # 35. FIRST ACTION REQUIRED
 
-Start by auditing the existing OPEN DESIGN repository.
+Start by auditing the existing Evora repository.
 
 Do not immediately generate a new application or replace existing code.
 
@@ -2097,6 +2099,6 @@ Continue through the phases systematically. Do not stop after building the edito
 
 If a task is too large for one session, document the exact implementation state, completed features, outstanding work, relevant files, known bugs and next actions so development can resume without losing context.
 
-**The ultimate objective: OPEN DESIGN must become a genuinely usable, professional-grade, free and open-source design platform, with the complete traditional Figma Design workflow and no Figma Make or AI design-generation functionality.**
+**The ultimate objective: Evora must become a genuinely usable, professional-grade, free and open-source design platform, with the complete traditional Figma Design workflow and no Figma Make or AI design-generation functionality.**
 
 Build the real product, not just its appearance.

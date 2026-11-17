@@ -72,6 +72,18 @@ function withAngle(paint: GradientPaint, angle: number): GradientPaint {
   return { ...paint, to: { x: tidy(paint.from.x + Math.cos(r) * length), y: tidy(paint.from.y + Math.sin(r) * length) } };
 }
 
+/** A gradient's stops as a CSS gradient, left to right, for the strip drawn above them. */
+function stopsCss(stops: readonly GradientStop[]): string {
+  const channel = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 255);
+  const parts = [...stops]
+    .sort((a, b) => a.position - b.position)
+    .map((stop) => `rgba(${channel(stop.color.r)}, ${channel(stop.color.g)}, ${channel(stop.color.b)}, ${stop.opacity}) ${Math.round(stop.position * 1000) / 10}%`);
+  return `linear-gradient(90deg, ${parts.join(', ')})`;
+}
+
+/** The checkerboard that shows through transparent colours. */
+const CHECKERS = 'repeating-conic-gradient(rgba(128, 128, 128, 0.35) 0% 25%, transparent 0% 50%) 0 0 / 8px 8px';
+
 function sortStops(stops: GradientStop[]): GradientStop[] {
   return stops
     .map((stop, index) => ({ stop, index }))
@@ -162,7 +174,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
       action={
         <button
           type="button"
-          className="od-icon-button !h-6 !w-6"
+          className="ev-icon-button -my-0.5"
           aria-label={`Add ${noun}`}
           title={`Add ${noun}`}
           onClick={() => setPaints(`Add ${noun}`, [...paints, solidPaint(defaultColor)])}
@@ -171,12 +183,18 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
         </button>
       }
     >
-      {mixed && <p className="m-0 text-dim">The selected layers have different {noun}s. Add one to replace them.</p>}
-      {!mixed && paints.length === 0 && <p className="m-0 text-faint">No {noun}</p>}
+      {mixed && <p className="m-0 text-[11px] text-dim">The selected layers have different {noun}s. Add one to replace them.</p>}
+      {!mixed && paints.length === 0 && <p className="m-0 text-[11px] text-faint">No {noun}</p>}
       {paints.map((paint, index) => {
         const name = `${title} ${index + 1}`;
         return (
-          <div key={index} role="group" aria-label={name} className="flex flex-col gap-1.5">
+          // Each paint after the first stands a little apart, so its rows read as one.
+          <div
+            key={index}
+            role="group"
+            aria-label={name}
+            className={`flex flex-col gap-1.5 ${index > 0 ? 'mt-1' : ''}`}
+          >
             <Row>
               <SelectField<PaintType>
                 label={`${name} type`}
@@ -197,24 +215,27 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                   onCommit={(value) => replace(index, { ...paint, opacity: value / 100 }, `Change ${noun} opacity`)}
                 />
               </div>
-              <button
-                type="button"
-                className="od-icon-button !h-6 !w-6"
-                aria-label={paint.visible ? `Hide ${noun} ${index + 1}` : `Show ${noun} ${index + 1}`}
-                title={paint.visible ? 'Hide' : 'Show'}
-                onClick={() => replace(index, { ...paint, visible: !paint.visible }, paint.visible ? `Hide ${noun}` : `Show ${noun}`)}
-              >
-                <Icon name={paint.visible ? 'eye' : 'eyeOff'} size={13} />
-              </button>
-              <button
-                type="button"
-                className="od-icon-button !h-6 !w-6"
-                aria-label={`Remove ${noun} ${index + 1}`}
-                title="Remove"
-                onClick={() => setPaints(`Remove ${noun}`, paints.filter((_, i) => i !== index))}
-              >
-                <Icon name="minus" size={13} />
-              </button>
+              {/* Show and remove, kept together at the end of the row. */}
+              <div className="flex flex-none items-center">
+                <button
+                  type="button"
+                  className="ev-icon-button"
+                  aria-label={paint.visible ? `Hide ${noun} ${index + 1}` : `Show ${noun} ${index + 1}`}
+                  title={paint.visible ? 'Hide' : 'Show'}
+                  onClick={() => replace(index, { ...paint, visible: !paint.visible }, paint.visible ? `Hide ${noun}` : `Show ${noun}`)}
+                >
+                  <Icon name={paint.visible ? 'eye' : 'eyeOff'} size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="ev-icon-button"
+                  aria-label={`Remove ${noun} ${index + 1}`}
+                  title="Remove"
+                  onClick={() => setPaints(`Remove ${noun}`, paints.filter((_, i) => i !== index))}
+                >
+                  <Icon name="minus" size={14} />
+                </button>
+              </div>
             </Row>
 
             {paint.type === 'SOLID' && (
@@ -230,12 +251,12 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
             {paint.type === 'IMAGE' && (
               <>
                 <Row>
-                  <span className="min-w-0 flex-1 truncate text-dim" title={assets[paint.imageHash]?.name}>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-dim" title={assets[paint.imageHash]?.name}>
                     {assets[paint.imageHash]?.name ?? 'Missing image'}
                   </span>
                   <button
                     type="button"
-                    className="od-button !h-[26px] flex-none !px-2"
+                    className="ev-button !h-7 flex-none !px-2.5 text-[11px]"
                     aria-label={`Replace image in ${name}`}
                     onClick={() => void chooseImage(index, paint)}
                   >
@@ -263,7 +284,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                   )}
                 </Row>
                 {paint.scaleMode === 'CROP' && (
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-2 gap-2">
                     {(
                       [
                         ['x', 'left', 'X'],
@@ -293,10 +314,9 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                     return (
                       <button
                         type="button"
-                        className="od-button !h-[26px]"
+                        className={`ev-button !h-7 text-[11px] ${active ? 'ev-button-primary' : ''}`}
                         aria-label={`Position ${name} on the canvas`}
                         aria-pressed={active}
-                        style={active ? { borderColor: 'var(--od-accent)', color: 'var(--od-accent)' } : undefined}
                         onClick={() => store.getState().setPaintEdit(active ? null : { id, key: paintKey, index })}
                       >
                         {active ? 'Done positioning' : 'Drag the image to position it'}
@@ -344,7 +364,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                       return (
                         <button
                           type="button"
-                          className="od-icon-button !h-[26px] !w-[26px]"
+                          className="ev-icon-button"
                           aria-label={`Edit ${name} on the canvas`}
                           aria-pressed={active}
                           title="Show this gradient's handles on the canvas"
@@ -356,7 +376,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                     })()}
                   <button
                     type="button"
-                    className="od-button !h-[26px] flex-none !px-2"
+                    className="ev-button !h-7 flex-none !px-2.5 text-[11px]"
                     aria-label={`Add stop to ${name}`}
                     title="Add a colour stop"
                     onClick={() => replace(index, { ...paint, stops: addStop(paint.stops) }, 'Add gradient stop')}
@@ -364,6 +384,15 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                     + Stop
                   </button>
                 </Row>
+                {/* The ramp the stops below make, over a checkerboard where it is transparent. */}
+                <div
+                  aria-hidden="true"
+                  className="relative h-3 overflow-hidden rounded-full"
+                  style={{ background: CHECKERS }}
+                >
+                  <div className="absolute inset-0" style={{ background: stopsCss(paint.stops) }} />
+                  <div className="pointer-events-none absolute inset-0 rounded-full shadow-[var(--ev-sunk)]" />
+                </div>
                 {paint.stops.map((stop, stopIndex) => {
                   const stopName = `${name} stop ${stopIndex + 1}`;
                   const setStop = (patch: Partial<GradientStop>, label: string, phase: 'live' | 'commit' = 'commit'): void => {
@@ -372,7 +401,7 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                     replace(index, { ...paint, stops: phase === 'live' ? stops : sortStops(stops) }, label, phase);
                   };
                   return (
-                    <Row key={stopIndex}>
+                    <div key={stopIndex} className="flex items-center gap-1.5">
                       <ColorField label={`${stopName} colour`} value={stop.color} onChange={(color, phase) => setStop({ color }, 'Change stop colour', phase)} />
                       <div className="w-[54px] flex-none">
                         <NumberField
@@ -396,15 +425,15 @@ export function PaintList({ title, paintKey, layers, defaultColor, allowImage = 
                       </div>
                       <button
                         type="button"
-                        className="od-icon-button !h-6 !w-6"
+                        className="ev-icon-button"
                         aria-label={`Remove ${stopName}`}
                         title="Remove stop"
                         disabled={paint.stops.length <= 2}
                         onClick={() => replace(index, { ...paint, stops: paint.stops.filter((_, i) => i !== stopIndex) }, 'Remove gradient stop')}
                       >
-                        <Icon name="minus" size={13} />
+                        <Icon name="minus" size={14} />
                       </button>
-                    </Row>
+                    </div>
                   );
                 })}
               </>

@@ -1,53 +1,97 @@
 @import "tailwindcss";
 
 /*
- * OPEN DESIGN interface theme. Every colour in the application chrome comes
- * from these variables, so a second theme is a second set of values.
+ * Evora interface theme. Every colour, shadow and radius of the application's
+ * chrome comes from these variables, so a second theme is a second set of
+ * values. The dark theme follows Framer's near-black surfaces and luminous
+ * blue; the layout and density follow Figma; controls are lightly
+ * neomorphic: raised ones catch a highlight on their top edge and sit on a
+ * soft shadow, fields are pressed into the surface.
  */
 :root {
-  --od-bg: #0e1112;
-  --od-panel: #171b1c;
-  --od-field: #222829;
-  --od-hover: #262d2e;
-  --od-line: #2b3233;
-  --od-ink: #e7eded;
-  --od-dim: #8d9797;
-  --od-faint: #5d6767;
-  --od-accent: #19c2b3;
-  --od-accent-ink: #04201d;
-  --od-selected: rgba(25, 194, 179, 0.2);
-  --od-danger: #ff7a7a;
+  --ev-bg: #09090a;
+  --ev-panel: #141415;
+  --ev-elevated: #1c1c1f;
+  --ev-field: #1e1e21;
+  --ev-field-strong: #26262a;
+  --ev-hover: #232327;
+  --ev-line: #27272b;
+  --ev-ink: #f2f2f4;
+  --ev-dim: #a0a0a8;
+  --ev-faint: #62626a;
+  --ev-accent: #0d99ff;
+  --ev-accent-strong: #0a85ef;
+  --ev-accent-ink: #ffffff;
+  --ev-selected: rgba(13, 153, 255, 0.17);
+  --ev-danger: #ff5a5f;
+  --ev-success: #2fd27f;
+  --ev-ring: rgba(13, 153, 255, 0.5);
+
+  /* Raised controls: a highlight along the top edge, a hairline and a soft drop. */
+  --ev-raise: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.45);
+  --ev-raise-hover: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.45);
+  /* Fields and wells: pressed into the surface. */
+  --ev-sunk: inset 0 1px 2px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  /* Panels floating over the window, and what floats over them. */
+  --ev-shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.055), 0 12px 32px -14px rgba(0, 0, 0, 0.8);
+  --ev-shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.075), 0 20px 50px -12px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.45);
+  --ev-button: linear-gradient(180deg, #2a2a2e 0%, #212124 100%);
+  --ev-button-hover: linear-gradient(180deg, #313136 0%, #26262a 100%);
+  --ev-primary: linear-gradient(180deg, #2ba7ff 0%, #0b8bff 100%);
+  --ev-primary-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 0 1px rgba(0, 72, 150, 0.75), 0 6px 16px -6px rgba(13, 153, 255, 0.7);
+
+  --ev-radius-sm: 6px;
+  --ev-radius: 8px;
+  --ev-radius-lg: 12px;
+  --ev-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* The light theme: the same variables with other values. Designs keep their own colours. */
 :root[data-theme="light"] {
-  --od-bg: #e7ebea;
-  --od-panel: #ffffff;
-  --od-field: #eef2f1;
-  --od-hover: #e3e9e8;
-  --od-line: #d3dad9;
-  --od-ink: #152021;
-  --od-dim: #586464;
-  --od-faint: #97a2a2;
-  --od-accent: #0b8177;
-  --od-accent-ink: #ffffff;
-  --od-selected: rgba(11, 129, 119, 0.16);
-  --od-danger: #c22f2f;
+  --ev-bg: #e6e6ea;
+  --ev-panel: #ffffff;
+  --ev-elevated: #ffffff;
+  --ev-field: #f1f1f4;
+  --ev-field-strong: #e8e8ec;
+  --ev-hover: #efeff2;
+  --ev-line: #e2e2e7;
+  --ev-ink: #18181c;
+  --ev-dim: #66666f;
+  --ev-faint: #a2a2ab;
+  --ev-accent: #0d8bf2;
+  --ev-accent-strong: #0a78d6;
+  --ev-accent-ink: #ffffff;
+  --ev-selected: rgba(13, 139, 242, 0.12);
+  --ev-danger: #e5484d;
+  --ev-success: #1fa463;
+  --ev-ring: rgba(13, 139, 242, 0.4);
+
+  --ev-raise: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.1);
+  --ev-raise-hover: inset 0 1px 0 rgba(255, 255, 255, 1), 0 0 0 1px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.12);
+  --ev-sunk: inset 0 1px 2px rgba(0, 0, 0, 0.07), inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --ev-shadow-panel: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 10px 30px -16px rgba(0, 0, 0, 0.25);
+  --ev-shadow-pop: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 18px 44px -14px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --ev-button: linear-gradient(180deg, #ffffff 0%, #f3f3f6 100%);
+  --ev-button-hover: linear-gradient(180deg, #ffffff 0%, #ececf0 100%);
+  --ev-primary: linear-gradient(180deg, #2a9dff 0%, #0b84ec 100%);
+  --ev-primary-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 0 1px rgba(0, 92, 180, 0.6), 0 6px 14px -6px rgba(13, 139, 242, 0.55);
 }
 
 @theme inline {
-  --color-bg: var(--od-bg);
-  --color-panel: var(--od-panel);
-  --color-field: var(--od-field);
-  --color-hover: var(--od-hover);
-  --color-line: var(--od-line);
-  --color-ink: var(--od-ink);
-  --color-dim: var(--od-dim);
-  --color-faint: var(--od-faint);
-  --color-accent: var(--od-accent);
-  --color-accent-ink: var(--od-accent-ink);
-  --color-selected: var(--od-selected);
-  --color-danger: var(--od-danger);
+  --color-bg: var(--ev-bg);
+  --color-panel: var(--ev-panel);
+  --color-elevated: var(--ev-elevated);
+  --color-field: var(--ev-field);
+  --color-hover: var(--ev-hover);
+  --color-line: var(--ev-line);
+  --color-ink: var(--ev-ink);
+  --color-dim: var(--ev-dim);
+  --color-faint: var(--ev-faint);
+  --color-accent: var(--ev-accent);
+  --color-accent-ink: var(--ev-accent-ink);
+  --color-selected: var(--ev-selected);
+  --color-danger: var(--ev-danger);
+  --color-success: var(--ev-success);
   --font-sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
@@ -59,12 +103,15 @@ body,
 
 body {
   margin: 0;
-  background: var(--od-bg);
-  color: var(--od-ink);
+  background: var(--ev-bg);
+  color: var(--ev-ink);
   font-family: var(--font-sans);
   font-size: 12px;
   line-height: 1.4;
+  letter-spacing: -0.003em;
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   user-select: none;
 }
@@ -75,100 +122,318 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
   user-select: text;
 }
 
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--ev-accent);
+}
+
+/* The keyboard's place: a soft ring that follows each control's corners and leaves its shading alone. */
 :focus-visible {
-  outline: 1.5px solid var(--od-accent);
+  outline: 2px solid var(--ev-ring);
   outline-offset: 1px;
 }
 
+::selection {
+  background: var(--ev-selected);
+}
+
+/* Thin scrollbars that keep out of the way until they are wanted. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 127, 140, 0.28) transparent;
+}
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
-  background: var(--od-line);
-  border-radius: 4px;
+  background: rgba(127, 127, 140, 0.24);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--od-faint);
+  background-color: rgba(127, 127, 140, 0.45);
 }
 
-/* Shared control styles. */
-.od-field {
-  height: 26px;
+/* ------------------------------------------------------------ surfaces */
+
+/* A panel floating over the window: the sidebars, the canvas, the file browser's cards. */
+.ev-panel {
+  background: var(--ev-panel);
+  border-radius: var(--ev-radius-lg);
+  box-shadow: var(--ev-shadow-panel);
+}
+
+/* What floats over panels: menus, pickers, dialogs, the tool dock. */
+.ev-popover {
+  background: var(--ev-elevated);
+  border-radius: 10px;
+  box-shadow: var(--ev-shadow-pop);
+  animation: ev-pop-in 140ms var(--ev-ease);
+}
+
+@keyframes ev-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ev-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ev-backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  animation: ev-fade-in 160ms var(--ev-ease);
+}
+
+/* ------------------------------------------------------------ controls */
+
+/* A field: pressed into the panel, lit by the accent while typing in it. */
+.ev-field {
+  height: 28px;
   min-width: 0;
   width: 100%;
-  background: var(--od-field);
-  border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 0 7px;
+  background: var(--ev-field);
+  border: 0;
+  border-radius: 7px;
+  box-shadow: var(--ev-sunk);
+  padding: 0 8px;
   outline: none;
+  transition:
+    background-color 120ms var(--ev-ease),
+    box-shadow 120ms var(--ev-ease);
 }
-.od-field:hover {
-  border-color: var(--od-line);
+.ev-field:hover:not(:disabled) {
+  background: var(--ev-field-strong);
 }
-.od-field:focus {
-  border-color: var(--od-accent);
+.ev-field:focus,
+.ev-field:focus-within {
+  background: var(--ev-field);
+  box-shadow:
+    inset 0 0 0 1px var(--ev-accent),
+    0 0 0 3px rgba(13, 153, 255, 0.16);
 }
-.od-field:disabled {
-  color: var(--od-faint);
+.ev-field:disabled {
+  color: var(--ev-faint);
+  box-shadow: none;
+}
+select.ev-field {
+  appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5 5 6.5 8 3.5' fill='none' stroke='%23a0a0a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+}
+select.ev-field option {
+  background: var(--ev-elevated);
+  color: var(--ev-ink);
 }
 
-.od-icon-button {
+/* A number or text field with a label or unit inside it, drawn as one field. */
+.ev-input-shell {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 0;
+  flex: 1 1 0%;
+  border-radius: 7px;
+  background: var(--ev-field);
+  box-shadow: var(--ev-sunk);
+  padding-left: 8px;
+  transition:
+    background-color 120ms var(--ev-ease),
+    box-shadow 120ms var(--ev-ease);
+}
+.ev-input-shell:hover {
+  background: var(--ev-field-strong);
+}
+.ev-input-shell:focus-within {
+  background: var(--ev-field);
+  box-shadow:
+    inset 0 0 0 1px var(--ev-accent),
+    0 0 0 3px rgba(13, 153, 255, 0.16);
+}
+
+/* An icon button: quiet until hovered; a chosen one glows in the accent. */
+.ev-icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: var(--od-dim);
+  color: var(--ev-dim);
   cursor: pointer;
   flex: none;
+  transition:
+    background-color 120ms var(--ev-ease),
+    color 120ms var(--ev-ease),
+    box-shadow 120ms var(--ev-ease),
+    transform 120ms var(--ev-ease);
 }
-.od-icon-button:hover:not(:disabled) {
-  background: var(--od-hover);
-  color: var(--od-ink);
+.ev-icon-button:hover:not(:disabled) {
+  background: var(--ev-hover);
+  color: var(--ev-ink);
 }
-.od-icon-button:disabled {
-  color: var(--od-faint);
+.ev-icon-button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.ev-icon-button:disabled {
+  color: var(--ev-faint);
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.55;
 }
-.od-icon-button[aria-pressed="true"] {
-  background: var(--od-accent);
-  color: var(--od-accent-ink);
+.ev-icon-button[aria-pressed="true"] {
+  background: var(--ev-primary);
+  color: var(--ev-accent-ink);
+  box-shadow: var(--ev-primary-shadow);
 }
 
-.od-button {
+/* A button: a raised pill-cornered key, Framer's way. */
+.ev-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 30px;
   padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid var(--od-line);
-  background: var(--od-field);
+  border: 0;
+  border-radius: var(--ev-radius);
+  background: var(--ev-button);
+  box-shadow: var(--ev-raise);
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    box-shadow 140ms var(--ev-ease),
+    transform 140ms var(--ev-ease),
+    filter 140ms var(--ev-ease);
 }
-.od-button:hover {
-  background: var(--od-hover);
+.ev-button:hover:not(:disabled) {
+  background: var(--ev-button-hover);
+  box-shadow: var(--ev-raise-hover);
 }
-.od-button-primary {
-  background: var(--od-accent);
-  border-color: var(--od-accent);
-  color: var(--od-accent-ink);
+.ev-button:active:not(:disabled) {
+  transform: translateY(0.5px) scale(0.985);
+  box-shadow: var(--ev-sunk);
+}
+.ev-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ev-button-primary {
+  background: var(--ev-primary);
+  box-shadow: var(--ev-primary-shadow);
+  color: var(--ev-accent-ink);
   font-weight: 600;
 }
-.od-button-primary:hover {
-  background: var(--od-accent);
+.ev-button-primary:hover:not(:disabled) {
+  background: var(--ev-primary);
+  box-shadow: var(--ev-primary-shadow);
   filter: brightness(1.08);
+}
+.ev-button-primary:active:not(:disabled) {
+  filter: brightness(0.95);
+  box-shadow: var(--ev-primary-shadow);
+}
+.ev-button-danger {
+  color: var(--ev-danger);
+}
+
+/* Tabs as a segmented control: a pressed-in track with the chosen tab raised out of it. */
+.ev-segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--ev-field);
+  box-shadow: var(--ev-sunk);
+}
+.ev-segment {
+  flex: 1 1 0%;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ev-dim);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 140ms var(--ev-ease),
+    color 140ms var(--ev-ease),
+    box-shadow 140ms var(--ev-ease);
+}
+.ev-segment:hover {
+  color: var(--ev-ink);
+}
+.ev-segment[aria-selected="true"] {
+  background: var(--ev-button);
+  color: var(--ev-ink);
+  box-shadow: var(--ev-raise);
+}
+
+/* The floating tool dock at the foot of the canvas. */
+.ev-dock {
+  background: color-mix(in srgb, var(--ev-elevated) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  border-radius: 14px;
+  box-shadow:
+    var(--ev-shadow-pop),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 5px;
+}
+
+/* A row in a list (layers, pages, menus): hover lifts it, choosing it lights it. */
+.ev-row {
+  transition: background-color 100ms var(--ev-ease);
+}
+
+/* Section headings in the properties panel, Figma's way: sentence case, quiet, bold. */
+.ev-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ev-ink);
+  letter-spacing: 0;
 }
 
 /* The selected part of a text layer, while the keyboard focus is in the properties panel. */
-::highlight(od-text-selection) {
-  background-color: rgba(25, 194, 179, 0.4);
+::highlight(ev-text-selection) {
+  background-color: rgba(13, 153, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }

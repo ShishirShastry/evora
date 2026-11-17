@@ -34,7 +34,7 @@ interface TextEditorProps {
 
 const TEXT_TRANSFORM = { ORIGINAL: 'none', UPPER: 'uppercase', LOWER: 'lowercase', TITLE: 'capitalize' } as const;
 /** The name of the highlight that shows the selected text while the keyboard focus is in the properties panel. */
-const HIGHLIGHT = 'od-text-selection';
+const HIGHLIGHT = 'ev-text-selection';
 /** Typing within this long of the last keystroke is undone together with it. */
 const TYPING_PAUSE_MS = 1000;
 
@@ -495,6 +495,8 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
   const layout = layoutText(node, getBrowserMeasurer() ?? approximateMeasurer);
   // A little slack keeps text that sets its own width from wrapping while a character is being measured.
   const width = autoWidth && (node.textAlign === 'LEFT' || node.textAlign === 'JUSTIFIED') ? node.width + Math.ceil(node.fontSize) : Math.max(1, node.width);
+  // The editing box's edge is drawn one screen pixel wide at every zoom, as Figma's is: the editor is scaled with the canvas.
+  const hairline = 1 / Math.max(z, 0.01);
 
   return (
     <div
@@ -545,6 +547,8 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
         contentEditable
         suppressContentEditableWarning
         spellCheck={false}
+        // The selected text is marked as strongly here as it is while the properties panel has the keyboard.
+        className="selection:bg-accent/40"
         style={{
           boxSizing: 'border-box',
           width: '100%',
@@ -556,13 +560,13 @@ export function TextEditor({ id, onDone }: TextEditorProps) {
           textAlign: node.textAlign === 'JUSTIFIED' ? 'justify' : (node.textAlign.toLowerCase() as 'left' | 'center' | 'right'),
           textTransform: TEXT_TRANSFORM[node.textCase],
           color: inkOf(node),
-          caretColor: fill ? rgbToCss(paintColor(fill)) : 'var(--od-accent)',
+          caretColor: fill ? rgbToCss(paintColor(fill)) : 'var(--ev-accent)',
           whiteSpace: autoWidth ? 'pre' : 'pre-wrap',
           overflowWrap: 'anywhere',
           userSelect: 'text',
           cursor: 'text',
-          outline: '1px solid var(--od-accent)',
-          outlineOffset: 1,
+          outline: `${hairline}px solid var(--ev-accent)`,
+          outlineOffset: hairline,
         }}
       />
     </div>

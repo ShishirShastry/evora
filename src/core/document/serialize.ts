@@ -1,13 +1,14 @@
 import {
   CURRENT_SCHEMA_VERSION,
   FILE_FORMAT,
+  LEGACY_FILE_FORMATS,
   type Document,
   type FileMeta,
-  type OpenDesignFile,
+  type EvoraFile,
 } from './schema';
 import { repairDocument } from './validate';
 
-/** Thrown when data cannot be opened as an OPEN DESIGN file. The message is safe to show to the user. */
+/** Thrown when data cannot be opened as an Evora file. The message is safe to show to the user. */
 export class FileFormatError extends Error {
   constructor(message: string) {
     super(message);
@@ -358,8 +359,9 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
  * again would destroy whatever this build does not understand.
  */
 export function migrateFile(raw: unknown): Raw {
-  if (!isObject(raw) || raw.format !== FILE_FORMAT) {
-    throw new FileFormatError('This is not an OPEN DESIGN file.');
+  // A file saved before the application was renamed says so in its own way, and is opened the same.
+  if (!isObject(raw) || (raw.format !== FILE_FORMAT && !LEGACY_FILE_FORMATS.includes(raw.format as string))) {
+    throw new FileFormatError('This is not an Evora file.');
   }
   const version = raw.schemaVersion;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
@@ -367,7 +369,7 @@ export function migrateFile(raw: unknown): Raw {
   }
   if (version > CURRENT_SCHEMA_VERSION) {
     throw new FileFormatError(
-      `This file was saved by a newer version of OPEN DESIGN (format ${version}). Update the application to open it.`,
+      `This file was saved by a newer version of Evora (format ${version}). Update the application to open it.`,
     );
   }
   let file = raw;
@@ -384,7 +386,7 @@ function isoDate(value: unknown, fallback: string): string {
 }
 
 export interface ParsedFile {
-  file: OpenDesignFile;
+  file: EvoraFile;
   /** What had to be repaired while loading. Empty for a healthy file. */
   repairs: string[];
 }
@@ -406,21 +408,21 @@ export function parseFile(raw: unknown): ParsedFile {
   };
 }
 
-/** Parses the text of a `.opendesign` file. */
+/** Parses the text of a `.evora` file (or an `.opendesign` one, from before the rename). */
 export function parseFileText(text: string): ParsedFile {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new FileFormatError('This file is damaged or is not an OPEN DESIGN file (it is not valid JSON).');
+    throw new FileFormatError('This file is damaged or is not an Evora file (it is not valid JSON).');
   }
   return parseFile(raw);
 }
 
-export function toFile(doc: Document, meta: FileMeta): OpenDesignFile {
+export function toFile(doc: Document, meta: FileMeta): EvoraFile {
   return { format: FILE_FORMAT, schemaVersion: CURRENT_SCHEMA_VERSION, meta: { ...meta }, document: doc };
 }
 
-export function serializeFile(file: OpenDesignFile): string {
+export function serializeFile(file: EvoraFile): string {
   return JSON.stringify(file);
 }

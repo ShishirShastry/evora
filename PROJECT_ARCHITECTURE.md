@@ -1,4 +1,4 @@
-# OPEN DESIGN — Project Architecture
+# Evora — Project Architecture
 
 Status: living document. Created in Phase 0 (2026-11-15). Update it whenever a module boundary or data flow changes.
 
@@ -100,7 +100,7 @@ A single npm package (see ADR-001). Later server and desktop code live in siblin
 
 ```
 Open Design/
-├── OPEN_DESIGN_MASTER_SPEC.md      the specification (verbatim copy)
+├── EVORA_MASTER_SPEC.md            the specification (the owner's text; the product renamed from OPEN DESIGN to Evora on 2026-11-17)
 ├── PROJECT_ARCHITECTURE.md  …      the six Phase 0 documents
 ├── HANDOFF.md                      current state for the next session (spec §35)
 ├── package.json, tsconfig*.json, vite.config.ts, playwright.config.ts
@@ -238,7 +238,7 @@ Hit testing (`src/core/scene/hitTest.ts`) is geometric, not pixel-based: the poi
 
 - **Local-first.** Documents are stored in IndexedDB through a `DocumentStorage` interface (`list`, `load`, `save`, `delete`, `duplicate`). No account and no server are needed (deployment Mode A).
 - **Autosave** is a debounced write after every committed change, flushed on page hide. The toolbar shows the true status: saved, saving, unsaved or error.
-- **Native file format** `.opendesign`: versioned JSON (see DOCUMENT_SCHEMA.md). "Save as" and "Open" use the File System Access API when the browser has it and fall back to download and file-picker upload.
+- **Native file format** `.evora` (`.opendesign` before the rename, still opened): versioned JSON (see DOCUMENT_SCHEMA.md). "Save as" and "Open" use the File System Access API when the browser has it and fall back to download and file-picker upload.
 - **Loading** always goes through `migrate → validate → repair`. A file from a newer schema version is refused with a clear message rather than opened lossily.
 - Later: binary assets are stored content-addressed beside documents (Phase 2), snapshots feed version history (Phase 9), and the server implements the same `DocumentStorage` interface over PostgreSQL and S3-compatible storage (Phase 8).
 

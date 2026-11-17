@@ -752,7 +752,7 @@ export interface AppActions {
   present?(startId?: NodeId): void;
   /** Writes the file to local storage immediately. */
   saveNow(): void;
-  /** Saves a `.opendesign` copy to disk. */
+  /** Saves a `.evora` copy to disk. */
   saveAs(): void;
   /** Lets the user choose image files and places them on the canvas. */
   placeImage(): void;

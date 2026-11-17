@@ -36,7 +36,7 @@ interface ClipboardRoot {
 }
 
 export interface ClipboardPayload {
-  kind: 'open-design/layers';
+  kind: 'evora/layers';
   sourceDocumentId: string;
   sourcePageId: NodeId | null;
   /** Centre of everything copied, in page space. */
@@ -63,7 +63,7 @@ export function copyNodes(doc: Document, ids: readonly NodeId[]): ClipboardPaylo
   });
   const bounds = unionRects(top.map((id) => getWorldBounds(doc, id)));
   return {
-    kind: 'open-design/layers',
+    kind: 'evora/layers',
     sourceDocumentId: doc.id,
     sourcePageId: getPageIdOf(doc, top[0] as NodeId),
     center: bounds ? rectCenter(bounds) : { x: 0, y: 0 },
@@ -72,8 +72,11 @@ export function copyNodes(doc: Document, ids: readonly NodeId[]): ClipboardPaylo
 }
 
 /** The type copied layers have on the system clipboard. */
-export const CLIPBOARD_MIME = 'application/x-open-design-layers+json';
-const CLIPBOARD_FORMAT = 'open-design/clipboard';
+export const CLIPBOARD_MIME = 'application/x-evora-layers+json';
+/** What the clipboard held as before the application was renamed, still taken when pasting. */
+export const LEGACY_CLIPBOARD_MIME = 'application/x-open-design-layers+json';
+const CLIPBOARD_FORMAT = 'evora/clipboard';
+const LEGACY_CLIPBOARD_FORMATS: readonly string[] = ['open-design/clipboard'];
 
 /** Copied layers together with what is known of the images they use: what goes on the clipboard. */
 export interface ClipboardData {
@@ -118,7 +121,7 @@ export function parseClipboard(text: string): ClipboardData | null {
   } catch {
     return null;
   }
-  if (!isRecord(raw) || raw.format !== CLIPBOARD_FORMAT || !isRecord(raw.payload) || !Array.isArray(raw.payload.roots)) return null;
+  if (!isRecord(raw) || (raw.format !== CLIPBOARD_FORMAT && !LEGACY_CLIPBOARD_FORMATS.includes(raw.format as string)) || !isRecord(raw.payload) || !Array.isArray(raw.payload.roots)) return null;
   const source = raw.payload;
   const number = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
   const point = (value: unknown): Point => (isRecord(value) ? { x: number(value.x), y: number(value.y) } : { x: 0, y: 0 });
@@ -182,7 +185,7 @@ export function parseClipboard(text: string): ClipboardData | null {
   if (kept.length === 0) return null;
   return {
     payload: {
-      kind: 'open-design/layers',
+      kind: 'evora/layers',
       sourceDocumentId: typeof source.sourceDocumentId === 'string' ? source.sourceDocumentId : '',
       sourcePageId: typeof source.sourcePageId === 'string' ? source.sourcePageId : null,
       center: point(source.center),

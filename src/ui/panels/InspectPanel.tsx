@@ -43,6 +43,15 @@ const STATUS_LABELS: Record<DevStatus, string> = { NONE: 'Not marked', READY: 'R
 type Language = 'CSS' | 'SWIFT' | 'COMPOSE';
 const LANGUAGE_LABELS: Record<Language, string> = { CSS: 'CSS', SWIFT: 'iOS (SwiftUI)', COMPOSE: 'Android (Compose)' };
 
+/** A rounded well pressed into the panel: what code and measurements sit in. */
+const WELL = 'rounded-[10px] bg-bg/50 shadow-[var(--ev-sunk)]';
+/** What an empty list says, in a quiet dashed outline where its rows would be. */
+const EMPTY = 'm-0 rounded-[8px] border border-dashed border-line px-3 py-2.5 text-center leading-[1.45] text-faint';
+/** A note under the controls it is about. */
+const NOTE = 'm-0 leading-[1.45] text-faint';
+/** A row of a list that takes you somewhere: Figma's list row, lit on hover. */
+const LINK_ROW = 'ev-row flex w-full rounded-[6px] border-0 bg-transparent px-1.5 text-left text-ink hover:bg-hover';
+
 function copyText(text: string, done: () => void): void {
   if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).then(done, () => undefined);
 }
@@ -50,22 +59,30 @@ function copyText(text: string, done: () => void): void {
 function CodeBlock({ label, code }: { label: string; code: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex flex-col gap-1">
-      <pre aria-label={label} tabIndex={0} className="m-0 max-h-64 overflow-auto whitespace-pre rounded border border-line bg-field p-2 font-mono text-[11px] leading-[1.5]">
+    // The code in a well, as Dev Mode shows it, with its copy button on a strip along the foot.
+    <div className={`flex flex-col ${WELL}`}>
+      <pre aria-label={label} tabIndex={0} className="m-0 max-h-64 select-text overflow-auto whitespace-pre rounded-t-[10px] px-3 py-2.5 font-mono text-[11px] leading-[1.65] text-ink focus-visible:-outline-offset-2">
         {code}
       </pre>
-      <button
-        type="button"
-        className="od-button !h-[24px] self-start !px-2"
-        onClick={() =>
-          copyText(code, () => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
-          })
-        }
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+      <div className="flex items-center justify-end border-t border-line/70 p-1">
+        <button
+          type="button"
+          className="ev-button !h-6 !gap-1 !rounded-[7px] !px-2 text-[11px]"
+          onClick={() =>
+            copyText(code, () => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            })
+          }
+        >
+          {copied && (
+            <span aria-hidden="true" className="flex text-accent">
+              <Icon name="check" size={12} />
+            </span>
+          )}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -94,7 +111,7 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
       <Section title={layer.name}>
         <Row>
           <span className="w-14 flex-none text-dim">Status</span>
-          <select aria-label="Development status" className="od-field min-w-0 flex-1" value={layer.devStatus} onChange={(event) => store.getState().apply('Change development status', (d) => setDevStatus(d, [layer.id], event.currentTarget.value as DevStatus))}>
+          <select aria-label="Development status" className="ev-field min-w-0 flex-1" value={layer.devStatus} onChange={(event) => store.getState().apply('Change development status', (d) => setDevStatus(d, [layer.id], event.currentTarget.value as DevStatus))}>
             {DEV_STATUSES.map((status) => (
               <option key={status} value={status}>
                 {STATUS_LABELS[status]}
@@ -105,15 +122,16 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
       </Section>
       {sections.map((section) => (
         <Section key={section.title} title={section.title}>
-          <dl className="m-0 flex flex-col gap-1" aria-label={section.title}>
+          {/* Label and value in pairs, like a spec sheet: one hairline between each. */}
+          <dl className={`m-0 flex flex-col divide-y divide-line/60 px-2.5 py-0.5 ${WELL}`} aria-label={section.title}>
             {section.rows.map((row, index) => (
-              <div key={index} className="flex items-start gap-2">
-                <dt className="w-24 flex-none text-dim">{row.label}</dt>
-                <dd className="m-0 flex min-w-0 flex-1 items-start gap-1.5 break-words">
-                  {row.color && <span aria-hidden className="mt-0.5 h-3 w-3 flex-none rounded-sm border border-line" style={{ background: cssColor(row.color) }} />}
-                  <span className="min-w-0 select-text">
+              <div key={index} className="flex items-start gap-2 py-[6px]">
+                <dt className="w-[84px] flex-none text-dim">{row.label}</dt>
+                <dd className="m-0 flex min-w-0 flex-1 items-start gap-1.5 break-words text-ink">
+                  {row.color && <span aria-hidden className="mt-px h-3.5 w-3.5 flex-none rounded-[4px] border border-line" style={{ background: cssColor(row.color) }} />}
+                  <span className="min-w-0 select-text tabular-nums">
                     {row.value}
-                    {row.token && <span className="ml-1 rounded bg-field px-1 text-accent">{row.token}</span>}
+                    {row.token && <span className="ml-1.5 rounded-[5px] bg-selected px-1.5 py-px text-[11px] font-medium text-accent">{row.token}</span>}
                   </span>
                 </dd>
               </div>
@@ -122,7 +140,7 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
         </Section>
       ))}
       <Section title="Code">
-        <select aria-label="Code language" className="od-field" value={language} onChange={(event) => setLanguage(event.currentTarget.value as Language)}>
+        <select aria-label="Code language" className="ev-field" value={language} onChange={(event) => setLanguage(event.currentTarget.value as Language)}>
           {(Object.keys(LANGUAGE_LABELS) as Language[]).map((entry) => (
             <option key={entry} value={entry}>
               {LANGUAGE_LABELS[entry]}
@@ -130,7 +148,7 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
           ))}
         </select>
         <CodeBlock label={`${LANGUAGE_LABELS[language]} code`} code={code} />
-        {language !== 'CSS' && <p className="m-0 text-faint">A starting point written from this layer’s properties: the nearest view and modifiers, not a finished screen.</p>}
+        {language !== 'CSS' && <p className={NOTE}>A starting point written from this layer’s properties: the nearest view and modifiers, not a finished screen.</p>}
       </Section>
       {(mapped || isComponent) && (
         <Section title="Component in code">
@@ -146,39 +164,39 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
                 placeholder={'Snippet, for example <Button variant="{Type}" />'}
                 onCommit={(snippet) => store.getState().apply('Change code mapping', (d) => setCodeConnect(d, layer.id, { ...connect, snippet }))}
               />
-              <p className="m-0 text-faint">In the snippet, a property’s name in braces stands for the value an instance has for it.</p>
+              <p className={NOTE}>In the snippet, a property’s name in braces stands for the value an instance has for it.</p>
             </>
           ) : (
-            <p className="m-0 text-faint">The mapping is set on the component.</p>
+            <p className={NOTE}>The mapping is set on the component.</p>
           )}
         </Section>
       )}
       <Section title="Assets">
         <Row>
-          <button type="button" className="od-button !h-[26px] flex-1 !px-2" aria-label="Export as PNG" onClick={() => saveAsset(exportTargetsOf({ ...doc, nodes: { ...doc.nodes, [layer.id]: { ...layer, exportSettings: [newExportSetting()] } } }, [layer.id]))}>
+          <button type="button" className="ev-button !h-7 flex-1 !px-2" aria-label="Export as PNG" onClick={() => saveAsset(exportTargetsOf({ ...doc, nodes: { ...doc.nodes, [layer.id]: { ...layer, exportSettings: [newExportSetting()] } } }, [layer.id]))}>
             PNG
           </button>
-          <button type="button" className="od-button !h-[26px] flex-1 !px-2" aria-label="Export as SVG" onClick={() => saveAsset(exportTargetsOf({ ...doc, nodes: { ...doc.nodes, [layer.id]: { ...layer, exportSettings: [newExportSetting({ format: 'SVG' })] } } }, [layer.id]))}>
+          <button type="button" className="ev-button !h-7 flex-1 !px-2" aria-label="Export as SVG" onClick={() => saveAsset(exportTargetsOf({ ...doc, nodes: { ...doc.nodes, [layer.id]: { ...layer, exportSettings: [newExportSetting({ format: 'SVG' })] } } }, [layer.id]))}>
             SVG
           </button>
           {own.length > 0 && (
-            <button type="button" className="od-button !h-[26px] flex-1 !px-2" aria-label="Export with this layer's settings" onClick={() => saveAsset(own)}>
+            <button type="button" className="ev-button !h-7 flex-1 !px-2" aria-label="Export with this layer's settings" onClick={() => saveAsset(own)}>
               Its {own.length} {own.length === 1 ? 'export' : 'exports'}
             </button>
           )}
         </Row>
         {exported && (
-          <p role="status" aria-label="Asset export" className="m-0 text-dim">
+          <p role="status" aria-label="Asset export" className="m-0 break-words leading-[1.45] text-dim">
             {exported}
           </p>
         )}
       </Section>
       <Section title="Annotations">
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        <ul className="m-0 flex list-none flex-col gap-1.5 p-0 empty:hidden">
           {layer.annotations.map((annotation, index) => (
             <li key={annotation.id} className="flex items-center gap-1.5">
               <CommitInput label={`Annotation ${index + 1}`} value={annotation.text} onCommit={(text) => store.getState().apply('Change annotation', (d) => updateAnnotation(d, layer.id, annotation.id, text))} />
-              <button type="button" className="od-icon-button flex-none" aria-label={`Remove annotation ${index + 1}`} title="Remove" onClick={() => store.getState().apply('Remove annotation', (d) => removeAnnotation(d, layer.id, annotation.id))}>
+              <button type="button" className="ev-icon-button flex-none" aria-label={`Remove annotation ${index + 1}`} title="Remove" onClick={() => store.getState().apply('Remove annotation', (d) => removeAnnotation(d, layer.id, annotation.id))}>
                 <Icon name="close" />
               </button>
             </li>
@@ -193,20 +211,20 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
             setNote('');
           }}
         >
-          <input aria-label="New annotation" className="od-field min-w-0 flex-1" placeholder="A note for developers" value={note} onChange={(event) => setNote(event.currentTarget.value)} onKeyDown={(event) => event.stopPropagation()} />
-          <button type="submit" className="od-button !h-[26px] flex-none !px-2" disabled={note.trim() === ''}>
+          <input aria-label="New annotation" className="ev-field min-w-0 flex-1" placeholder="A note for developers" value={note} onChange={(event) => setNote(event.currentTarget.value)} onKeyDown={(event) => event.stopPropagation()} />
+          <button type="submit" className="ev-button !h-7 flex-none !px-3" disabled={note.trim() === ''}>
             Add
           </button>
         </form>
       </Section>
       <Section title="Development resources">
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        <ul className={`m-0 flex list-none flex-col p-0.5 empty:hidden ${WELL}`}>
           {layer.devResources.map((resource) => (
-            <li key={resource.id} className="flex items-center gap-1.5">
-              <a className="min-w-0 flex-1 truncate text-accent" href={safeUrl(resource.url) ?? undefined} target="_blank" rel="noreferrer noopener" title={resource.url}>
+            <li key={resource.id} className="ev-row flex h-7 items-center gap-1.5 rounded-[7px] pl-2 hover:bg-hover">
+              <a className="min-w-0 flex-1 truncate text-accent underline-offset-2 hover:underline" href={safeUrl(resource.url) ?? undefined} target="_blank" rel="noreferrer noopener" title={resource.url}>
                 {resource.name}
               </a>
-              <button type="button" className="od-icon-button flex-none" aria-label={`Remove link ${resource.name}`} title="Remove" onClick={() => store.getState().apply('Remove link', (d) => removeDevResource(d, layer.id, resource.id))}>
+              <button type="button" className="ev-icon-button flex-none" aria-label={`Remove link ${resource.name}`} title="Remove" onClick={() => store.getState().apply('Remove link', (d) => removeDevResource(d, layer.id, resource.id))}>
                 <Icon name="close" />
               </button>
             </li>
@@ -221,10 +239,10 @@ function LayerInspect({ layer }: { layer: LayerNode }) {
             setLink({ name: '', url: '' });
           }}
         >
-          <input aria-label="Link name" className="od-field" placeholder="Name, for example Storybook" value={link.name} onChange={(event) => setLink({ ...link, name: event.currentTarget.value })} onKeyDown={(event) => event.stopPropagation()} />
+          <input aria-label="Link name" className="ev-field" placeholder="Name, for example Storybook" value={link.name} onChange={(event) => setLink({ ...link, name: event.currentTarget.value })} onKeyDown={(event) => event.stopPropagation()} />
           <Row>
-            <input aria-label="Link address" className="od-field min-w-0 flex-1" placeholder="https://…" value={link.url} onChange={(event) => setLink({ ...link, url: event.currentTarget.value })} onKeyDown={(event) => event.stopPropagation()} />
-            <button type="submit" className="od-button !h-[26px] flex-none !px-2" disabled={safeUrl(link.url) === null}>
+            <input aria-label="Link address" className="ev-field min-w-0 flex-1" placeholder="https://…" value={link.url} onChange={(event) => setLink({ ...link, url: event.currentTarget.value })} onKeyDown={(event) => event.stopPropagation()} />
+            <button type="submit" className="ev-button !h-7 flex-none !px-3" disabled={safeUrl(link.url) === null}>
               Add
             </button>
           </Row>
@@ -247,29 +265,30 @@ function PageInspect() {
   return (
     <>
       <Section title="Developer mode">
-        <p className="m-0 text-dim">Select a layer to see its measurements, colours, type and code. Move the pointer over another layer to measure the distance to it. The canvas does not move or resize layers while this tab is open.</p>
+        <p className={`m-0 px-3 py-2.5 leading-[1.5] text-dim ${WELL}`}>Select a layer to see its measurements, colours, type and code. Move the pointer over another layer to measure the distance to it. The canvas does not move or resize layers while this tab is open.</p>
       </Section>
       <Section title="Development status">
-        {marked.length === 0 && <p className="m-0 text-faint">Nothing is marked yet. Select a frame and choose “Ready for development”.</p>}
-        <ul className="m-0 flex list-none flex-col gap-1 p-0" aria-label="Marked for development">
+        {marked.length === 0 && <p className={EMPTY}>Nothing is marked yet. Select a frame and choose “Ready for development”.</p>}
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0" aria-label="Marked for development">
           {marked.map(({ pageId: page, layer }) => (
-            <li key={layer.id}>
-              <button type="button" className="flex w-full items-center gap-2 border-0 bg-transparent p-0 text-left text-ink hover:text-accent" onClick={() => go(page, layer.id)}>
+            <li key={layer.id} className="-mx-1.5">
+              <button type="button" className={`${LINK_ROW} h-7 items-center gap-2`} onClick={() => go(page, layer.id)}>
+                <span aria-hidden="true" className={`h-1.5 w-1.5 flex-none rounded-full ${layer.devStatus === 'COMPLETED' ? 'bg-success' : 'bg-accent'}`} />
                 <span className="min-w-0 flex-1 truncate">{layer.name}</span>
-                <span className="flex-none text-dim">{STATUS_LABELS[layer.devStatus]}</span>
+                <span className="flex-none text-[11px] text-dim">{STATUS_LABELS[layer.devStatus]}</span>
               </button>
             </li>
           ))}
         </ul>
       </Section>
       <Section title="Annotations on this page">
-        {notes.length === 0 && <p className="m-0 text-faint">No annotations on this page.</p>}
-        <ol className="m-0 flex list-none flex-col gap-1 p-0" aria-label="Annotations on this page">
+        {notes.length === 0 && <p className={EMPTY}>No annotations on this page.</p>}
+        <ol className="m-0 flex list-none flex-col gap-0.5 p-0" aria-label="Annotations on this page">
           {notes.map((placed) => (
-            <li key={placed.annotation.id}>
-              <button type="button" className="flex w-full items-start gap-2 border-0 bg-transparent p-0 text-left text-ink hover:text-accent" onClick={() => go(pageId, placed.layerId)}>
-                <span className="flex-none text-dim">{placed.number}.</span>
-                <span className="min-w-0 flex-1">
+            <li key={placed.annotation.id} className="-mx-1.5">
+              <button type="button" className={`${LINK_ROW} items-start gap-2 py-1.5 leading-[1.45]`} onClick={() => go(pageId, placed.layerId)}>
+                <span className="min-w-4 flex-none text-right tabular-nums text-dim">{placed.number}.</span>
+                <span className="min-w-0 flex-1 break-words">
                   {placed.annotation.text} <span className="text-dim">({isLayer(doc.nodes[placed.layerId]) ? doc.nodes[placed.layerId]?.name : ''})</span>
                 </span>
               </button>
@@ -291,7 +310,7 @@ export function InspectPanel() {
       {layers.length === 1 && <LayerInspect key={(layers[0] as LayerNode).id} layer={layers[0] as LayerNode} />}
       {layers.length > 1 && (
         <Section title="Inspect">
-          <p className="m-0 text-faint">Select one layer to inspect it.</p>
+          <p className={EMPTY}>Select one layer to inspect it.</p>
         </Section>
       )}
     </aside>

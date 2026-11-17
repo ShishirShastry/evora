@@ -51,12 +51,12 @@ export function NumberField({ label, prefix, suffix, value, onCommit, min, max, 
   };
 
   return (
-    <label className="flex h-[26px] min-w-0 flex-1 items-center rounded-[5px] border border-transparent bg-field pl-2 focus-within:border-accent hover:border-line">
+    <label className="ev-input-shell">
       {prefix !== undefined && <span className="mr-1.5 flex-none text-dim">{prefix}</span>}
       <input
         ref={inputRef}
         aria-label={label}
-        className="h-full w-full min-w-0 border-0 bg-transparent p-0 outline-none disabled:text-faint"
+        className="h-full w-full min-w-0 border-0 bg-transparent p-0 text-ink tabular-nums outline-none placeholder:text-dim disabled:text-faint"
         inputMode="decimal"
         spellCheck={false}
         disabled={disabled}
@@ -121,6 +121,13 @@ interface TextEditProps {
   className?: string;
 }
 
+/**
+ * The rename box: shorter than a field so it fits inside a list row, with a
+ * crisp accent edge as in Figma (it is only ever on screen while it is being
+ * typed in).
+ */
+const TEXT_EDIT_CLASS = 'ev-field !h-[22px] !rounded-[5px] !px-1.5 text-ink !shadow-[inset_0_0_0_1px_var(--ev-accent)]';
+
 /** An inline text editor for renaming: Enter or blur commits, Escape cancels. */
 export function TextEdit({ label, value, onCommit, onCancel, className }: TextEditProps) {
   const ref = useRef<HTMLInputElement>(null);
@@ -142,8 +149,7 @@ export function TextEdit({ label, value, onCommit, onCancel, className }: TextEd
     <input
       ref={ref}
       aria-label={label}
-      className={`od-field ${className ?? ''}`}
-      style={{ height: 22, borderColor: 'var(--od-accent)' }}
+      className={`${TEXT_EDIT_CLASS} ${className ?? ''}`}
       defaultValue={value}
       spellCheck={false}
       onBlur={(event) => finish(true, event.currentTarget.value)}

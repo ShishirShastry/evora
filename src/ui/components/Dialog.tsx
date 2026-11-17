@@ -22,7 +22,7 @@ export function Dialog({ title, onClose, children, footer, width = 420 }: Dialog
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="ev-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -33,7 +33,7 @@ export function Dialog({ title, onClose, children, footer, width = 420 }: Dialog
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="flex max-h-full flex-col rounded-xl border border-line bg-panel shadow-[0_16px_60px_rgba(0,0,0,0.6)] outline-none"
+        className="ev-popover flex max-h-full flex-col !rounded-[14px] outline-none"
         style={{ width }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -42,14 +42,14 @@ export function Dialog({ title, onClose, children, footer, width = 420 }: Dialog
           }
         }}
       >
-        <header className="flex h-11 flex-none items-center justify-between border-b border-line pl-4 pr-2">
+        <header className="flex h-12 flex-none items-center justify-between border-b border-line pl-4 pr-2">
           <h2 className="m-0 text-[13px] font-semibold">{title}</h2>
-          <button type="button" className="od-icon-button" aria-label="Close" onClick={onClose}>
+          <button type="button" className="ev-icon-button" aria-label="Close" onClick={onClose}>
             <Icon name="close" />
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-        {footer && <footer className="flex flex-none justify-end gap-2 border-t border-line p-3">{footer}</footer>}
+        {footer && <footer className="flex flex-none justify-end gap-2 border-t border-line px-4 py-3">{footer}</footer>}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 # Third-party notices
 
-OPEN DESIGN ships with the following third-party material. Libraries used only to build or test the application are listed in `package.json` and carry their own licences in `node_modules`.
+Evora ships with the following third-party material. Libraries used only to build or test the application are listed in `package.json` and carry their own licences in `node_modules`.
 
 ## Inter (font)
 

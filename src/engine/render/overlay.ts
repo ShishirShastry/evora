@@ -36,9 +36,9 @@ import { worldToScreen, type Size, type Viewport } from '../viewport';
 import { traceLayerPath } from './paint';
 import { drawFrameGuides, drawGuides, drawRulers, type RulerTheme } from './rulers';
 
-export const ACCENT = '#19c2b3';
-const ACCENT_FILL = 'rgba(25, 194, 179, 0.12)';
-const LABEL_COLOR = '#8d9797';
+export const ACCENT = '#0d99ff';
+const ACCENT_FILL = 'rgba(13, 153, 255, 0.1)';
+const LABEL_COLOR = '#a0a0a8';
 const GUIDE_COLOR = '#ff4f7b';
 const LABEL_FONT = '11px Inter, "Segoe UI", system-ui, sans-serif';
 const LABEL_HEIGHT = 16;
@@ -380,7 +380,7 @@ export function renderOverlay(ctx: Ctx, input: OverlayInput): { labels: FrameLab
       ctx.beginPath();
       ctx.rect(-textWidth / 2 - 5, 7, textWidth + 10, 17);
       ctx.fill();
-      ctx.fillStyle = '#04201d';
+      ctx.fillStyle = '#ffffff';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, -textWidth / 2, 16);
       ctx.restore();

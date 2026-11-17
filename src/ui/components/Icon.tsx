@@ -55,11 +55,12 @@ export type IconName =
   | 'intersect'
   | 'exclude'
   | 'mask'
-  | 'handles';
+  | 'handles'
+  | 'play';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
-/** OPEN DESIGN's own icon set: simple 16px line icons drawn for this project. */
+/** Evora's own icon set: simple 16px line icons drawn for this project. */
 const PATHS: Record<IconName, ReactNode> = {
   move: <path {...s} d="M3.5 2.5l9 4.6-3.7 1.2-1.3 3.7z" />,
   hand: <path {...s} d="M5.5 8V3.8a1 1 0 0 1 2 0V7m0-3.7a1 1 0 0 1 2 0V7m0-2.6a1 1 0 0 1 2 0V9.5c0 2.5-1.6 4-3.9 4-1.7 0-2.6-.7-3.5-2.1L3 9.6c-.5-.9.6-1.7 1.3-1l1.2 1.2" />,
@@ -92,6 +93,7 @@ const PATHS: Record<IconName, ReactNode> = {
   chevronDown: <path {...s} d="M3.5 6L8 10.5 12.5 6" />,
   plus: <path {...s} d="M8 3v10M3 8h10" />,
   minus: <path {...s} d="M3 8h10" />,
+  play: <path d="M5 3.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L5.9 2.7a.6.6 0 0 0-.9.5z" fill="currentColor" />,
   undo: <path {...s} d="M3 6.5h6.5a3.5 3.5 0 0 1 0 7H6M3 6.5L6 3.5M3 6.5l3 3" />,
   redo: <path {...s} d="M13 6.5H6.5a3.5 3.5 0 0 0 0 7H10M13 6.5l-3-3M13 6.5l-3 3" />,
   menu: <path {...s} d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />,
@@ -179,12 +181,33 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   );
 }
 
-/** The OPEN DESIGN mark: an open ring with a square set into the opening. */
+/**
+ * Evora's mark, standing in until the owner's logo arrives: a raised tile with
+ * a luminous "e" in it. It is drawn in this one place, so the real logo
+ * replaces it here and appears everywhere the mark does.
+ */
 export function Logo({ size = 22 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <path d="M16 6a10 10 0 1 0 10 10" fill="none" stroke="var(--od-accent)" strokeWidth="3.5" strokeLinecap="round" />
-      <rect x="17" y="7" width="8" height="8" rx="1.5" fill="var(--od-ink)" />
+      <defs>
+        <linearGradient id="evora-tile" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#2ba7ff" />
+          <stop offset="1" stopColor="#0b6fe0" />
+        </linearGradient>
+      </defs>
+      <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#evora-tile)" />
+      <rect x="1.5" y="1.5" width="29" height="29" rx="8.5" fill="none" stroke="rgba(255,255,255,0.28)" />
+      <path d="M21.6 17.2H11.1c.4 3 2.5 4.9 5.4 4.9 1.9 0 3.4-.8 4.4-2.1M10.9 15.2c.4-3 2.6-5.2 5.4-5.2s5 2.1 5.3 5.2H10.9z" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/** The mark with the name beside it, for the file browser and the start of things. */
+export function Wordmark({ size = 26 }: { size?: number }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Logo size={size} />
+      <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink">Evora</span>
+    </span>
   );
 }

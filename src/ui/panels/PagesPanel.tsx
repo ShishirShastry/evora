@@ -36,23 +36,25 @@ export function PagesPanel() {
 
   return (
     <section aria-label="Pages" className="flex max-h-[38%] flex-none flex-col border-b border-line">
+      {/* Figma's section head: a quiet sentence-case title, its one action at the far end. */}
       <header className="flex h-9 flex-none items-center justify-between pl-3 pr-1.5">
-        <h2 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">Pages</h2>
-        <button type="button" className="od-icon-button" aria-label="Add page" title="Add page" onClick={() => createPage(store)}>
+        <h2 className="ev-section-title">Pages</h2>
+        <button type="button" className="ev-icon-button" aria-label="Add page" title="Add page" onClick={() => createPage(store)}>
           <Icon name="plus" />
         </button>
       </header>
-      <ul role="listbox" aria-label="Pages" className="m-0 min-h-0 list-none overflow-y-auto p-0 pb-1.5">
+      <ul role="listbox" aria-label="Pages" className="m-0 min-h-0 list-none overflow-y-auto p-0 pb-2 pt-px">
         {pages.map((page) => {
           const selected = page.id === pageId;
+          // Rows sit inset from the panel's edge with rounded corners; the current page is lit in the accent's tint.
           return (
             <li
               key={page.id}
               role="option"
               aria-selected={selected}
               tabIndex={0}
-              className={`flex h-7 cursor-default items-center gap-2 pl-3 pr-2 outline-none ${
-                selected ? 'bg-selected font-medium' : 'hover:bg-hover'
+              className={`ev-row mx-1.5 flex h-7 cursor-default items-center gap-2 rounded-md pl-1.5 pr-2 outline-none ${
+                selected ? 'bg-selected font-medium text-ink' : 'hover:bg-hover'
               }`}
               onClick={() => store.getState().setPage(page.id)}
               onDoubleClick={() => setRenaming(page.id)}
@@ -67,11 +69,12 @@ export function PagesPanel() {
                 } else if (event.key === 'F2') setRenaming(page.id);
               }}
             >
-              <span className="w-3 flex-none text-accent">{selected ? <Icon name="check" size={12} /> : null}</span>
+              <span className="flex w-3 flex-none items-center justify-center text-accent">{selected ? <Icon name="check" size={12} /> : null}</span>
               {renaming === page.id ? (
                 <TextEdit
                   label="Page name"
                   value={page.name}
+                  className="-ml-1.5 !px-1.5"
                   onCancel={() => setRenaming(null)}
                   onCommit={(name) => {
                     setRenaming(null);

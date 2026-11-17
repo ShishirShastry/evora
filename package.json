@@ -1,8 +1,8 @@
 {
-  "name": "open-design",
+  "name": "evora",
   "version": "0.1.0",
   "private": true,
-  "description": "OPEN DESIGN - a free, open-source, local-first design and prototyping application.",
+  "description": "Evora - a free, open-source, local-first design and prototyping application.",
   "license": "MIT",
   "type": "module",
   "engines": {

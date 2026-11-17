@@ -11,7 +11,7 @@ import {
   toFile,
   type Document,
   type NodeId,
-  type OpenDesignFile,
+  type EvoraFile,
 } from '../core';
 import { createEditorStore } from '../state/editorStore';
 import { createAutosaver } from './autosave';
@@ -32,7 +32,7 @@ import { MemoryStorage, type DocumentStorage } from './storage';
 
 let dbCounter = 0;
 function freshStorage(): IndexedDbStorage {
-  return new IndexedDbStorage(indexedDB, `open-design-test-${dbCounter++}`);
+  return new IndexedDbStorage(indexedDB, `evora-test-${dbCounter++}`);
 }
 
 function sampleDocument(): { doc: Document; pageId: NodeId; rectId: NodeId } {
@@ -67,8 +67,41 @@ describe('IndexedDB storage', () => {
     await storage.close();
   });
 
+  it('brings over the files kept before the application was renamed Evora, and leaves the old ones as they were', async () => {
+    const oldName = `open-design-test-${dbCounter++}`;
+    const before = new IndexedDbStorage(indexedDB, oldName, null);
+    const { doc } = sampleDocument();
+    await before.save(toFile(doc, meta));
+    await before.saveAsset('abc', { mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]).buffer });
+    await before.close();
+
+    const after = new IndexedDbStorage(indexedDB, `evora-test-${dbCounter++}`, oldName);
+    expect((await after.list()).map((summary) => summary.id)).toEqual([doc.id]);
+    expect((await after.load(doc.id))?.document).toEqual(doc);
+    const picture = await after.loadAsset('abc');
+    expect(picture?.mimeType).toBe('image/png');
+    expect([...new Uint8Array(picture?.bytes as ArrayBuffer)]).toEqual([1, 2, 3]);
+    // Only when Evora's storage is made: a file deleted afterwards does not come back.
+    await after.remove(doc.id);
+    await after.close();
+    const again = new IndexedDbStorage(indexedDB, (after as unknown as { name: string }).name, oldName);
+    expect(await again.list()).toEqual([]);
+    await again.close();
+    // The old storage still has everything.
+    const old = new IndexedDbStorage(indexedDB, oldName, null);
+    expect((await old.load(doc.id))?.document).toEqual(doc);
+    await old.close();
+
+    // Where there was nothing before, nothing is brought over, and no old storage is made.
+    const missing = `open-design-missing-${dbCounter++}`;
+    const fresh = new IndexedDbStorage(indexedDB, `evora-test-${dbCounter++}`, missing);
+    expect(await fresh.list()).toEqual([]);
+    await fresh.close();
+    expect((await indexedDB.databases()).some((database) => database.name === missing)).toBe(false);
+  });
+
   it('keeps data across connections, as a page reload would', async () => {
-    const name = `open-design-test-${dbCounter++}`;
+    const name = `evora-test-${dbCounter++}`;
     const first = new IndexedDbStorage(indexedDB, name);
     const { doc } = sampleDocument();
     await first.save(toFile(doc, meta));
@@ -137,7 +170,7 @@ describe('file operations', () => {
 
   it('refuses files it cannot read, with a message for the user', async () => {
     await expect(importFileText(storage, 'not json at all')).rejects.toBeInstanceOf(FileFormatError);
-    await expect(importFileText(storage, '{"hello":"world"}')).rejects.toThrow('not an OPEN DESIGN file');
+    await expect(importFileText(storage, '{"hello":"world"}')).rejects.toThrow('not an Evora file');
     const { doc } = sampleDocument();
     const future = { ...toFile(doc, meta), schemaVersion: CURRENT_SCHEMA_VERSION + 1 };
     await expect(importFileText(storage, JSON.stringify(future))).rejects.toThrow('newer version');
@@ -145,9 +178,9 @@ describe('file operations', () => {
   });
 
   it('builds a safe file name for export', () => {
-    expect(exportFileName('Landing page')).toBe('Landing page.opendesign');
-    expect(exportFileName('a/b:c*d')).toBe('a b c d.opendesign');
-    expect(exportFileName('///')).toBe('Untitled.opendesign');
+    expect(exportFileName('Landing page')).toBe('Landing page.evora');
+    expect(exportFileName('a/b:c*d')).toBe('a b c d.evora');
+    expect(exportFileName('///')).toBe('Untitled.evora');
   });
 });
 
@@ -218,7 +251,7 @@ describe('autosave', () => {
       saveAsset: (hash, asset) => inner.saveAsset(hash, asset),
       loadAsset: (hash) => inner.loadAsset(hash),
       removeAsset: (hash) => inner.removeAsset(hash),
-      save: async (file: OpenDesignFile) => {
+      save: async (file: EvoraFile) => {
         if (failing) throw new Error('disk full');
         await inner.save(file);
       },
@@ -274,10 +307,13 @@ describe('session memory', () => {
     expect(loadSession('doc', storage)).toEqual({ pageId: 'p1', viewports: { p1: { x: 1, y: 2, zoom: 3 } } });
     expect(loadSession('other', storage)).toEqual({});
 
-    storage.setItem('open-design:session:bad', '{"pageId":5,"viewports":{"p":{"x":"a","y":0,"zoom":1},"q":{"x":0,"y":0,"zoom":0}}}');
+    storage.setItem('evora:session:bad', '{"pageId":5,"viewports":{"p":{"x":"a","y":0,"zoom":1},"q":{"x":0,"y":0,"zoom":0}}}');
     expect(loadSession('bad', storage)).toEqual({ pageId: undefined, viewports: {} });
-    storage.setItem('open-design:session:worse', 'not json');
+    storage.setItem('evora:session:worse', 'not json');
     expect(loadSession('worse', storage)).toEqual({});
+    // The view of a file kept before the application was renamed Evora is still found.
+    storage.setItem('open-design:session:older', JSON.stringify({ pageId: 'p2', viewports: {} }));
+    expect(loadSession('older', storage)).toEqual({ pageId: 'p2', viewports: {} });
   });
 
   it('an editor store starts on the remembered page and view', () => {

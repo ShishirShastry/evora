@@ -50,7 +50,7 @@ test('a design saved as a .fig file and opened again from it', async ({ page }) 
   // Saved as a Figma file: an archive with the canvas in it.
   await menu(page, 'File', 'Save a copy to disk…');
   const dialog = page.getByRole('dialog', { name: 'Save a copy to disk' });
-  await expect(dialog.getByRole('button', { name: 'OPEN DESIGN (.opendesign)' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Evora (.evora)' })).toBeVisible();
   const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'Figma (.fig)' }).click()]);
   expect(download.suggestedFilename()).toBe('Handoff.fig');
   await expect(dialog.getByRole('status', { name: 'Figma file saved' })).toContainText('Saved as a Figma file.');

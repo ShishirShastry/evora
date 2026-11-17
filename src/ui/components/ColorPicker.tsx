@@ -123,7 +123,7 @@ export function ColorPicker({ label, value, anchor, onChange, onClose }: ColorPi
       ref={panel}
       role="dialog"
       aria-label={`${label} picker`}
-      className="fixed z-50 flex flex-col gap-2 rounded-lg border border-line bg-panel p-2 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      className="ev-popover fixed z-50 flex flex-col gap-2 p-2.5"
       style={{ left, top, width: WIDTH }}
     >
       <div
@@ -132,7 +132,7 @@ export function ColorPicker({ label, value, anchor, onChange, onClose }: ColorPi
         aria-label="Saturation and brightness"
         aria-valuetext={`Saturation ${Math.round(hsv.s * 100)}%, brightness ${Math.round(hsv.v * 100)}%`}
         aria-valuenow={Math.round(hsv.s * 100)}
-        className="relative h-[140px] cursor-crosshair touch-none rounded"
+        className="relative h-[150px] cursor-crosshair touch-none rounded-lg"
         style={{ background: `linear-gradient(to top, #000, rgba(0,0,0,0)), linear-gradient(to right, #fff, hsl(${hsv.h}, 100%, 50%))` }}
         {...dragHandlers((x, y) => ({ h: hsv.h, s: x, v: 1 - y }))}
         onKeyDown={(event) => stepKeys(event, (dx, dy) => ({ h: hsv.h, s: clamp(hsv.s + dx / 100), v: clamp(hsv.v + dy / 100) }))}
@@ -150,7 +150,7 @@ export function ColorPicker({ label, value, anchor, onChange, onClose }: ColorPi
         aria-valuemin={0}
         aria-valuemax={360}
         aria-valuenow={Math.round(hsv.h)}
-        className="relative h-3 cursor-pointer touch-none rounded"
+        className="relative h-3 cursor-pointer touch-none rounded-full"
         style={{ background: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' }}
         {...dragHandlers((x) => ({ h: Math.min(359.99, x * 360), s: hsv.s, v: hsv.v }))}
         onKeyDown={(event) => stepKeys(event, (dx, dy) => ({ h: (((hsv.h + dx + dy) % 360) + 360) % 360, s: hsv.s, v: hsv.v }))}
@@ -162,8 +162,8 @@ export function ColorPicker({ label, value, anchor, onChange, onClose }: ColorPi
       </div>
 
       <div className="flex items-center gap-1.5">
-        <span className="h-[26px] w-[26px] flex-none rounded border border-line" style={{ background: `#${hex}` }} />
-        <label className="flex h-[26px] min-w-0 flex-1 items-center rounded-[5px] border border-transparent bg-field pl-2 focus-within:border-accent hover:border-line">
+        <span className="h-[28px] w-[28px] flex-none rounded-[7px] shadow-[var(--ev-sunk)]" style={{ background: `#${hex}` }} />
+        <label className="ev-input-shell">
           <span className="mr-1.5 flex-none text-dim">#</span>
           <input
             aria-label="Hex colour"
@@ -190,7 +190,7 @@ export function ColorPicker({ label, value, anchor, onChange, onClose }: ColorPi
         {dropper && (
           <button
             type="button"
-            className="od-icon-button !h-[26px] !w-[26px]"
+            className="ev-icon-button !h-[26px] !w-[26px]"
             aria-label="Pick a colour from the screen"
             title="Pick a colour from the screen"
             onClick={() => {

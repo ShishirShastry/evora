@@ -1,4 +1,4 @@
-import type { OpenDesignFile } from '../core';
+import type { EvoraFile } from '../core';
 
 /** What the file browser shows for one file, without loading its contents. */
 export interface FileSummary {
@@ -26,9 +26,9 @@ export interface StoredAsset {
 export interface DocumentStorage {
   list(): Promise<FileSummary[]>;
   /** The stored file exactly as it was saved, or null when there is no such file. */
-  load(id: string): Promise<OpenDesignFile | null>;
+  load(id: string): Promise<EvoraFile | null>;
   /** Creates or replaces a file. The document and its summary are written atomically. */
-  save(file: OpenDesignFile): Promise<void>;
+  save(file: EvoraFile): Promise<void>;
   remove(id: string): Promise<void>;
   /** Stores an asset under its hash. Storing the same hash again is harmless. */
   saveAsset(hash: string, asset: StoredAsset): Promise<void>;
@@ -37,7 +37,7 @@ export interface DocumentStorage {
   removeAsset(hash: string): Promise<void>;
 }
 
-export function summarize(file: OpenDesignFile): FileSummary {
+export function summarize(file: EvoraFile): FileSummary {
   let layerCount = 0;
   // What a file holds of the libraries it uses is not counted: those are not its layers.
   const nodes = file.document.nodes;
@@ -62,15 +62,15 @@ export class MemoryStorage implements DocumentStorage {
   private readonly assets = new Map<string, StoredAsset>();
 
   async list(): Promise<FileSummary[]> {
-    return [...this.files.values()].map((json) => summarize(JSON.parse(json) as OpenDesignFile));
+    return [...this.files.values()].map((json) => summarize(JSON.parse(json) as EvoraFile));
   }
 
-  async load(id: string): Promise<OpenDesignFile | null> {
+  async load(id: string): Promise<EvoraFile | null> {
     const json = this.files.get(id);
-    return json === undefined ? null : (JSON.parse(json) as OpenDesignFile);
+    return json === undefined ? null : (JSON.parse(json) as EvoraFile);
   }
 
-  async save(file: OpenDesignFile): Promise<void> {
+  async save(file: EvoraFile): Promise<void> {
     this.files.set(file.document.id, JSON.stringify(file));
   }
 

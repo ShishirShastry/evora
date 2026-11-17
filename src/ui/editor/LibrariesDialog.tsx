@@ -2,7 +2,28 @@ import { useCallback, useEffect, useState } from 'react';
 import { hasUnpublishedChanges, importLibrary, listLibraries, publishContent, publishCounts, publishLibrary, removeLibrary, unpublishLibrary } from '../../core';
 import { listPublishedLibraries, loadLibrary, type LibrarySummary } from '../../persistence/libraries';
 import { Dialog } from '../components/Dialog';
+import { Icon } from '../components/Icon';
 import { useEditor, useEditorContext } from './EditorContext';
+
+/** A rounded well pressed into the dialog: what this file's card and the lists of libraries sit in. */
+const WELL = 'rounded-[12px] bg-bg/50 shadow-[var(--ev-sunk)]';
+/** What an empty list says, in a quiet dashed outline where its rows would be. */
+const EMPTY = 'm-0 rounded-[10px] border border-dashed border-line px-3 py-3 text-center leading-[1.45] text-faint';
+/** A note under a part of the dialog. */
+const NOTE = 'm-0 leading-[1.5] text-faint';
+/** A list of libraries: rows in a well, a hairline between each. */
+const LIST = `m-0 flex list-none flex-col divide-y divide-line/60 px-1 py-0 empty:hidden ${WELL}`;
+/** A row of a list of libraries. */
+const ROW = 'flex items-center gap-2.5 px-2 py-2';
+
+/** A library's mark in a row: a small raised tile with the component glyph. */
+function LibraryTile() {
+  return (
+    <span aria-hidden="true" className="flex h-8 w-8 flex-none items-center justify-center rounded-[8px] text-dim shadow-[var(--ev-raise)]" style={{ background: 'var(--ev-button)' }}>
+      <Icon name="component" />
+    </span>
+  );
+}
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
 
@@ -53,103 +74,114 @@ export function LibrariesDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog title="Libraries" onClose={onClose} width={560}>
-      <div className="flex flex-col gap-4">
-        <section aria-label="This file as a library" className="flex flex-col gap-1.5">
-          <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">This file</h3>
-          <p className="m-0">
-            {nothing ? 'This file has no components, styles or variables to publish.' : `This file has ${contents(counts)}.`}{' '}
-            <span role="status" aria-label="Publishing status">
-              {doc.publication
-                ? `Published as version ${doc.publication.version}${when(doc.publication.publishedAt) ? ` on ${when(doc.publication.publishedAt)}` : ''}${changed ? ', with changes since that are not published.' : '.'}`
-                : 'Not published.'}
-            </span>
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="od-button"
-              data-autofocus
-              disabled={nothing || (doc.publication !== null && !changed)}
-              onClick={() => {
-                store.getState().apply('Publish library', (d) => publishLibrary(d, new Date().toISOString()));
-                // Written at once, so that other files find the new version.
-                app.saveNow();
-              }}
-            >
-              {doc.publication ? 'Publish changes' : 'Publish'}
-            </button>
-            {doc.publication && (
+      <div className="flex flex-col gap-5">
+        <section aria-label="This file as a library" className="flex flex-col gap-2">
+          <h3 className="ev-section-title">This file</h3>
+          {/* This file's card: what it would publish and where it stands, with the actions under it. */}
+          <div className={`flex flex-col gap-3 p-3 ${WELL}`}>
+            <div className="flex items-start gap-3">
+              <span aria-hidden="true" className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-selected text-accent">
+                <Icon name="component" size={18} />
+              </span>
+              <p className="m-0 min-w-0 flex-1 leading-[1.5] text-ink">
+                {nothing ? 'This file has no components, styles or variables to publish.' : `This file has ${contents(counts)}.`}{' '}
+                <span role="status" aria-label="Publishing status" className="mt-0.5 block text-dim">
+                  {doc.publication
+                    ? `Published as version ${doc.publication.version}${when(doc.publication.publishedAt) ? ` on ${when(doc.publication.publishedAt)}` : ''}${changed ? ', with changes since that are not published.' : '.'}`
+                    : 'Not published.'}
+                </span>
+              </p>
+            </div>
+            <div className="flex gap-2 pl-12">
               <button
                 type="button"
-                className="od-button"
+                className="ev-button ev-button-primary !px-4"
+                data-autofocus
+                disabled={nothing || (doc.publication !== null && !changed)}
                 onClick={() => {
-                  store.getState().apply('Unpublish library', unpublishLibrary);
+                  store.getState().apply('Publish library', (d) => publishLibrary(d, new Date().toISOString()));
+                  // Written at once, so that other files find the new version.
                   app.saveNow();
                 }}
               >
-                Unpublish
+                {doc.publication ? 'Publish changes' : 'Publish'}
               </button>
-            )}
+              {doc.publication && (
+                <button
+                  type="button"
+                  className="ev-button !px-4"
+                  onClick={() => {
+                    store.getState().apply('Unpublish library', unpublishLibrary);
+                    app.saveNow();
+                  }}
+                >
+                  Unpublish
+                </button>
+              )}
+            </div>
           </div>
-          <p className="m-0 text-faint">Other files get what was published, not what has changed since. Files that already use this library take a new version when they choose “Update”.</p>
+          <p className={NOTE}>Other files get what was published, not what has changed since. Files that already use this library take a new version when they choose “Update”.</p>
         </section>
 
-        <section aria-label="Libraries used in this file" className="flex flex-col gap-1.5">
-          <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">Used in this file</h3>
-          {used.length === 0 && <p className="m-0 text-faint">No library has been added to this file.</p>}
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        <section aria-label="Libraries used in this file" className="flex flex-col gap-2">
+          <h3 className="ev-section-title">Used in this file</h3>
+          {used.length === 0 && <p className={EMPTY}>No library has been added to this file.</p>}
+          <ul className={LIST}>
             {used.map((library) => {
               const latest = available?.find((entry) => entry.id === library.id);
               const newer = latest !== undefined && latest.version > library.version;
               return (
-                <li key={library.id} className="flex items-center gap-2 rounded border border-line px-2 py-1.5">
+                <li key={library.id} className={ROW}>
+                  <LibraryTile />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate">{latest?.name ?? library.name}</div>
-                    <div className="text-dim">
+                    <div className="truncate font-medium text-ink">{latest?.name ?? library.name}</div>
+                    <div className="text-[11px] leading-[1.45] text-dim">
                       Version {library.version}
                       {available === null ? '' : latest === undefined ? '. The library file is not published on this device any more; what this file has from it stays.' : newer ? `. Version ${latest.version} is available.` : '. Up to date.'}
                     </div>
                   </div>
                   {newer && (
-                    <button type="button" className="od-button flex-none" aria-label={`Update ${library.name}`} onClick={() => take(library.id, 'Update library')}>
+                    <button type="button" className="ev-button ev-button-primary !h-7 flex-none !px-3" aria-label={`Update ${library.name}`} onClick={() => take(library.id, 'Update library')}>
                       Update
                     </button>
                   )}
-                  <button type="button" className="od-button flex-none" aria-label={`Remove ${library.name}`} onClick={() => store.getState().apply('Remove library', (d) => removeLibrary(d, library.id))}>
+                  <button type="button" className="ev-button ev-button-danger !h-7 flex-none !px-3" aria-label={`Remove ${library.name}`} onClick={() => store.getState().apply('Remove library', (d) => removeLibrary(d, library.id))}>
                     Remove
                   </button>
                 </li>
               );
             })}
           </ul>
-          {used.length > 0 && <p className="m-0 text-faint">Removing a library turns the instances of its components into ordinary frames; layers keep the look its styles and variables gave them.</p>}
+          {used.length > 0 && <p className={NOTE}>Removing a library turns the instances of its components into ordinary frames; layers keep the look its styles and variables gave them.</p>}
         </section>
 
-        <section aria-label="Available libraries" className="flex flex-col gap-1.5">
-          <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">Available</h3>
-          {available === null && <p className="m-0 text-faint">Looking for published files…</p>}
+        <section aria-label="Available libraries" className="flex flex-col gap-2">
+          <h3 className="ev-section-title">Available</h3>
+          {available === null && <p className={EMPTY}>Looking for published files…</p>}
           {available !== null && available.filter((entry) => !used.some((library) => library.id === entry.id)).length === 0 && (
-            <p className="m-0 text-faint">No other published file on this device. To make one, open a file, choose Libraries and publish it.</p>
+            <p className={EMPTY}>No other published file on this device. To make one, open a file, choose Libraries and publish it.</p>
           )}
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+          <ul className={LIST}>
             {(available ?? [])
               .filter((entry) => !used.some((library) => library.id === entry.id))
               .map((entry) => (
-                <li key={entry.id} className="flex items-center gap-2 rounded border border-line px-2 py-1.5">
+                <li key={entry.id} className={ROW}>
+                  <LibraryTile />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate">{entry.name}</div>
-                    <div className="text-dim">
+                    <div className="truncate font-medium text-ink">{entry.name}</div>
+                    <div className="text-[11px] leading-[1.45] text-dim">
                       {contents(entry)}. Version {entry.version}.
                     </div>
                   </div>
-                  <button type="button" className="od-button flex-none" aria-label={`Add ${entry.name}`} onClick={() => take(entry.id, 'Add library')}>
+                  <button type="button" className="ev-button !h-7 flex-none !gap-1.5 !pl-2 !pr-3" aria-label={`Add ${entry.name}`} onClick={() => take(entry.id, 'Add library')}>
+                    <Icon name="plus" size={12} />
                     Add to this file
                   </button>
                 </li>
               ))}
           </ul>
           {problem && (
-            <p role="alert" className="m-0 text-dim">
+            <p role="alert" className="m-0 leading-[1.45] text-danger">
               {problem}
             </p>
           )}

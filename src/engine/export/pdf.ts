@@ -472,6 +472,6 @@ export async function exportPdf(pages: readonly PdfPage[], options: PdfOptions =
   file.set(resourcesId, `<< /ProcSet [/PDF /Text /ImageB /ImageC] /ExtGState << ${stateEntries} >> /Font << ${entries([...fonts.values()])} >> /Pattern << ${entries(patterns)} >> /XObject << ${entries(xobjects)} >> >>`);
   file.set(pagesId, `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`);
   file.set(catalogId, `<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
-  const infoId = file.add(`<< /Title ${pdfString(options.title ?? 'Untitled')} /Producer (OPEN DESIGN) /Creator (OPEN DESIGN) >>`);
+  const infoId = file.add(`<< /Title ${pdfString(options.title ?? 'Untitled')} /Producer (Evora) /Creator (Evora) >>`);
   return { bytes: await file.write(catalogId, infoId, options.deflate), warnings: [...warnings] };
 }

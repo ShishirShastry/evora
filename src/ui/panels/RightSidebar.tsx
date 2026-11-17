@@ -14,19 +14,14 @@ export function RightSidebar() {
   ] as const;
   return (
     <>
-      <div role="tablist" aria-label="Properties" className="flex h-9 flex-none items-center gap-1 border-b border-line px-2">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            className={`h-7 rounded-md border-0 bg-transparent px-2 text-[11px] font-semibold uppercase tracking-wide hover:bg-hover ${tab === id ? 'text-accent' : 'text-dim'}`}
-            onClick={() => store.getState().setRightTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="flex-none border-b border-line px-2 py-2">
+        <div role="tablist" aria-label="Properties" className="ev-segmented">
+          {tabs.map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} className="ev-segment text-[11.5px]" onClick={() => store.getState().setRightTab(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="min-h-0 flex-1">{tab === 'design' ? <DesignPanel /> : tab === 'prototype' ? <PrototypePanel /> : <InspectPanel />}</div>
     </>

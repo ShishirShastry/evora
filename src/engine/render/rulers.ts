@@ -7,10 +7,10 @@ export const RULER_SIZE = 20;
 /** The rulers are part of the application's chrome, so they follow its theme. */
 export type RulerTheme = 'dark' | 'light';
 const RULER_COLORS: Record<RulerTheme, { background: string; line: string; text: string }> = {
-  dark: { background: '#171b1c', line: '#2b3233', text: '#8d9797' },
-  light: { background: '#ffffff', line: '#d5dbda', text: '#5b6767' },
+  dark: { background: '#141415', line: '#27272b', text: '#a0a0a8' },
+  light: { background: '#ffffff', line: '#e2e2e7', text: '#66666f' },
 };
-const RULER_SELECTION = 'rgba(25, 194, 179, 0.28)';
+const RULER_SELECTION = 'rgba(13, 153, 255, 0.28)';
 export const GUIDE_COLOR = '#4aa8ff';
 const RULER_FONT = '10px Inter, "Segoe UI", system-ui, sans-serif';
 /** Labelled ticks are at least this far apart on screen. */

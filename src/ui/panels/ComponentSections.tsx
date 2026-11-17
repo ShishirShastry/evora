@@ -40,6 +40,27 @@ import type { EditorStore } from '../../state/editorStore';
 import { Icon } from '../components/Icon';
 import { useEditor, useEditorContext, useRunCommand } from '../editor/EditorContext';
 import { Row, Section } from './panelParts';
+import { Adorned } from './TokenSections';
+
+/** Display only: a short caption over a group of fields. */
+const CAPTION = 'text-[11px] font-medium text-dim';
+/** Display only: a checkbox with its words beside it, as one target. */
+const CHECK_ROW = 'flex min-h-6 cursor-pointer select-none items-center gap-2';
+const CHECKBOX = 'h-3.5 w-3.5 flex-none cursor-pointer accent-[var(--ev-accent)]';
+/** Display only: a raised key, as wide as its words or wider; keys that do not fit beside each other go onto the next line. */
+const KEY = 'ev-button !h-7 flex-auto !px-3';
+/** Display only: a line of keys, which wraps rather than squeezing their words. */
+const KEYS = 'flex flex-wrap gap-2';
+
+/** Display only: a magnifying glass for the search field. */
+function SearchMark() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10.5 10.5 13.5 13.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 /** A button that runs one of the application's commands, named and switched off as the command says. */
 function CommandButton({ id }: { id: string }) {
@@ -49,7 +70,7 @@ function CommandButton({ id }: { id: string }) {
   return (
     <button
       type="button"
-      className="od-button !h-[26px] flex-1 !px-2"
+      className={KEY}
       title={command.shortcut ? `${command.label} (${command.shortcut})` : command.label}
       disabled={command.enabled ? !command.enabled(state) : false}
       onClick={() => run(command)}
@@ -64,7 +85,7 @@ function TextCommit({ label, value, onCommit, placeholder }: { label: string; va
   return (
     <input
       aria-label={label}
-      className="od-field min-w-0 flex-1"
+      className="ev-field min-w-0 flex-1 placeholder:text-faint"
       spellCheck={false}
       placeholder={placeholder}
       defaultValue={value}
@@ -87,16 +108,16 @@ const TYPE_NAMES: Record<ComponentPropType, string> = { BOOLEAN: 'Boolean', TEXT
 function PropertiesEditor({ store, owner }: { store: EditorStore; owner: FrameNode }) {
   const apply = (label: string, change: (doc: Document) => Document): void => store.getState().apply(label, change);
   return (
-    <div role="group" aria-label="Component properties" className="flex flex-col gap-1.5">
-      <span className="text-dim">Properties</span>
-      {owner.componentProps.length === 0 && <p className="m-0 text-faint">No properties</p>}
+    <div role="group" aria-label="Component properties" className="flex flex-col gap-2 pt-1">
+      <span className={CAPTION}>Properties</span>
+      {owner.componentProps.length === 0 && <p className="m-0 text-[11px] text-faint">No properties</p>}
       {owner.componentProps.map((prop) => (
         <Row key={prop.id}>
           <TextCommit label={`Name of property ${prop.name}`} value={prop.name} onCommit={(name) => apply('Rename property', (doc) => renameComponentProp(doc, owner.id, prop.id, name))} />
-          <span className="w-20 flex-none text-dim">{TYPE_NAMES[prop.type]}</span>
+          <span className="w-20 flex-none truncate text-[11px] text-dim">{TYPE_NAMES[prop.type]}</span>
           <button
             type="button"
-            className="od-icon-button !h-6 !w-6"
+            className="ev-icon-button !h-6 !w-6"
             aria-label={`Remove property ${prop.name}`}
             title="Remove"
             onClick={() => apply('Remove property', (doc) => removeComponentProp(doc, owner.id, prop.id))}
@@ -105,19 +126,19 @@ function PropertiesEditor({ store, owner }: { store: EditorStore; owner: FrameNo
           </button>
         </Row>
       ))}
-      <Row>
+      <div className="flex flex-wrap gap-1.5">
         {(['BOOLEAN', 'TEXT', 'INSTANCE_SWAP'] as const).map((type) => (
           <button
             key={type}
             type="button"
-            className="od-button !h-[26px] flex-1 !px-1 text-[11px]"
+            className="ev-button !h-7 flex-auto !px-2 !text-[11px]"
             aria-label={`Add ${TYPE_NAMES[type].toLowerCase()} property`}
             onClick={() => apply('Add property', (doc) => addComponentProp(doc, owner.id, type)?.doc ?? doc)}
           >
             + {TYPE_NAMES[type]}
           </button>
         ))}
-      </Row>
+      </div>
     </div>
   );
 }
@@ -138,8 +159,8 @@ function InstanceControls({ store, doc, instance, heading }: { store: EditorStor
   const apply = (label: string, change: (d: Document) => Document): void => store.getState().apply(label, change);
   const named = (name: string): string => (heading ? `${heading}: ${name}` : name);
   return (
-    <div role="group" aria-label={heading ? `Properties of ${heading}` : 'Instance properties'} className="flex flex-col gap-1.5">
-      {heading && <span className="text-dim">{heading}</span>}
+    <div role="group" aria-label={heading ? `Properties of ${heading}` : 'Instance properties'} className={`flex flex-col gap-2 ${heading ? 'pt-1' : ''}`}>
+      {heading && <span className={`${CAPTION} truncate`}>{heading}</span>}
       {isComponent(component) &&
         options.map((option) => (
           <Row key={option.name}>
@@ -148,7 +169,7 @@ function InstanceControls({ store, doc, instance, heading }: { store: EditorStor
             </span>
             <select
               aria-label={named(`Variant ${option.name}`)}
-              className="od-field flex-1"
+              className="ev-field min-w-0 flex-1"
               value={component.variantProps[option.name] ?? ''}
               onChange={(event) => {
                 const value = event.currentTarget.value;
@@ -168,10 +189,10 @@ function InstanceControls({ store, doc, instance, heading }: { store: EditorStor
         const set = (next: boolean | string): void => apply('Change property', (d) => setInstanceProp(d, [instance.id], prop.id, next));
         if (prop.type === 'BOOLEAN') {
           return (
-            <label key={prop.id} className="flex cursor-pointer items-center gap-2">
+            <label key={prop.id} className={CHECK_ROW}>
               <input
                 type="checkbox"
-                className="accent-[var(--od-accent)]"
+                className={CHECKBOX}
                 aria-label={named(`Property ${prop.name}`)}
                 checked={value === true}
                 onChange={(event) => set(event.currentTarget.checked)}
@@ -188,7 +209,9 @@ function InstanceControls({ store, doc, instance, heading }: { store: EditorStor
             {prop.type === 'TEXT' ? (
               <TextCommit label={named(`Property ${prop.name}`)} value={typeof value === 'string' ? value : ''} onCommit={set} />
             ) : (
-              <select aria-label={named(`Property ${prop.name}`)} className="od-field flex-1" value={typeof value === 'string' ? value : ''} onChange={(event) => set(event.currentTarget.value)}>
+              // An instance swap, Figma's way: the component's mark inside the left end of the field.
+              <Adorned mark={<span className="flex text-accent"><Icon name="instance" size={11} /></span>}>
+              <select aria-label={named(`Property ${prop.name}`)} className="ev-field min-w-0 flex-1 !pl-7" value={typeof value === 'string' ? value : ''} onChange={(event) => set(event.currentTarget.value)}>
                 {typeof value !== 'string' && <option value="">None</option>}
                 {listComponents(doc)
                   .filter((entry) => !getAncestorIds(doc, instance.id).includes(entry.id))
@@ -198,6 +221,7 @@ function InstanceControls({ store, doc, instance, heading }: { store: EditorStor
                     </option>
                   ))}
               </select>
+              </Adorned>
             )}
           </Row>
         );
@@ -246,16 +270,16 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
     const options = variantOptions(doc, only.id);
     return (
       <Section title="Component set">
-        <span className="text-dim">Variant properties</span>
+        <span className={CAPTION}>Variant properties</span>
         {options.map((option) => (
           <Row key={option.name}>
             <TextCommit label={`Name of variant property ${option.name}`} value={option.name} onCommit={(name) => apply('Rename variant property', (d) => renameVariantProperty(d, only.id, option.name, name))} />
-            <span className="min-w-0 flex-1 truncate text-dim" title={option.values.join(', ')}>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-dim" title={option.values.join(', ')}>
               {option.values.join(', ')}
             </span>
             <button
               type="button"
-              className="od-icon-button !h-6 !w-6"
+              className="ev-icon-button !h-6 !w-6"
               aria-label={`Remove variant property ${option.name}`}
               title="Remove"
               disabled={options.length <= 1}
@@ -265,13 +289,13 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
             </button>
           </Row>
         ))}
-        <Row>
-          <button type="button" className="od-button !h-[26px] flex-1 !px-2" onClick={() => apply('Add variant property', (d) => addVariantProperty(d, only.id))}>
+        <div className={KEYS}>
+          <button type="button" className={KEY} onClick={() => apply('Add variant property', (d) => addVariantProperty(d, only.id))}>
             Add variant property
           </button>
           <button
             type="button"
-            className="od-button !h-[26px] flex-1 !px-2"
+            className={KEY}
             onClick={() => {
               let made: NodeId | null = null;
               apply('Add variant', (d) => {
@@ -284,7 +308,7 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
           >
             Add variant
           </button>
-        </Row>
+        </div>
         <PropertiesEditor store={store} owner={only as FrameNode} />
       </Section>
     );
@@ -301,7 +325,8 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
       <Section title="Component">
         <textarea
           aria-label="Component description"
-          className="od-field h-14 resize-none py-1"
+          // The field's own height and padding are those of a one-line field, so a box of text sets its own over them.
+          className="ev-field !h-16 resize-none !py-1.5 placeholder:text-faint"
           placeholder="Description"
           spellCheck={false}
           defaultValue={only.description}
@@ -313,7 +338,10 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
           onKeyDown={(event) => event.stopPropagation()}
         />
         <Row>
-          <span className="min-w-0 flex-1 text-dim" role="status" aria-label="Instances of this component">
+          <span aria-hidden="true" className="flex flex-none text-accent">
+            <Icon name="instance" size={12} />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-dim" role="status" aria-label="Instances of this component">
             {count === 1 ? '1 instance' : `${count} instances`}
           </span>
           <CommandButton id="object.createInstance" />
@@ -330,9 +358,9 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
           ))
         ) : (
           <>
-            <Row>
+            <div className={KEYS}>
               <CommandButton id="object.createComponentSet" />
-            </Row>
+            </div>
             <PropertiesEditor store={store} owner={only} />
           </>
         )}
@@ -350,9 +378,11 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
       <Section title="Instance">
         <Row>
           <span className="w-20 flex-none text-dim">Component</span>
+          {/* Figma's instance swap: the component's mark inside the left end of the field. */}
+          <Adorned mark={<span className="flex text-accent"><Icon name="component" size={12} /></span>}>
           <select
             aria-label="Component shown"
-            className="od-field flex-1"
+            className="ev-field min-w-0 flex-1 !pl-7"
             value={componentId}
             onChange={(event) => {
               const next = event.currentTarget.value;
@@ -372,18 +402,19 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
               </option>
             ))}
           </select>
+          </Adorned>
         </Row>
         {single && <InstanceControls store={store} doc={doc} instance={single} />}
         {single &&
           // What the instances inside this one can set is offered here too, under their names.
           innerInstances(doc, single.id).map((inner) => <InstanceControls key={inner.id} store={store} doc={doc} instance={inner} heading={inner.name} />)}
-        <Row>
+        <div className={KEYS}>
           <CommandButton id="object.goToMain" />
           <CommandButton id="object.resetInstance" />
-        </Row>
-        <Row>
+        </div>
+        <div className={KEYS}>
           <CommandButton id="object.detachInstance" />
-        </Row>
+        </div>
       </Section>
     );
   }
@@ -393,7 +424,7 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
     const component = owner.componentId ? doc.nodes[owner.componentId] : undefined;
     return (
       <Section title="In an instance">
-        <p role="note" aria-label="Part of an instance" className="m-0 text-faint">
+        <p role="note" aria-label="Part of an instance" className="m-0 rounded-[var(--ev-radius)] bg-field px-2.5 py-2 text-[11px] leading-[1.45] text-dim shadow-[var(--ev-sunk)]">
           This layer belongs to an instance of “{component?.name ?? 'a component'}”. What it shows can be changed here and is kept for this instance; where it is and how big
           are the component’s.
         </p>
@@ -415,7 +446,7 @@ export function ComponentSection({ layers }: { layers: LayerNode[] }) {
             <span className="w-20 flex-none text-dim">{TYPE_NAMES[type]}</span>
             <select
               aria-label={label}
-              className="od-field flex-1"
+              className="ev-field min-w-0 flex-1"
               value={only.propRefs[key] ?? ''}
               onChange={(event) => {
                 const next = event.currentTarget.value;
@@ -479,43 +510,56 @@ export function ComponentsPanel() {
   };
   return (
     <section aria-label="Components" className="flex max-h-[34%] flex-none flex-col border-b border-line">
+      {/* Figma's section head: a quiet sentence-case title. */}
       <header className="flex h-9 flex-none items-center justify-between pl-3 pr-1.5">
-        <h2 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">Components</h2>
+        <h2 className="ev-section-title">Components</h2>
       </header>
-      <div className="px-2 pb-1.5">
-        <input
-          aria-label="Search components"
-          className="od-field w-full"
-          placeholder="Search"
-          spellCheck={false}
-          value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          onKeyDown={(event) => event.stopPropagation()}
-        />
+      <div className="px-2 pb-2">
+        <Adorned
+          mark={
+            <span className="flex text-faint">
+              <SearchMark />
+            </span>
+          }
+        >
+          <input
+            aria-label="Search components"
+            className="ev-field w-full !pl-7 placeholder:text-faint"
+            placeholder="Search"
+            spellCheck={false}
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+          />
+        </Adorned>
       </div>
-      <ul aria-label="Components" className="m-0 min-h-0 list-none overflow-y-auto p-0 pb-1.5">
-        {found.length === 0 && <li className="px-3 py-1 text-faint">No component matches</li>}
+      {/* Rows like Figma's assets: inset from the panel's edge, rounded, each with the component's mark. */}
+      <ul aria-label="Components" className="m-0 min-h-0 list-none overflow-y-auto p-0 pb-2">
+        {found.length === 0 && <li className="mx-1.5 px-2 py-1.5 text-[11px] text-faint">No component matches</li>}
         {[...groups.entries()].map(([group, members]) => (
           <li key={group} className="list-none">
-            {group !== '' && <div className="px-3 pt-1 text-[11px] text-dim">{group}</div>}
+            {group !== '' && <div className="truncate px-3.5 pb-1 pt-2 text-[11px] font-medium text-dim">{group}</div>}
             <ul aria-label={group === '' ? 'Ungrouped components' : group} className="m-0 list-none p-0">
               {members.map((component) => (
                 <li
                   key={component.id}
-                  className="flex h-7 items-center gap-1 pl-3 pr-1.5 hover:bg-hover"
+                  className="ev-row mx-1.5 flex h-7 items-center gap-1 rounded-md pl-2 pr-0.5 hover:bg-hover"
                   title={[component.description, libraryOf(doc, component.id) ? `From the library “${libraryOf(doc, component.id)?.name}”. It is edited in that file.` : ''].filter(Boolean).join('\n') || undefined}
                 >
                   <button
                     type="button"
-                    className="min-w-0 flex-1 cursor-default truncate border-0 bg-transparent p-0 text-left text-ink"
+                    className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-[4px] border-0 bg-transparent p-0 text-left"
                     aria-label={`Go to component ${full(component)}`}
                     onClick={() => goTo(component.id)}
                   >
-                    {group === '' ? component.name : full(component).slice(full(component).lastIndexOf('/') + 1).trim()}
+                    <span aria-hidden="true" className="flex flex-none text-accent">
+                      <Icon name="component" size={12} />
+                    </span>
+                    <span className="min-w-0 truncate">{group === '' ? component.name : full(component).slice(full(component).lastIndexOf('/') + 1).trim()}</span>
                   </button>
                   <button
                     type="button"
-                    className="od-icon-button !h-6 !w-6"
+                    className="ev-icon-button !h-6 !w-6"
                     aria-label={`Insert an instance of ${full(component)}`}
                     title="Insert an instance in the middle of the view"
                     onClick={() => insertInstance(store, component.id)}

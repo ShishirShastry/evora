@@ -122,7 +122,7 @@ export async function importFileText(storage: DocumentStorage, text: string): Pr
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new FileFormatError('This file is damaged or is not an OPEN DESIGN file (it is not valid JSON).');
+    throw new FileFormatError('This file is damaged or is not an Evora file (it is not valid JSON).');
   }
   const { file, repairs } = parseFile(raw);
 

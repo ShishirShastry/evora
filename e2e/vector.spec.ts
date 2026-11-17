@@ -11,7 +11,7 @@ type RGB = [number, number, number];
 
 const PAGE: RGB = [30, 30, 30];
 const GREY: RGB = [217, 217, 217];
-const ACCENT: RGB = [25, 194, 179];
+const ACCENT: RGB = [13, 153, 255];
 const WHITE: RGB = [255, 255, 255];
 
 const canvas = (page: Page): Locator => page.getByRole('application', { name: 'Design canvas' });

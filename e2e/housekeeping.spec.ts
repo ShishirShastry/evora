@@ -63,7 +63,7 @@ test('side panels are resized by their edges and remembered; the light theme is 
 
   // The light theme, from the View menu: the panels turn white and the rulers with them.
   const background = (): Promise<string> => layersPanel.evaluate((element) => getComputedStyle(element).backgroundColor);
-  expect(await background()).toBe('rgb(23, 27, 28)');
+  expect(await background()).toBe('rgb(20, 20, 21)');
   await page.getByRole('button', { name: 'Main menu' }).click();
   await page.getByRole('menuitem', { name: 'View' }).click();
   await page.getByRole('menuitemcheckbox', { name: /Light theme/ }).click();
@@ -89,7 +89,7 @@ test('side panels are resized by their edges and remembered; the light theme is 
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'New design file' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(231, 235, 234)');
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(230, 230, 234)');
 
   // And back to dark.
   await page.getByRole('button', { name: 'New design file' }).click();
@@ -99,9 +99,9 @@ test('side panels are resized by their edges and remembered; the light theme is 
   await expect(page.getByRole('menuitemcheckbox', { name: /Light theme/ })).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('menuitemcheckbox', { name: /Light theme/ }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  expect(await layersPanel.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(23, 27, 28)');
+  expect(await layersPanel.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(20, 20, 21)');
   await canvas(page).focus();
-  expect(await rulerPixel()).toEqual([23, 27, 28]);
+  expect(await rulerPixel()).toEqual([20, 20, 21]);
   expect(errors).toEqual([]);
 });
 

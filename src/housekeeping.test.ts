@@ -191,7 +191,9 @@ describe('layers on the system clipboard', () => {
     // Not layers at all.
     expect(parseClipboard('Hello')).toBeNull();
     expect(parseClipboard('{"format":"something else"}')).toBeNull();
-    expect(parseClipboard(JSON.stringify({ format: 'open-design/clipboard', payload: { roots: [] } }))).toBeNull();
+    expect(parseClipboard(JSON.stringify({ format: 'evora/clipboard', payload: { roots: [] } }))).toBeNull();
+    // Layers copied before the application was renamed Evora still paste.
+    expect(again((data) => void ((data as unknown as { format: string }).format = 'open-design/clipboard'))).not.toBeNull();
     // Copied by a newer version than this one, or with no version at all.
     expect(again((data) => void (data.schemaVersion = CURRENT_SCHEMA_VERSION + 1))).toBeNull();
     expect(again((data) => void ((data as { schemaVersion?: number }).schemaVersion = undefined))).toBeNull();
@@ -242,12 +244,18 @@ describe('side panel widths and the theme', () => {
     // Widths outside what a panel can be, and anything that is not a width or a theme, are brought back.
     savePreferences({ leftPanelWidth: 5000, rightPanelWidth: 10 }, storage);
     expect(loadPreferences(storage)).toMatchObject({ leftPanelWidth: PANEL_WIDTH_MAX, rightPanelWidth: PANEL_WIDTH_MIN });
-    storage.setItem('open-design:preferences', JSON.stringify({ theme: 'sepia', leftPanelWidth: 'wide', rightPanelWidth: null }));
+    storage.setItem('evora:preferences', JSON.stringify({ theme: 'sepia', leftPanelWidth: 'wide', rightPanelWidth: null }));
     expect(loadPreferences(storage)).toEqual(DEFAULT_PREFERENCES);
     expect(clampPanelWidth(250.6, 240)).toBe(251);
     expect(clampPanelWidth(Number.NaN, 240)).toBe(240);
     // Storage that cannot be used leaves the defaults.
     expect(loadPreferences(undefined)).toEqual(DEFAULT_PREFERENCES);
+    // Preferences kept before the application was renamed Evora are read, and saved under the new name.
+    const before = localStorageLike();
+    before.setItem('open-design:preferences', JSON.stringify({ theme: 'light', leftPanelWidth: 300 }));
+    expect(loadPreferences(before)).toMatchObject({ theme: 'light', leftPanelWidth: 300 });
+    savePreferences({ snapping: false }, before);
+    expect(JSON.parse(before.getItem('evora:preferences') as string)).toMatchObject({ theme: 'light', leftPanelWidth: 300, snapping: false });
   });
 
   it('switch the theme from the View menu, without touching the document', () => {

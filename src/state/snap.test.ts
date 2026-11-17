@@ -223,12 +223,12 @@ describe('preferences', () => {
     expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: false, showRulers: false }));
     savePreferences(prefs({ snapping: true, showLayoutGrids: true, showRulers: true }), storage);
     expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: true, showRulers: true }));
-    storage.setItem('open-design:preferences', 'broken');
+    storage.setItem('evora:preferences', 'broken');
     expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: true, showRulers: false }));
     // A value of the wrong type falls back to its default; values saved by an older version are kept.
-    storage.setItem('open-design:preferences', '{"snapping":"yes","showLayoutGrids":false}');
+    storage.setItem('evora:preferences', '{"snapping":"yes","showLayoutGrids":false}');
     expect(loadPreferences(storage)).toEqual(prefs({ snapping: true, showLayoutGrids: false, showRulers: false }));
-    storage.setItem('open-design:preferences', '{"snapping":false}');
+    storage.setItem('evora:preferences', '{"snapping":false}');
     expect(loadPreferences(storage)).toEqual(prefs({ snapping: false, showLayoutGrids: true, showRulers: false }));
   });
 });

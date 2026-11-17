@@ -52,10 +52,10 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
       aria-label={label}
       // A submenu hangs off the side of its item, where there is no width to fill: its items must not wrap,
       // so that it is as wide as its longest label and shortcut.
-      className="min-w-[200px] whitespace-nowrap rounded-lg border border-line bg-panel py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      className="ev-popover min-w-[210px] whitespace-nowrap p-1 text-ink"
     >
       {items.map((item, index) => {
-        if (item.type === 'separator') return <div key={index} role="separator" className="my-1 h-px bg-line" />;
+        if (item.type === 'separator') return <div key={index} role="separator" className="mx-1 my-1 h-px bg-line" />;
         if (item.type === 'submenu') {
           const open = openIndex === index;
           return (
@@ -65,7 +65,7 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
               tabIndex={-1}
               aria-haspopup="menu"
               aria-expanded={open}
-              className="relative flex h-7 cursor-default items-center justify-between px-3 outline-none hover:bg-hover focus:bg-hover"
+              className="relative flex h-7 cursor-default items-center justify-between rounded-[6px] px-2.5 outline-none transition-colors duration-100 hover:bg-accent hover:text-accent-ink focus:bg-accent focus:text-accent-ink"
               onMouseEnter={() => setOpenIndex(index)}
               onClick={() => setOpenIndex(index)}
               onKeyDown={(event) => {
@@ -106,8 +106,12 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
             aria-checked={item.checked}
             tabIndex={-1}
             aria-disabled={item.disabled ? 'true' : undefined}
-            className={`flex h-7 w-full cursor-default items-center justify-between gap-6 border-0 bg-transparent px-3 text-left outline-none ${
-              item.disabled ? 'text-faint' : `hover:bg-hover focus:bg-hover ${item.danger ? 'text-danger' : ''}`
+            className={`group flex h-7 w-full cursor-default items-center justify-between gap-6 rounded-[6px] border-0 bg-transparent px-2.5 text-left outline-none transition-colors duration-100 ${
+              item.disabled
+                ? 'text-faint'
+                : item.danger
+                  ? 'text-danger hover:bg-danger hover:text-white focus:bg-danger focus:text-white'
+                  : 'hover:bg-accent hover:text-accent-ink focus:bg-accent focus:text-accent-ink'
             }`}
             onMouseEnter={() => setOpenIndex(null)}
             onClick={(event) => {
@@ -120,11 +124,11 @@ function MenuList({ items, label, onClose, onBack, autoFocus }: MenuListProps) {
           >
             <span className="flex items-center gap-2">
               {item.checked !== undefined && (
-                <span className="w-3 text-accent">{item.checked ? <Icon name="check" size={12} /> : null}</span>
+                <span className="w-3 text-accent group-hover:text-accent-ink group-focus:text-accent-ink">{item.checked ? <Icon name="check" size={12} /> : null}</span>
               )}
               {item.label}
             </span>
-            {item.shortcut && <span className="text-dim">{item.shortcut}</span>}
+            {item.shortcut && <span className="text-dim group-hover:text-accent-ink/80 group-focus:text-accent-ink/80">{item.shortcut}</span>}
           </button>
         );
       })}

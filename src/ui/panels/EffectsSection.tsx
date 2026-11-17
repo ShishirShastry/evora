@@ -55,7 +55,7 @@ export function EffectsSection({ layers }: { layers: LayerNode[] }) {
       action={
         <button
           type="button"
-          className="od-icon-button !h-6 !w-6"
+          className="ev-icon-button -my-0.5"
           aria-label="Add effect"
           title="Add effect"
           onClick={() => setEffects('Add effect', [...effects, dropShadow()])}
@@ -64,15 +64,16 @@ export function EffectsSection({ layers }: { layers: LayerNode[] }) {
         </button>
       }
     >
-      {mixed && <p className="m-0 text-dim">The selected layers have different effects. Add one to replace them.</p>}
-      {!mixed && effects.length === 0 && <p className="m-0 text-faint">No effects</p>}
+      {mixed && <p className="m-0 text-[11px] text-dim">The selected layers have different effects. Add one to replace them.</p>}
+      {!mixed && effects.length === 0 && <p className="m-0 text-[11px] text-faint">No effects</p>}
       {effects.map((effect, index) => {
         const name = `Effect ${index + 1}`;
         const setShadow = (patch: Partial<ShadowEffect>, label: string, phase: 'live' | 'commit' = 'commit'): void => {
           if (isShadow(effect)) replace(index, { ...effect, ...patch }, label, phase);
         };
         return (
-          <div key={index} role="group" aria-label={name} className="flex flex-col gap-1.5">
+          // Each effect after the first stands a little apart, so its rows read as one.
+          <div key={index} role="group" aria-label={name} className={`flex flex-col gap-1.5 ${index > 0 ? 'mt-1' : ''}`}>
             <Row>
               <SelectField<EffectType>
                 label={`${name} type`}
@@ -80,24 +81,27 @@ export function EffectsSection({ layers }: { layers: LayerNode[] }) {
                 options={EFFECT_NAMES}
                 onChange={(type) => replace(index, convertEffect(effect, type), 'Change effect type')}
               />
-              <button
-                type="button"
-                className="od-icon-button !h-6 !w-6"
-                aria-label={effect.visible ? `Hide effect ${index + 1}` : `Show effect ${index + 1}`}
-                title={effect.visible ? 'Hide' : 'Show'}
-                onClick={() => replace(index, { ...effect, visible: !effect.visible }, effect.visible ? 'Hide effect' : 'Show effect')}
-              >
-                <Icon name={effect.visible ? 'eye' : 'eyeOff'} size={13} />
-              </button>
-              <button
-                type="button"
-                className="od-icon-button !h-6 !w-6"
-                aria-label={`Remove effect ${index + 1}`}
-                title="Remove"
-                onClick={() => setEffects('Remove effect', effects.filter((_, i) => i !== index))}
-              >
-                <Icon name="minus" size={13} />
-              </button>
+              {/* Show and remove, kept together at the end of the row. */}
+              <div className="flex flex-none items-center">
+                <button
+                  type="button"
+                  className="ev-icon-button"
+                  aria-label={effect.visible ? `Hide effect ${index + 1}` : `Show effect ${index + 1}`}
+                  title={effect.visible ? 'Hide' : 'Show'}
+                  onClick={() => replace(index, { ...effect, visible: !effect.visible }, effect.visible ? 'Hide effect' : 'Show effect')}
+                >
+                  <Icon name={effect.visible ? 'eye' : 'eyeOff'} size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="ev-icon-button"
+                  aria-label={`Remove effect ${index + 1}`}
+                  title="Remove"
+                  onClick={() => setEffects('Remove effect', effects.filter((_, i) => i !== index))}
+                >
+                  <Icon name="minus" size={14} />
+                </button>
+              </div>
             </Row>
             {isShadow(effect) ? (
               <>

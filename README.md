@@ -1,6 +1,6 @@
-# OPEN DESIGN
+# Evora
 
-A free, open-source, local-first design and prototyping application. No account, no subscription, no paid features, no AI generation. The full specification is [OPEN_DESIGN_MASTER_SPEC.md](OPEN_DESIGN_MASTER_SPEC.md); the current state of the build is in [HANDOFF.md](HANDOFF.md).
+A free, open-source, local-first design and prototyping application. No account, no subscription, no paid features, no AI generation. The full specification is [EVORA_MASTER_SPEC.md](EVORA_MASTER_SPEC.md); the current state of the build is in [HANDOFF.md](HANDOFF.md).
 
 ## Run it
 
@@ -28,7 +28,7 @@ npm run build           # production build into dist/
 |---|---|
 | `src/core` | The document model and every operation on it. Pure TypeScript: no React, no browser APIs. |
 | `src/engine` | Canvas renderer, selection overlay, viewport maths and the interaction tools. |
-| `src/persistence` | Local storage (IndexedDB), autosave, `.opendesign` import and export. |
+| `src/persistence` | Local storage (IndexedDB), autosave, `.evora` import and export (files saved before the rename, `.opendesign`, still open). |
 | `src/state` | The editor store (document, selection, undo history) and the command table that menus and shortcuts share. |
 | `src/ui` | The React interface: file browser, toolbar, menus, layers, properties, canvas host. |
 | `e2e` | Browser acceptance tests. |
@@ -37,4 +37,4 @@ npm run build           # production build into dist/
 
 ## Licence
 
-OPEN DESIGN is released under the [MIT License](LICENSE). The Inter font that ships with it is under the SIL Open Font License 1.1; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Evora is released under the [MIT License](LICENSE). The Inter font that ships with it is under the SIL Open Font License 1.1; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

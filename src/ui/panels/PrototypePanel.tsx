@@ -85,13 +85,24 @@ const SCROLL_LABELS: Record<ScrollBehavior, string> = { SCROLLS: 'Scrolls with t
 const POSITION_LABELS: Record<OverlayPosition, string> = { CENTER: 'Centre', TOP_LEFT: 'Top left', TOP_CENTER: 'Top centre', TOP_RIGHT: 'Top right', BOTTOM_LEFT: 'Bottom left', BOTTOM_CENTER: 'Bottom centre', BOTTOM_RIGHT: 'Bottom right' };
 const DEVICE_LABELS: Record<PrototypeDevice, string> = { NONE: 'None: as big as the frame', PHONE: 'Phone (390 × 844)', TABLET: 'Tablet (820 × 1180)', DESKTOP: 'Desktop (1440 × 900)' };
 
+/** A rounded well pressed into the panel: what an interaction or a flow sits in. */
+const WELL = 'rounded-[10px] bg-bg/50 shadow-[var(--ev-sunk)]';
+/** An action inside an interaction: a raised card lifted out of the interaction's well. */
+const CARD = 'rounded-[8px] bg-panel shadow-[var(--ev-raise)]';
+/** What an empty list says, in a quiet dashed outline where its rows would be. */
+const EMPTY = 'm-0 rounded-[8px] border border-dashed border-line px-3 py-2.5 text-center leading-[1.45] text-faint';
+/** A note under the controls it is about. */
+const NOTE = 'm-0 leading-[1.45] text-faint';
+/** A small accent tile marking where a flow starts. */
+const FLOW_TILE = 'flex flex-none items-center justify-center rounded-[7px] bg-selected text-accent';
+
 const TAKES_DESTINATION: readonly ActionType[] = ['NAVIGATE', 'OPEN_OVERLAY', 'SWAP_OVERLAY', 'SCROLL_TO', 'CHANGE_TO'];
 const TAKES_TRANSITION: readonly ActionType[] = ['NAVIGATE', 'OPEN_OVERLAY', 'SWAP_OVERLAY', 'CLOSE_OVERLAY', 'SCROLL_TO', 'CHANGE_TO'];
 const DIRECTIONAL: readonly TransitionType[] = ['MOVE_IN', 'MOVE_OUT', 'PUSH', 'SLIDE_IN', 'SLIDE_OUT'];
 
 function Select<T extends string>({ label, value, options, onChange, className }: { label: string; value: T | ''; options: readonly (readonly [T | '', string])[]; onChange: (value: T) => void; className?: string }) {
   return (
-    <select aria-label={label} className={`od-field ${className ?? 'min-w-0 flex-1'}`} value={value} onChange={(event) => onChange(event.currentTarget.value as T)}>
+    <select aria-label={label} className={`ev-field ${className ?? 'min-w-0 flex-1'}`} value={value} onChange={(event) => onChange(event.currentTarget.value as T)}>
       {options.map(([option, name]) => (
         <option key={option} value={option}>
           {name}
@@ -183,7 +194,8 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
         const missing = action.destinationId !== null && !choices.some(([id]) => id === action.destinationId);
         const problem = action.type === 'SET_VARIABLE' || action.type === 'CONDITIONAL' ? (action.expression.trim() === '' ? null : expressionProblem(action.expression, names)) : null;
         return (
-          <div key={index} className="flex flex-col gap-1.5 rounded border border-line p-1.5">
+          // The actions of an interaction are cards in its well; the branches of a condition hang from a rail inside their card.
+          <div key={index} className={depth === 0 ? `flex flex-col gap-1.5 p-1.5 ${CARD}` : 'flex flex-col gap-1.5 border-l-2 border-line py-0.5 pl-2'}>
             <Row>
               <Select
                 label={`${name} type`}
@@ -192,7 +204,7 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
                 // What the new type has no use for is cleared, so that nothing stale is kept.
                 onChange={(type) => set(index, newAction(type, { transition: action.transition }))}
               />
-              <button type="button" className="od-icon-button flex-none" aria-label={`Remove ${name}`} title="Remove action" onClick={() => onChange(actions.filter((_, at) => at !== index))}>
+              <button type="button" className="ev-icon-button flex-none" aria-label={`Remove ${name}`} title="Remove action" onClick={() => onChange(actions.filter((_, at) => at !== index))}>
                 <Icon name="close" />
               </button>
             </Row>
@@ -206,7 +218,7 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
                 />
               </Row>
             )}
-            {action.type === 'CHANGE_TO' && choices.length === 0 && <p className="m-0 text-faint">“Change to” is for a variant, a layer of one, or an instance of one: it shows another variant of the same set.</p>}
+            {action.type === 'CHANGE_TO' && choices.length === 0 && <p className={NOTE}>“Change to” is for a variant, a layer of one, or an instance of one: it shows another variant of the same set.</p>}
             {TAKES_TRANSITION.includes(action.type) && <TransitionEditor label={name} value={action.transition} onChange={(transition) => set(index, { ...action, transition })} />}
             {action.type === 'OPEN_LINK' && <CommitInput label={`${name} address`} value={action.expression} className="w-full" placeholder="https://…" onCommit={(expression) => set(index, { ...action, expression: expression.trim() })} />}
             {(action.type === 'SET_VARIABLE' || action.type === 'INPUT') && (
@@ -219,7 +231,7 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
                 />
               </Row>
             )}
-            {action.type === 'INPUT' && <p className="m-0 text-faint">What is typed goes into this text variable until Enter. Bind a text layer to the variable to show it.</p>}
+            {action.type === 'INPUT' && <p className={NOTE}>What is typed goes into this text variable until Enter. Bind a text layer to the variable to show it.</p>}
             {(action.type === 'SET_VARIABLE' || action.type === 'CONDITIONAL') && (
               <>
                 <CommitInput
@@ -230,7 +242,7 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
                   onCommit={(expression) => set(index, { ...action, expression })}
                 />
                 {problem && (
-                  <p role="alert" className="m-0 text-danger">
+                  <p role="alert" className="m-0 leading-[1.45] text-danger">
                     {problem}
                   </p>
                 )}
@@ -238,16 +250,17 @@ function ActionList({ label, layer, actions, depth, onChange }: { label: string;
             )}
             {action.type === 'CONDITIONAL' && (
               <>
-                <span className="text-dim">If it holds</span>
+                <span className="mt-0.5 text-[11px] font-medium text-dim">If it holds</span>
                 <ActionList label={`${name} then`} layer={layer} actions={action.then} depth={depth + 1} onChange={(then) => set(index, { ...action, then })} />
-                <span className="text-dim">Otherwise</span>
+                <span className="mt-0.5 text-[11px] font-medium text-dim">Otherwise</span>
                 <ActionList label={`${name} else`} layer={layer} actions={action.otherwise} depth={depth + 1} onChange={(otherwise) => set(index, { ...action, otherwise })} />
               </>
             )}
           </div>
         );
       })}
-      <button type="button" className="od-button !h-[24px] self-start !px-2" aria-label={`Add an action to ${label}`} onClick={() => onChange([...actions, newAction('NAVIGATE')])}>
+      <button type="button" className="ev-button !h-6 self-start !gap-1 !rounded-[7px] !pl-1.5 !pr-2 text-[11px]" aria-label={`Add an action to ${label}`} onClick={() => onChange([...actions, newAction('NAVIGATE')])}>
+        <Icon name="plus" size={12} />
         Add action
       </button>
     </div>
@@ -259,10 +272,10 @@ function ReactionEditor({ layer, reaction, index }: { layer: LayerNode; reaction
   const label = `Interaction ${index + 1}`;
   const change = (text: string, patch: Partial<Omit<Reaction, 'id'>>): void => store.getState().apply(text, (d) => updateReaction(d, layer.id, reaction.id, patch));
   return (
-    <li className="flex flex-col gap-1.5 rounded border border-line p-1.5" aria-label={label}>
+    <li className={`flex flex-col gap-1.5 p-1.5 ${WELL}`} aria-label={label}>
       <Row>
         <Select label={`${label} trigger`} value={reaction.trigger.type} options={TRIGGER_TYPES.map((type) => [type, TRIGGER_LABELS[type]] as const)} onChange={(type) => change('Change trigger', { trigger: newTrigger(type) })} />
-        <button type="button" className="od-icon-button flex-none" aria-label={`Remove ${label}`} title="Remove interaction" onClick={() => store.getState().apply('Remove interaction', (d) => removeReaction(d, layer.id, reaction.id))}>
+        <button type="button" className="ev-icon-button flex-none" aria-label={`Remove ${label}`} title="Remove interaction" onClick={() => store.getState().apply('Remove interaction', (d) => removeReaction(d, layer.id, reaction.id))}>
           <Icon name="close" />
         </button>
       </Row>
@@ -290,28 +303,35 @@ function LayerPrototype({ layer }: { layer: LayerNode }) {
         <Section title="Flow starting point">
           {flow ? (
             <Row>
+              <span aria-hidden="true" className={`h-7 w-7 ${FLOW_TILE}`}>
+                <Icon name="play" size={11} />
+              </span>
               <CommitInput label="Flow name" value={flow.name} onCommit={(name) => store.getState().apply('Rename flow', (d) => renameFlow(d, pageId, flow.id, name))} />
-              <button type="button" className="od-button !h-[26px] flex-none !px-2" onClick={() => store.getState().apply('Remove flow', (d) => removeFlow(d, pageId, flow.id))}>
+              <button type="button" className="ev-button !h-7 flex-none !px-2.5" onClick={() => store.getState().apply('Remove flow', (d) => removeFlow(d, pageId, flow.id))}>
                 Remove
               </button>
             </Row>
           ) : (
-            <button type="button" className="od-button !h-[26px] self-start !px-2" onClick={() => store.getState().apply('Add flow', (d) => addFlow(d, layer.id)?.doc ?? d)}>
+            <button type="button" className="ev-button !h-7 w-full !gap-1.5" onClick={() => store.getState().apply('Add flow', (d) => addFlow(d, layer.id)?.doc ?? d)}>
+              <span aria-hidden="true" className="flex text-accent">
+                <Icon name="play" size={10} />
+              </span>
               Start a flow here
             </button>
           )}
         </Section>
       )}
       <Section title="Interactions">
-        {mirrored && <p className="m-0 text-faint">This layer is part of an instance: it has its component’s interactions until they are changed here.</p>}
-        {isInstance(layer) && <p className="m-0 text-faint">An instance also has the interactions of the component it shows.</p>}
-        {layer.reactions.length === 0 && <p className="m-0 text-faint">No interactions. Add one here, or drag from the circle on the layer’s edge to a frame.</p>}
-        <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+        {mirrored && <p className={NOTE}>This layer is part of an instance: it has its component’s interactions until they are changed here.</p>}
+        {isInstance(layer) && <p className={NOTE}>An instance also has the interactions of the component it shows.</p>}
+        {layer.reactions.length === 0 && <p className={EMPTY}>No interactions. Add one here, or drag from the circle on the layer’s edge to a frame.</p>}
+        <ul className="m-0 flex list-none flex-col gap-2 p-0 empty:hidden">
           {layer.reactions.map((reaction, index) => (
             <ReactionEditor key={reaction.id} layer={layer} reaction={reaction} index={index} />
           ))}
         </ul>
-        <button type="button" className="od-button !h-[26px] self-start !px-2" onClick={() => store.getState().apply('Add interaction', (d) => addReaction(d, layer.id, newTrigger('ON_CLICK'), [newAction('NAVIGATE')])?.doc ?? d)}>
+        <button type="button" className="ev-button !h-7 w-full !gap-1.5" onClick={() => store.getState().apply('Add interaction', (d) => addReaction(d, layer.id, newTrigger('ON_CLICK'), [newAction('NAVIGATE')])?.doc ?? d)}>
+          <Icon name="plus" size={12} />
           Add interaction
         </button>
       </Section>
@@ -342,13 +362,14 @@ function LayerPrototype({ layer }: { layer: LayerNode }) {
             <span className="w-20 flex-none text-dim">Position</span>
             <Select label="Overlay position" value={layer.overlayPosition} options={OVERLAY_POSITIONS.map((position) => [position, POSITION_LABELS[position]] as const)} onChange={(overlayPosition) => store.getState().apply('Change overlay position', (d) => patchNodes(d, { [layer.id]: { overlayPosition } }))} />
           </Row>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={layer.overlayCloseOutside} onChange={(event) => store.getState().apply('Change overlay', (d) => patchNodes(d, { [layer.id]: { overlayCloseOutside: event.currentTarget.checked } }))} />
+          <label className="-mx-1 flex h-7 cursor-pointer items-center gap-2 rounded-[6px] px-1 transition-colors duration-100 hover:bg-hover">
+            <input type="checkbox" className="h-3.5 w-3.5 flex-none cursor-pointer" checked={layer.overlayCloseOutside} onChange={(event) => store.getState().apply('Change overlay', (d) => patchNodes(d, { [layer.id]: { overlayCloseOutside: event.currentTarget.checked } }))} />
             Close when clicking outside
           </label>
-          <label className="flex items-center gap-1.5">
+          <label className="-mx-1 flex h-7 cursor-pointer items-center gap-2 rounded-[6px] px-1 transition-colors duration-100 hover:bg-hover">
             <input
               type="checkbox"
+              className="h-3.5 w-3.5 flex-none cursor-pointer"
               checked={layer.overlayBackground !== null}
               onChange={(event) => store.getState().apply('Change overlay background', (d) => patchNodes(d, { [layer.id]: { overlayBackground: event.currentTarget.checked ? { color: { r: 0, g: 0, b: 0 }, opacity: 0.5 } : null } }))}
             />
@@ -393,25 +414,42 @@ function PagePrototype() {
           <span className="w-14 flex-none text-dim">Device</span>
           <Select label="Prototype device" value={page.prototypeDevice} options={PROTOTYPE_DEVICES.map((device) => [device, DEVICE_LABELS[device]] as const)} onChange={(prototypeDevice) => store.getState().apply('Change prototype device', (d) => patchNodes(d, { [pageId]: { prototypeDevice } }))} />
         </Row>
-        <button type="button" className="od-button !h-[26px] self-start !px-2" onClick={() => app.present?.()}>
+        <button type="button" className="ev-button !h-7 w-full !gap-1.5" onClick={() => app.present?.()}>
+          <span aria-hidden="true" className="flex text-accent">
+            <Icon name="play" size={10} />
+          </span>
           Present
         </button>
       </Section>
       <Section title="Flows">
-        {flows.length === 0 && <p className="m-0 text-faint">No flows yet. Select a frame and choose “Start a flow here”. Without a flow, the prototype starts on the selected frame or the first one.</p>}
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        {flows.length === 0 && <p className={EMPTY}>No flows yet. Select a frame and choose “Start a flow here”. Without a flow, the prototype starts on the selected frame or the first one.</p>}
+        <ul className="m-0 flex list-none flex-col gap-1.5 p-0 empty:hidden">
           {flows.map((flow) => (
-            <li key={flow.id} className="flex items-center gap-1.5">
-              <CommitInput label={`Name of flow ${flow.name}`} value={flow.name} onCommit={(name) => store.getState().apply('Rename flow', (d) => renameFlow(d, pageId, flow.id, name))} />
-              <span className="min-w-0 flex-1 truncate text-dim" title="The frame it starts on">
-                {doc.nodes[flow.startId]?.name}
-              </span>
-              <button type="button" className="od-button !h-[24px] flex-none !px-2" aria-label={`Present flow ${flow.name}`} onClick={() => app.present?.(flow.startId)}>
-                Present
-              </button>
-              <button type="button" className="od-icon-button flex-none" aria-label={`Remove flow ${flow.name}`} title="Remove flow" onClick={() => store.getState().apply('Remove flow', (d) => removeFlow(d, pageId, flow.id))}>
-                <Icon name="close" />
-              </button>
+            // A flow, as Figma lists them: its name beside the flow mark, and under it the frame it starts on.
+            <li key={flow.id} className={`flex flex-col gap-1 p-1.5 ${WELL}`}>
+              <div className="flex items-center gap-1.5">
+                <span aria-hidden="true" className={`h-7 w-7 ${FLOW_TILE}`}>
+                  <Icon name="play" size={11} />
+                </span>
+                <CommitInput label={`Name of flow ${flow.name}`} value={flow.name} onCommit={(name) => store.getState().apply('Rename flow', (d) => renameFlow(d, pageId, flow.id, name))} />
+              </div>
+              <div className="flex items-center gap-1.5 pl-2">
+                <span aria-hidden="true" className="flex flex-none text-faint">
+                  <Icon name="frame" size={12} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-dim" title="The frame it starts on">
+                  {doc.nodes[flow.startId]?.name}
+                </span>
+                <button type="button" className="ev-button !h-6 flex-none !gap-1 !rounded-[7px] !pl-1.5 !pr-2 text-[11px]" aria-label={`Present flow ${flow.name}`} onClick={() => app.present?.(flow.startId)}>
+                  <span aria-hidden="true" className="flex text-accent">
+                    <Icon name="play" size={9} />
+                  </span>
+                  Present
+                </button>
+                <button type="button" className="ev-icon-button flex-none" aria-label={`Remove flow ${flow.name}`} title="Remove flow" onClick={() => store.getState().apply('Remove flow', (d) => removeFlow(d, pageId, flow.id))}>
+                  <Icon name="close" />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -430,7 +468,7 @@ export function PrototypePanel() {
       {layers.length === 1 && <LayerPrototype layer={layers[0] as LayerNode} />}
       {layers.length > 1 && (
         <Section title="Interactions">
-          <p className="m-0 text-faint">Select one layer to see and change its interactions.</p>
+          <p className={EMPTY}>Select one layer to see and change its interactions.</p>
         </Section>
       )}
     </aside>

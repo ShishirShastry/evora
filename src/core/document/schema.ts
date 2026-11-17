@@ -1,5 +1,5 @@
 /**
- * OPEN DESIGN document schema, version 24 (adds a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * Evora document schema, version 24 (adds a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -12,8 +12,15 @@
  */
 
 export const CURRENT_SCHEMA_VERSION = 24;
-export const FILE_FORMAT = 'open-design';
-export const FILE_EXTENSION = '.opendesign';
+export const FILE_FORMAT = 'evora';
+export const FILE_EXTENSION = '.evora';
+/**
+ * What files were called before the application was renamed Evora (on
+ * 2026-11-17): they are opened as they always were, and saved again under the
+ * new name.
+ */
+export const LEGACY_FILE_FORMATS: readonly string[] = ['open-design'];
+export const LEGACY_FILE_EXTENSIONS: readonly string[] = ['.opendesign'];
 
 export type NodeId = string;
 
@@ -969,7 +976,7 @@ export interface FileMeta {
 }
 
 /** The native file container, as stored on disk and in local storage. */
-export interface OpenDesignFile {
+export interface EvoraFile {
   format: typeof FILE_FORMAT;
   schemaVersion: number;
   meta: FileMeta;

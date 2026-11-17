@@ -183,17 +183,34 @@ export function LayersPanel() {
     if (target.position === 'inside') store.getState().setCollapsed(target.id, false);
   };
 
+  /**
+   * How a row is lit: 2 when it is selected, 1 when a layer it sits inside is
+   * selected (Figma's lighter tint for the contents of a selection), 0 when not.
+   * Lit neighbours join into one block with rounded ends. Display only.
+   */
+  const lit = (index: number): 0 | 1 | 2 => {
+    const row = rows[index];
+    if (!row || selected.size === 0) return 0;
+    if (selected.has(row.node.id)) return 2;
+    for (let parent = doc.nodes[row.node.parentId]; isLayer(parent); parent = doc.nodes[parent.parentId]) {
+      if (selected.has(parent.id)) return 1;
+    }
+    return 0;
+  };
+
   return (
     <section aria-label="Layers" className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-9 flex-none items-center pl-3">
-        <h2 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">Layers</h2>
+      {/* Figma's section head: a quiet sentence-case title. */}
+      <header className="flex h-9 flex-none items-center pl-3 pr-1.5">
+        <h2 className="ev-section-title">Layers</h2>
       </header>
+      {/* No padding above the rows: row N sits at N × LAYER_ROW_HEIGHT, which the scrolling and the virtual list rely on. */}
       <div
         ref={listRef}
         role="tree"
         aria-label="Layers"
         aria-multiselectable="true"
-        className="min-h-0 flex-1 overflow-y-auto pb-3"
+        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3"
         onScroll={(event) => {
           const { scrollTop, clientHeight } = event.currentTarget;
           setView((current) => (current.top === scrollTop && current.height === clientHeight ? current : { top: scrollTop, height: clientHeight }));
@@ -206,16 +223,45 @@ export function LayersPanel() {
         }}
       >
         {rows.length === 0 && (
-          <p className="m-0 px-3 py-2 text-dim">
-            This page is empty. Pick a shape or frame tool in the toolbar and drag on the canvas.
-          </p>
+          // An empty page: a soft well pressed into the panel, with a raised frame mark in it.
+          <div className="mx-1.5 mt-1 flex flex-col items-center gap-2.5 rounded-[10px] bg-field px-4 py-5 text-center" style={{ boxShadow: 'var(--ev-sunk)' }}>
+            <span
+              aria-hidden="true"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-dim"
+              style={{ background: 'var(--ev-button)', boxShadow: 'var(--ev-raise)' }}
+            >
+              <Icon name="frame" size={15} />
+            </span>
+            <p className="m-0 text-[11px] leading-relaxed text-dim">
+              This page is empty. Pick a shape or frame tool in the toolbar and drag on the canvas.
+            </p>
+          </div>
         )}
         {/* The space of the rows above the ones in view, so the scroll bar is that of the whole list. */}
         {start > 0 && <div role="presentation" style={{ height: start * LAYER_ROW_HEIGHT }} />}
-        {rows.slice(start, end).map((row) => {
+        {rows.slice(start, end).map((row, offset) => {
           const { node } = row;
           const isSelected = selected.has(node.id);
           const dropHere = drop?.id === node.id ? drop.position : null;
+          // Display only: the row's tint, its corners where it joins lit neighbours, and its icon's colour.
+          const index = start + offset;
+          const level = lit(index);
+          const joinUp = level > 0 && lit(index - 1) > 0;
+          const joinDown = level > 0 && lit(index + 1) > 0;
+          const corners = joinUp ? (joinDown ? '' : 'rounded-b-md') : joinDown ? 'rounded-t-md' : 'rounded-md';
+          const hovered = hoveredId === node.id;
+          const tint =
+            level === 2
+              ? 'bg-selected'
+              : level === 1
+                ? hovered
+                  ? 'bg-selected/70'
+                  : 'bg-selected/40 hover:bg-selected/70'
+                : hovered
+                  ? 'bg-hover'
+                  : 'hover:bg-hover';
+          const isComponent = node.type === 'FRAME' && (node.kind === 'COMPONENT' || node.kind === 'COMPONENT_SET' || node.kind === 'INSTANCE');
+          const iconTone = !node.visible ? 'text-faint' : isComponent ? 'text-accent' : isSelected ? 'text-ink' : 'text-dim';
           return (
             <div
               key={node.id}
@@ -226,11 +272,9 @@ export function LayersPanel() {
               aria-level={row.depth + 1}
               aria-expanded={row.hasChildren ? row.expanded : undefined}
               draggable={renamingId !== node.id}
-              className={`group relative flex h-7 cursor-default items-center pr-1 ${
-                isSelected ? 'bg-selected' : hoveredId === node.id ? 'bg-hover' : 'hover:bg-hover'
-              } ${dropHere === 'inside' ? 'outline outline-1 -outline-offset-1 outline-accent' : ''} ${
-                node.visible ? '' : 'text-faint'
-              }`}
+              className={`ev-row group relative flex h-7 cursor-default items-center pr-1 ${corners} ${tint} ${
+                dropHere === 'inside' ? 'outline outline-1 -outline-offset-1 outline-accent' : ''
+              } ${node.visible ? '' : 'text-faint'}`}
               style={{ paddingLeft: 6 + row.depth * 14 }}
               onClick={(event) => onRowClick(event, node.id)}
               onDoubleClick={() => store.getState().setRenaming(node.id)}
@@ -262,13 +306,18 @@ export function LayersPanel() {
             >
               {dropHere && dropHere !== 'inside' && (
                 <span
-                  className="pointer-events-none absolute right-0 h-0.5 bg-accent"
+                  className="pointer-events-none absolute right-1 z-10 h-0.5 rounded-full bg-accent"
                   style={{ left: 6 + row.depth * 14, [dropHere === 'above' ? 'top' : 'bottom']: -1 }}
-                />
+                >
+                  {/* Figma's insertion mark: a small ring where the line starts. */}
+                  <span aria-hidden="true" className="absolute -left-1 -top-[3px] h-2 w-2 rounded-full border-2 border-accent bg-panel" />
+                </span>
               )}
               <button
                 type="button"
-                className="flex h-5 w-4 flex-none items-center justify-center border-0 bg-transparent p-0 text-dim"
+                className={`flex h-5 w-4 flex-none items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors duration-150 hover:text-ink ${
+                  isSelected ? 'text-dim' : 'text-faint group-hover:text-dim'
+                }`}
                 style={{ visibility: row.hasChildren ? 'visible' : 'hidden' }}
                 aria-label={row.expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
                 tabIndex={-1}
@@ -277,9 +326,12 @@ export function LayersPanel() {
                   store.getState().setCollapsed(node.id, row.expanded);
                 }}
               >
-                <Icon name={row.expanded ? 'chevronDown' : 'chevronRight'} size={10} />
+                {/* One chevron that turns, rather than two that swap. */}
+                <span aria-hidden="true" className={`flex transition-transform duration-150 ease-out ${row.expanded ? 'rotate-90' : ''}`}>
+                  <Icon name="chevronRight" size={10} />
+                </span>
               </button>
-              <span className={`mr-1.5 flex-none ${isSelected ? 'text-accent' : 'text-dim'}`}>
+              <span className={`mr-1.5 flex flex-none items-center transition-colors duration-150 ${iconTone}`}>
                 <Icon
                   name={
                     node.isMask
@@ -304,7 +356,7 @@ export function LayersPanel() {
                 <TextEdit
                   label="Layer name"
                   value={node.name}
-                  className="flex-1"
+                  className="-ml-1.5 flex-1 !px-1.5"
                   onCancel={() => store.getState().setRenaming(null)}
                   onCommit={(name) => {
                     store.getState().setRenaming(null);
@@ -314,10 +366,15 @@ export function LayersPanel() {
               ) : (
                 <span className="min-w-0 flex-1 truncate">{node.name}</span>
               )}
-              <span className={`flex flex-none ${node.locked || !node.visible ? '' : 'opacity-0 group-hover:opacity-100'}`}>
+              {/* Lock and visibility: quiet until the row is hovered or a key reaches them; always shown while they are on. */}
+              <span
+                className={`flex flex-none transition-opacity duration-150 ${
+                  node.locked || !node.visible ? '' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'
+                }`}
+              >
                 <button
                   type="button"
-                  className={`od-icon-button !h-6 !w-6 ${node.locked ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                  className={`ev-icon-button !h-6 !w-6 ${node.locked ? '' : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100'}`}
                   aria-label={node.locked ? `Unlock ${node.name}` : `Lock ${node.name}`}
                   title={node.locked ? 'Unlock' : 'Lock'}
                   onClick={(event) => {
@@ -330,7 +387,7 @@ export function LayersPanel() {
                 </button>
                 <button
                   type="button"
-                  className={`od-icon-button !h-6 !w-6 ${node.visible ? 'opacity-0 group-hover:opacity-100' : ''}`}
+                  className={`ev-icon-button !h-6 !w-6 ${node.visible ? 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100' : ''}`}
                   aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
                   title={node.visible ? 'Hide' : 'Show'}
                   onClick={(event) => {

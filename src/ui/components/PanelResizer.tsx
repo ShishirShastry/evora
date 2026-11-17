@@ -20,6 +20,20 @@ const STEP = 16;
 const BIG_STEP = 48;
 
 /**
+ * Invisible until wanted: the grab strip lies along the inside of the panel's
+ * edge (the panel clips what lies outside it), and a slim accent line grows
+ * along that edge on hover, shows fully while dragging, and marks the
+ * keyboard's place in place of the focus ring.
+ */
+const STRIP =
+  'absolute top-0 z-20 h-full w-1.5 cursor-col-resize touch-none focus-visible:!outline-none ' +
+  'after:pointer-events-none after:absolute after:inset-y-3 after:w-0.5 after:rounded-full after:bg-accent after:opacity-0 after:scale-y-75 ' +
+  'after:transition-[opacity,scale,box-shadow] after:duration-150 after:ease-[var(--ev-ease)] ' +
+  'hover:after:scale-y-100 hover:after:opacity-60 hover:after:delay-75 ' +
+  'active:after:scale-y-100 active:after:opacity-100 active:after:delay-0 active:after:shadow-[0_0_10px_var(--ev-ring)] ' +
+  'focus-visible:after:scale-y-100 focus-visible:after:opacity-100 focus-visible:after:shadow-[0_0_10px_var(--ev-ring)]';
+
+/**
  * The edge of a side panel that faces the canvas: drag it to make the panel
  * wider or narrower, double-click to put it back, or focus it and use the
  * arrow keys (Shift for bigger steps, Home and End for the limits).
@@ -45,9 +59,7 @@ export function PanelResizer({ label, width, min, max, reset, side, onChange, on
       aria-valuemax={max}
       tabIndex={0}
       title="Drag to resize. Double-click to reset."
-      className={`absolute top-0 z-20 h-full w-[7px] cursor-col-resize touch-none hover:bg-accent/40 focus-visible:bg-accent/60 ${
-        side === 'left' ? '-right-1' : '-left-1'
-      }`}
+      className={`${STRIP} ${side === 'left' ? 'right-0 after:right-0' : 'left-0 after:left-0'}`}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.currentTarget.setPointerCapture(event.pointerId);

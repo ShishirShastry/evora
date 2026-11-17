@@ -159,12 +159,12 @@ test('gradient handles: a gradient is turned by dragging its end on the canvas',
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   expectNear(await overlay(300, 200), [255, 255, 255]);
-  expectNear(await overlay(300, 400), [25, 194, 179]);
+  expectNear(await overlay(300, 400), [13, 153, 255]);
 
   // Drag the end round to the middle of the right edge: the gradient now runs at 45 degrees.
   await drag([300, 400], [400, 300]);
   await expect(field(page, 'Fill 1 angle')).toHaveValue('45');
-  expectNear(await overlay(400, 300), [25, 194, 179]);
+  expectNear(await overlay(400, 300), [13, 153, 255]);
   // What was all one colour along the top edge is no longer: the left is red, the right is on its way to blue.
   const left = await pixel(page, 205, 205);
   const right = await pixel(page, 395, 205);

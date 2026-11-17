@@ -58,7 +58,7 @@ export function VectorSection({ layers }: { layers: VectorNode[] }) {
 
   const selected = editing?.vertices.length ?? 0;
   const button = (id: string, label: string, enabled: boolean) => (
-    <button type="button" className="od-button flex-1 !px-1 disabled:opacity-40" disabled={!enabled} onClick={() => run(getCommand(id) as Command)}>
+    <button type="button" className="ev-button min-w-0 flex-1 !px-1 text-[11px]" disabled={!enabled} onClick={() => run(getCommand(id) as Command)}>
       {label}
     </button>
   );
@@ -66,14 +66,14 @@ export function VectorSection({ layers }: { layers: VectorNode[] }) {
   return (
     <Section title="Vector">
       <Row>
-        <span className="w-20 flex-none text-dim">Fill covers</span>
+        <span className="w-[72px] flex-none truncate text-[11px] text-dim">Fill covers</span>
         <SelectField<WindingRule> label="Fill rule" value={rule} options={RULES} onChange={setRule} />
       </Row>
       {single && (
         <Row>
           <button
             type="button"
-            className="od-button flex-1"
+            className={`ev-button flex-1 text-[11px] ${editing ? 'ev-button-primary' : ''}`}
             aria-pressed={editing !== null}
             onClick={() => run(getCommand('object.editVector') as Command)}
           >
@@ -83,7 +83,7 @@ export function VectorSection({ layers }: { layers: VectorNode[] }) {
       )}
       {editing && single && (
         <>
-          <p className="m-0 text-dim" aria-live="polite">
+          <p className="m-0 text-[11px] text-dim" aria-live="polite">
             {editing.vertices.length === 0
               ? `${single.network.vertices.length} points. Click one to select it.`
               : `${editing.vertices.length} of ${single.network.vertices.length} points selected`}
@@ -94,15 +94,18 @@ export function VectorSection({ layers }: { layers: VectorNode[] }) {
               <NumberField label="Point Y position" prefix="Y" value={position.y} onCommit={(y) => movePoint({ y })} />
             </Row>
           )}
-          <Row>
-            {button('vector.corner', 'Corner', selected > 0)}
-            {button('vector.smooth', 'Smooth', selected > 0)}
-          </Row>
-          <Row>
-            {button('vector.join', 'Join', selected === 2)}
-            {button('vector.cut', 'Cut', selected > 0)}
-            {button('edit.delete', 'Delete', selected > 0)}
-          </Row>
+          {/* The point commands: raised keys in a pressed-in tray. */}
+          <div className="flex flex-col gap-1 rounded-[10px] bg-bg/40 p-1 shadow-[var(--ev-sunk)]">
+            <div className="flex gap-1">
+              {button('vector.corner', 'Corner', selected > 0)}
+              {button('vector.smooth', 'Smooth', selected > 0)}
+            </div>
+            <div className="flex gap-1">
+              {button('vector.join', 'Join', selected === 2)}
+              {button('vector.cut', 'Cut', selected > 0)}
+              {button('edit.delete', 'Delete', selected > 0)}
+            </div>
+          </div>
         </>
       )}
     </Section>

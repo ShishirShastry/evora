@@ -7,18 +7,18 @@ import { MIXED, type Mixed } from '../components/Fields';
 
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section aria-label={title} className="border-b border-line px-3 py-2.5">
+    <section aria-label={title} className="border-b border-line px-3 pb-3 pt-2.5 last:border-b-0">
       <header className="mb-2 flex h-6 items-center justify-between">
-        <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-dim">{title}</h3>
+        <h3 className="ev-section-title">{title}</h3>
         {action}
       </header>
-      <div className="flex flex-col gap-1.5">{children}</div>
+      <div className="flex flex-col gap-2">{children}</div>
     </section>
   );
 }
 
 export function Row({ children }: { children: ReactNode }) {
-  return <div className="flex items-center gap-1.5">{children}</div>;
+  return <div className="flex items-center gap-2">{children}</div>;
 }
 
 /** The shared value of a property across layers, or MIXED when they differ. */
@@ -67,7 +67,7 @@ export function SelectField<T extends string>({ label, value, options, onChange,
   return (
     <select
       aria-label={label}
-      className={`od-field ${className ?? 'flex-1'}`}
+      className={`ev-field ${className ?? 'flex-1'}`}
       disabled={disabled}
       value={value}
       onChange={(event) => onChange(event.currentTarget.value as T)}
