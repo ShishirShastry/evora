@@ -77,9 +77,38 @@ export interface ApiOptions {
   google?: GoogleConfig | null;
   /** The app's public origin (EVORA_PUBLIC_URL), where Google sends people back to; otherwise only this computer's addresses are accepted. */
   publicUrl?: string | null;
+  /** More routes, from the parts of the server built on this one (version history, plugins, community). */
+  extensions?: ApiExtension[];
 }
 
-interface Ctx {
+/**
+ * What a part of the server built on the API gets to make its routes with:
+ * the store and hub, and the API's own helpers for who is asking and what
+ * they may do, so that every route checks access the same way.
+ */
+export interface ApiKit {
+  store: Store;
+  hub: Hub;
+  route: typeof route<Ctx>;
+  HttpError: typeof HttpError;
+  /** An answer with a status other than 200: `new kit.Reply(201, body)`. */
+  Reply: typeof Reply;
+  /** Return this from a handler that has written the response itself. */
+  HANDLED: typeof HANDLED;
+  requireUser(ctx: Ctx): UserRow;
+  requirePerson(ctx: Ctx): { id: string; guest: boolean };
+  workspaceOf(ctx: Ctx, id: string, least?: Role): { workspace: WorkspaceRow; role: Role; user: UserRow };
+  docOf(ctx: Ctx, id: string): { doc: DocRow; role: Role };
+  info(doc: DocRow, who: Identity): DocInfo;
+  text(body: Record<string, unknown>, key: string, max: number): string;
+  optionalText(body: Record<string, unknown>, key: string, max: number): string | undefined;
+  maxUploadBytes: number;
+}
+
+/** A part of the server that adds routes. */
+export type ApiExtension = (kit: ApiKit) => Route<Ctx>[];
+
+export interface Ctx {
   req: IncomingMessage;
   res: ServerResponse;
   who: Identity;
@@ -932,6 +961,25 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): (req: In
       return {};
     }),
   ];
+
+  // The routes of the parts built on the API.
+  const kit: ApiKit = {
+    store,
+    hub,
+    route: route<Ctx>,
+    HttpError,
+    Reply,
+    HANDLED,
+    requireUser,
+    requirePerson,
+    workspaceOf,
+    docOf,
+    info,
+    text,
+    optionalText,
+    maxUploadBytes: options.maxUploadBytes,
+  };
+  for (const extension of options.extensions ?? []) routes.push(...extension(kit));
 
   return async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');

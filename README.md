@@ -15,7 +15,7 @@ Evora is a standalone design tool that aims at the traditional Figma Design work
 
 - **Specification:** [EVORA_MASTER_SPEC.md](EVORA_MASTER_SPEC.md), the product brief the project is built against.
 - **Current state, limits and next steps:** [HANDOFF.md](HANDOFF.md).
-- **Architecture:** [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). **File format:** [DOCUMENT_SCHEMA.md](DOCUMENT_SCHEMA.md) (schema version 25, with a migration and a test for every version).
+- **Architecture:** [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). **File format:** [DOCUMENT_SCHEMA.md](DOCUMENT_SCHEMA.md) (schema version 26, with a migration and a test for every version).
 
 ## Status
 
@@ -29,10 +29,10 @@ Evora is a standalone design tool that aims at the traditional Figma Design work
 | 6 | Prototyping | Built and tested |
 | 7 | Export, developer handoff and Figma files | Built and tested |
 | 8 | Collaboration (free, unlimited) | Built and tested |
-| 9 | Ecosystem: plugins, version history, branching | Not started |
+| 9 | Ecosystem: version history, branching, plugins and widgets, community, file management | Built and tested |
 | 10 | Desktop apps and production release | Not started |
 
-Every change is checked by about a thousand unit tests (Vitest) and more than seventy browser acceptance tests (Playwright, in Microsoft Edge), including tests in which several people edit the same file at once. What each feature does not do yet is listed honestly in [HANDOFF.md](HANDOFF.md) under "Known limitations".
+Every change is checked by more than eleven hundred unit tests (Vitest) and more than seventy-five browser acceptance tests (Playwright, in Microsoft Edge), including tests in which several people edit the same file at once. What each feature does not do yet is listed honestly in [HANDOFF.md](HANDOFF.md) under "Known limitations".
 
 ## Features
 
@@ -72,6 +72,20 @@ Every change is checked by about a thousand unit tests (Vitest) and more than se
 - Real-time co-editing: every property of every layer is merged last-writer-wins with hybrid logical clocks, so everyone converges to the same document; edits made offline are kept and merged on reconnect; undo undoes only your own changes.
 - Live cursors with names, other people's selections, avatars and following someone's view.
 - Comments pinned to the canvas or to a layer, with replies, @mentions, notifications, resolve and reopen, and a Comments panel.
+
+### Version history and branching
+- Named versions and automatic ones, for files on your device and shared files alike; view any version read-only, rename it, restore it (one undo step), or delete it.
+- Compare two versions, or a version with the file as it is: side by side, overlaid with an opacity slider, and a list of the layers added, removed and changed.
+- Branches of shared files: update from main, merge into main with every conflict shown and resolved per layer, and roll a merge back.
+
+### Plugins and widgets
+- Plugins run in a sandbox and can do only what you allowed when installing them (read, write, export, a window, stored data); every change a plugin makes is one undo step. See [plugins/PLUGINS.md](plugins/PLUGINS.md) to write one; four examples are in [plugins/examples](plugins/examples).
+- A plugin manager (install from a `.evora-plugin` file, enable, disable, uninstall, a console, reload while developing) and a plugin directory on the server.
+- Widgets: interactive objects on the canvas, drawn by a plugin and shared live with everyone in the file.
+
+### Community and file management
+- Publish a file as a design file, template, UI kit, component library or icon library, with versions; browse, search, and duplicate what others published.
+- Projects, moving files, favourites, recents, search across all your files, sorting, grid and list views, and a trash that keeps deleted files for 30 days.
 
 ## Getting started
 
@@ -135,20 +149,19 @@ npm run build       # production build into dist/
 | `src/state` | The editor store (document, selection, per-person undo history) and the command table shared by menus and shortcuts. |
 | `src/persistence` | Local storage (IndexedDB), autosave, file import and export. |
 | `src/collab` | The collaboration contract (`protocol.ts`), the sync engine, the offline queue and the API client. |
-| `src/ui` | The React interface: file browser, editor chrome, panels, dialogs, collaboration screens. |
-| `server` | The collaboration server: HTTP API, WebSocket rooms, accounts, sharing, comments, Google sign-in. Node built-ins only. |
+| `src/plugins` | The plugin runtime: manifest checks, the sandbox, the `evora.*` API, widgets, the installed-plugin store. No React. |
+| `src/ui` | The React interface: file browser, editor chrome, panels, dialogs, collaboration, version history, plugins and community screens. |
+| `plugins` | The plugin developer guide (`PLUGINS.md`) and four example plugins. |
+| `server` | The collaboration server: HTTP API, WebSocket rooms, accounts, sharing, comments, Google sign-in, versions and branches, the plugin directory, the community library. Node built-ins only. |
 | `e2e` | Browser acceptance tests. |
 
 ## Roadmap
 
-Phases 9 and 10 of the specification, and what an outside review of the project put first:
+Version history, branching, and plugins and widgets (the first three items of an outside review of the project) were built in Phase 9. What comes next, Phase 10 of the specification and the rest of that review:
 
-1. **Version history and visual comparison:** named versions, automatic checkpoints, restore, side-by-side and overlay comparison, layer-level differences.
-2. **Branching and merging:** isolated branches, updating from main, merge review, conflict resolution and rollback.
-3. **Plugins and widgets:** a stable SDK, a sandbox, APIs, documentation, installation and a community directory.
-4. **Developer integrations:** a VS Code extension, component-to-code mapping, a public REST API, GitHub, Storybook and Jira.
-5. **Desktop apps:** Windows, macOS and Linux builds, signed installers, automatic updates and crash recovery.
-6. **Production hardening:** security review, performance benchmarks, large-document and multiplayer load tests, file migration testing.
+1. **Developer integrations:** a VS Code extension, component-to-code mapping, a public REST API, GitHub, Storybook and Jira.
+2. **Desktop apps:** Windows, macOS and Linux builds, signed installers, automatic updates and crash recovery.
+3. **Production hardening:** security review, performance benchmarks, large-document and multiplayer load tests, file migration testing.
 
 Also open: sections as a layer type of their own, text on a path, variable-width strokes, video in prototypes, audio and cursor chat, shared team fonts, library analytics, finer permission policies, and character-level merging of text edited by two people at once.
 

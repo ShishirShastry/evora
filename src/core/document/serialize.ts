@@ -363,6 +363,17 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     // A text style without one leaves it as it is set on the layer's own (it is optional in a style).
     return { ...file, schemaVersion: 25, document: { ...body, nodes: upgraded } };
   },
+  // Version 26 added widgets: a frame drawn by a widget plugin. No older frame is one.
+  25: (file) => {
+    const body = isObject(file.document) ? file.document : {};
+    const nodes = isObject(body.nodes) ? body.nodes : {};
+    const upgraded: Raw = {};
+    for (const id in nodes) {
+      const node = nodes[id];
+      upgraded[id] = isObject(node) && node.type === 'FRAME' ? { widget: null, ...node } : node;
+    }
+    return { ...file, schemaVersion: 26, document: { ...body, nodes: upgraded } };
+  },
 };
 
 /**

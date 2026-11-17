@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../collab/api';
+import type { DocInfo } from '../../collab/protocol';
+import { filesApi, filterFiles, forgetLocalFile, noteLocalOpened, setLocalFavorite, sortFiles } from '../../collab/files';
 import { AccountMenu } from '../collab/AccountMenu';
 import { HomeRail, homeViewHash, NewWorkspaceDialog, SharedPage, useWorkspaces, WorkspacePage, type HomeView } from '../collab/HomeCollab';
+import { PublishDialog, type PublishSource } from '../community/PublishDialog';
+import { QuickPage, TrashPage } from '../files/FilePages';
+import { FileTable, FileToolbar, Glyph, useFilesStore, useListPrefs, useLocalFileMarks } from '../files/parts';
 import { useAccount } from '../collab/hooks';
 import { NotificationsBell } from '../collab/NotificationsBell';
 import { FigError, FileFormatError, FILE_EXTENSION, LEGACY_FILE_EXTENSIONS } from '../../core';
@@ -84,7 +89,8 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
   const shown: HomeView = account ? view : { kind: 'local' };
   const workspace = shown.kind === 'workspace' ? workspaces?.find((candidate) => candidate.id === shown.id) : undefined;
   // A workspace one was added to after the list was read (followed from a notification, say) is not in it yet: the list is read again, once for each.
-  const missing = shown.kind === 'workspace' && workspaces !== null && !workspace ? shown.id : null;
+  const trashOf = shown.kind === 'trash' ? workspaces?.find((candidate) => candidate.id === shown.id) : undefined;
+  const missing = (shown.kind === 'workspace' || shown.kind === 'trash') && workspaces !== null && !workspace && !trashOf ? shown.id : null;
   const [rechecked, setRechecked] = useState<{ id: string; list: unknown } | null>(null);
   useEffect(() => {
     if (missing === null || rechecked?.id === missing) return;
@@ -99,6 +105,25 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
   const [deleting, setDeleting] = useState<FileSummary | null>(null);
   const [figReport, setFigReport] = useState<{ id: string; name: string; lines: string[] } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [publishing, setPublishing] = useState<PublishSource | null>(null);
+  const [renamingDialog, setRenamingDialog] = useState<FileSummary | null>(null);
+  const [search, setSearch] = useState('');
+  /** Signed out, the files on this device: all of them, the ones opened lately, or the favourites. */
+  const [localTab, setLocalTab] = useState<'all' | 'recents' | 'favorites'>('all');
+  const [prefs, setPrefs] = useListPrefs();
+  const marks = useLocalFileMarks();
+  const bump = useFilesStore((state) => state.bump);
+
+  /** Opens a file on this device, noting it among the recents. */
+  const openLocal = (id: string): void => {
+    noteLocalOpened(id);
+    onOpen(id);
+  };
+  /** Opens a shared file, noting it among the person's recents on the server. */
+  const openDoc = (doc: DocInfo): void => {
+    if (account) void filesApi.noteOpened(doc.id).catch(() => undefined);
+    onNavigate(`#/doc/${doc.id}`);
+  };
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -130,7 +155,7 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
   const create = (): Promise<void> =>
     attempt(async () => {
       const file = await createFile(storage);
-      onOpen(file.id);
+      openLocal(file.id);
     });
 
   // An Evora file or a Figma file, told apart by its name and its first bytes.
@@ -144,32 +169,34 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
         await refresh();
         // What the file had that could not be brought over is said before it is opened.
         if (notConverted.length > 0) setFigReport({ id, name: file.name, lines: notConverted });
-        else onOpen(id);
+        else openLocal(id);
         return;
       }
       const { id } = await importFileText(storage, new TextDecoder().decode(bytes));
-      onOpen(id);
+      openLocal(id);
     });
 
-  const openMenu = (file: FileSummary, x: number, y: number): void =>
-    setMenu({
-      x,
-      y,
-      items: [
-        { label: 'Open', onSelect: () => onOpen(file.id) },
-        { label: 'Rename', onSelect: () => setRenaming(file.id) },
-        {
-          label: 'Duplicate',
-          onSelect: () =>
-            void attempt(async () => {
-              await duplicateFile(storage, file.id);
-              await refresh();
-            }),
-        },
-        { type: 'separator' },
-        { label: 'Delete…', danger: true, onSelect: () => setDeleting(file) },
-      ],
-    });
+  const menuItems = (file: FileSummary): MenuItem[] => {
+    const favorite = marks.favorites.includes(file.id);
+    return [
+      { label: 'Open', onSelect: () => openLocal(file.id) },
+      { label: 'Rename', onSelect: () => setRenaming(file.id) },
+      {
+        label: 'Duplicate',
+        onSelect: () =>
+          void attempt(async () => {
+            await duplicateFile(storage, file.id);
+            await refresh();
+          }),
+      },
+      { label: favorite ? 'Remove from favorites' : 'Add to favorites', onSelect: () => setLocalFavorite(file.id, !favorite) },
+      { label: 'Publish to Community…', onSelect: () => setPublishing({ kind: 'local', fileId: file.id, name: file.name }) },
+      { type: 'separator' },
+      { label: 'Delete…', danger: true, onSelect: () => setDeleting(file) },
+    ];
+  };
+  const openMenu = (file: FileSummary, x: number, y: number): void => setMenu({ x, y, items: menuItems(file) });
+  const shownFiles = files === null ? null : sortFiles(filterFiles(files, prefs.filter), prefs.sort);
 
   const now = Date.now();
 
@@ -181,6 +208,26 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
           <Wordmark size={24} />
         </h1>
         <div className="flex-1" />
+        <label className="ev-input-shell hidden h-8 w-[220px] items-center gap-2 px-2.5 text-dim md:flex">
+          <Glyph name="search" size={14} />
+          <input
+            type="search"
+            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[12.5px] text-ink outline-none placeholder:text-faint"
+            aria-label="Search files"
+            placeholder="Search files"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setSearch('');
+            }}
+          />
+        </label>
+        {!account && (
+          <button type="button" className="ev-button" onClick={() => onNavigate('#/community')}>
+            <Glyph name="globe" size={14} />
+            Community
+          </button>
+        )}
         <button type="button" className="ev-button" onClick={() => void importFile()}>
           Import file…
         </button>
@@ -194,18 +241,42 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
 
       <div className="flex min-h-0 flex-1 gap-1.5">
       {account && (
-        <HomeRail view={shown} onView={(next) => onNavigate(homeViewHash(next))} workspaces={workspaces} error={workspacesError} onNewWorkspace={() => setNewWorkspace(true)} />
+        <HomeRail
+          view={shown}
+          onView={(next) => {
+            setSearch('');
+            onNavigate(homeViewHash(next));
+          }}
+          workspaces={workspaces}
+          error={workspacesError}
+          onNewWorkspace={() => setNewWorkspace(true)}
+          onCommunity={() => onNavigate('#/community')}
+        />
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1120px] px-4 pb-12 pt-7 sm:px-8">
+          {search.trim() && <QuickPage key={`search:${search.trim()}`} kind="search" query={search.trim()} storage={storage} files={filesApi} signedIn={account !== null} onOpenLocal={openLocal} onOpenDoc={openDoc} />}
+          {!search.trim() && (
+          <>
+          {(shown.kind === 'recents' || shown.kind === 'favorites') && (
+            <QuickPage key={shown.kind} kind={shown.kind} storage={storage} files={filesApi} signedIn={account !== null} onOpenLocal={openLocal} onOpenDoc={openDoc} />
+          )}
+          {shown.kind === 'trash' &&
+            (trashOf ? (
+              <TrashPage key={trashOf.id} files={filesApi} workspace={trashOf} onChanged={bump} />
+            ) : (
+              <p className="m-0 text-dim">{workspaces === null || !recheckDone ? 'Loading…' : 'This workspace is not one of yours, or it no longer exists.'}</p>
+            ))}
           {shown.kind === 'workspace' &&
             (workspace ? (
               <WorkspacePage
                 key={workspace.id}
                 api={api}
                 workspace={workspace}
+                projectId={shown.projectId}
+                onNavigate={onNavigate}
                 meId={account?.user.id ?? null}
-                onOpenDoc={(doc) => onNavigate(`#/doc/${doc.id}`)}
+                onOpenDoc={openDoc}
                 onChanged={reloadWorkspaces}
                 onGone={() => {
                   reloadWorkspaces();
@@ -215,8 +286,26 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
             ) : (
               <p className="m-0 text-dim">{workspaces === null || !recheckDone ? 'Loading…' : 'This workspace is not one of yours, or it no longer exists.'}</p>
             ))}
-          {shown.kind === 'shared' && <SharedPage api={api} onOpenDoc={(doc) => onNavigate(`#/doc/${doc.id}`)} />}
-          {shown.kind === 'local' && (
+          {shown.kind === 'shared' && <SharedPage api={api} onOpenDoc={openDoc} onNavigate={onNavigate} />}
+          {shown.kind === 'local' && !account && (
+            <div role="tablist" aria-label="Files on this device" className="ev-segmented mb-5 inline-flex">
+              {(
+                [
+                  ['all', 'All files'],
+                  ['recents', 'Recents'],
+                  ['favorites', 'Favorites'],
+                ] as const
+              ).map(([tab, label]) => (
+                <button key={tab} type="button" role="tab" aria-selected={localTab === tab} className="ev-segment !flex-none !px-3 text-[12px]" onClick={() => setLocalTab(tab)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {shown.kind === 'local' && !account && localTab !== 'all' && (
+            <QuickPage key={localTab} kind={localTab} storage={storage} files={filesApi} signedIn={false} onOpenLocal={openLocal} onOpenDoc={openDoc} />
+          )}
+          {shown.kind === 'local' && (account || localTab === 'all') && (
           <>
           <h2 className="m-0 mb-5 text-[18px] font-semibold tracking-[-0.015em] text-ink">Files on this device</h2>
           {error && (
@@ -245,9 +334,27 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
               </button>
             </div>
           )}
-          {files !== null && files.length > 0 && (
+          {files !== null && files.length > 0 && <FileToolbar prefs={prefs} onChange={setPrefs} />}
+          {shownFiles !== null && files !== null && files.length > 0 && shownFiles.length === 0 && <p className="m-0 text-dim">No files match “{prefs.filter}”.</p>}
+          {shownFiles !== null && shownFiles.length > 0 && prefs.view === 'list' && (
+            <FileTable
+              label="Files"
+              rows={shownFiles.map((file) => ({
+                id: file.id,
+                name: file.name,
+                location: 'This device',
+                updatedAt: file.updatedAt,
+                createdAt: file.createdAt,
+                favorite: marks.favorites.includes(file.id),
+                shared: false,
+                onOpen: () => openLocal(file.id),
+                menu: () => menuItems(file).map((item) => (item.type !== 'separator' && item.type !== 'submenu' && item.label === 'Rename' ? { ...item, onSelect: () => setRenamingDialog(file) } : item)),
+              }))}
+            />
+          )}
+          {shownFiles !== null && shownFiles.length > 0 && prefs.view === 'grid' && (
             <ul aria-label="Files" className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(212px,1fr))] gap-4 p-0">
-              {files.map((file) => (
+              {shownFiles.map((file) => (
                 <li
                   key={file.id}
                   className="group relative flex flex-col rounded-[12px] bg-panel shadow-[var(--ev-shadow-panel)] transition-[translate,box-shadow] duration-150 ease-[var(--ev-ease)] hover:-translate-y-0.5 hover:shadow-[var(--ev-shadow-pop)]"
@@ -280,9 +387,17 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
                         type="button"
                         className="flex min-w-0 flex-1 cursor-pointer flex-col items-start justify-center gap-0.5 border-0 bg-transparent p-0 text-left after:absolute after:inset-0 after:rounded-[12px] after:transition-shadow after:duration-150 focus-visible:!outline-none focus-visible:after:shadow-[0_0_0_2px_var(--ev-ring)]"
                         aria-label={`Open ${file.name}`}
-                        onClick={() => onOpen(file.id)}
+                        onClick={() => openLocal(file.id)}
                       >
-                        <span className="max-w-full truncate text-[12.5px] font-medium text-ink">{file.name}</span>
+                        <span className="flex max-w-full items-center gap-1 truncate text-[12.5px] font-medium text-ink">
+                          {file.name}
+                          {marks.favorites.includes(file.id) && (
+                            <span className="flex-none text-[#ffc21a]" title="Favorite">
+                              <Glyph name="starFilled" size={11} />
+                              <span className="sr-only">(favorite)</span>
+                            </span>
+                          )}
+                        </span>
                         <span className="max-w-full truncate text-[11px] text-dim">
                           Edited {formatWhen(file.updatedAt, now)} · {file.layerCount} {file.layerCount === 1 ? 'layer' : 'layers'}
                         </span>
@@ -307,6 +422,8 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
           )}
           </>
           )}
+          </>
+          )}
         </div>
       </div>
       </div>
@@ -322,6 +439,24 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
         />
       )}
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="File menu" onClose={() => setMenu(null)} />}
+      {publishing && <PublishDialog source={publishing} storage={storage} onClose={() => setPublishing(null)} onNavigate={onNavigate} />}
+      {renamingDialog && (
+        <Dialog title="Rename file" onClose={() => setRenamingDialog(null)} width={380}>
+          <TextEdit
+            label="File name"
+            value={renamingDialog.name}
+            onCancel={() => setRenamingDialog(null)}
+            onCommit={(name) => {
+              const target = renamingDialog;
+              setRenamingDialog(null);
+              void attempt(async () => {
+                await renameFile(storage, target.id, name);
+                await refresh();
+              });
+            }}
+          />
+        </Dialog>
+      )}
       {figReport && (
         <Dialog
           title="Figma file opened"
@@ -335,7 +470,7 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
               onClick={() => {
                 const { id } = figReport;
                 setFigReport(null);
-                onOpen(id);
+                openLocal(id);
               }}
             >
               Open the file
@@ -374,6 +509,7 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
                   void attempt(async () => {
                     await deleteFile(storage, target.id);
                     clearSession(target.id);
+                    forgetLocalFile(target.id);
                     await refresh();
                   });
                 }}

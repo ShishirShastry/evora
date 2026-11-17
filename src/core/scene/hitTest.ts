@@ -184,8 +184,8 @@ function defaultTargetIndex(doc: Document, chain: readonly NodeId[], selection: 
   const first = chain[0] as NodeId;
   let index = 0;
   const top = doc.nodes[first];
-  // A frame on the page is passed through to what is in it; an instance is one thing, picked as a whole.
-  if (isFrame(top) && top.kind !== 'INSTANCE') {
+  // A frame on the page is passed through to what is in it; an instance is one thing, picked as a whole, and so is a widget.
+  if (isFrame(top) && top.kind !== 'INSTANCE' && !top.widget) {
     if (chain.length > 1) index = 1;
     else if (getChildIds(doc, first).length > 0) index = -1;
   }
@@ -204,7 +204,19 @@ function defaultTargetIndex(doc: Document, chain: readonly NodeId[], selection: 
       break;
     }
   }
-  return index;
+  // A widget is one thing: what is inside it is drawn by its plugin, and a click there is for the widget.
+  const widget = chain.findIndex((id) => isFrame(doc.nodes[id]) && (doc.nodes[id] as { widget: unknown }).widget != null);
+  return widget >= 0 && index > widget ? widget : index;
+}
+
+/** The widget frame a layer is in (or is), if any: the outermost one. */
+export function widgetFrameOf(doc: Document, id: NodeId): NodeId | null {
+  let found: NodeId | null = null;
+  for (const candidate of [id, ...getAncestorIds(doc, id)]) {
+    const node = doc.nodes[candidate];
+    if (isFrame(node) && node.widget) found = candidate;
+  }
+  return found;
 }
 
 export interface TargetOptions {
@@ -247,7 +259,9 @@ export function deeperTargetAt(
   if (!hit) return null;
   const chain = chainTo(doc, hit);
   const index = defaultTargetIndex(doc, chain, selection);
-  return chain[Math.min(index + 1, chain.length - 1)] ?? null;
+  // A double-click does not go into a widget either.
+  const widget = chain.findIndex((id) => isFrame(doc.nodes[id]) && (doc.nodes[id] as { widget: unknown }).widget != null);
+  return chain[widget >= 0 ? widget : Math.min(index + 1, chain.length - 1)] ?? null;
 }
 
 function boxIntersectsRect(doc: Document, id: NodeId, rect: Rect): boolean {
@@ -268,7 +282,8 @@ export function nodesInRect(doc: Document, pageId: NodeId, rect: Rect): NodeId[]
   for (const id of getChildIds(doc, pageId)) {
     if (!selectable(id)) continue;
     const children = getChildIds(doc, id);
-    if (isFrame(doc.nodes[id]) && children.length > 0) {
+    const frame = doc.nodes[id];
+    if (isFrame(frame) && !frame.widget && children.length > 0) {
       if (rectContainsRect(rect, getWorldBounds(doc, id))) out.push(id);
       else for (const childId of children) if (selectable(childId) && boxIntersectsRect(doc, childId, rect)) out.push(childId);
     } else if (boxIntersectsRect(doc, id, rect)) out.push(id);
@@ -310,7 +325,7 @@ export function containerAt(
       const id = children[i] as NodeId;
       const node = doc.nodes[id];
       // What is in an instance is its component's: nothing is put into one.
-      if (!isFrame(node) || node.kind === 'INSTANCE' || !node.visible || node.locked || exclude.has(id)) continue;
+      if (!isFrame(node) || node.kind === 'INSTANCE' || node.widget || !node.visible || node.locked || exclude.has(id)) continue;
       const local = applyToPoint(invert(getWorldMatrix(doc, id)), point);
       if (!inBox(local, node.width, node.height, 0)) continue;
       return search(id) ?? id;

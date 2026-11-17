@@ -1,3 +1,5 @@
+import { menuItems as pluginMenuItems } from '../plugins/menu';
+import { menuItems as versionMenuItems } from '../versions/menu';
 import { COMMANDS, getCommand, runCommand, type Command, type CommandEnv, type CommandGroup } from '../../state/commands';
 import type { EditorState } from '../../state/editorStore';
 import type { MenuItem } from '../components/Menu';
@@ -166,12 +168,19 @@ export function mainMenu(env: CommandEnv, state: EditorState, extra: { renameFil
   const build = (ids: string[]): MenuItem[] => ids.map((id) => (id === '-' ? separator : commandItem(id, env, state)));
   const file = build(MENU_ORDER.File);
   file.splice(1, 0, { label: 'Rename file…', onSelect: extra.renameFile });
+  // Phase 9's parts add their own submenus: version history, and plugins.
+  const phase9: MenuItem[] = [];
+  const history = versionMenuItems(env, state);
+  if (history.length > 0) phase9.push({ type: 'submenu', label: 'Version history', items: history });
+  const plugins = pluginMenuItems(env, state);
+  if (plugins.length > 0) phase9.push({ type: 'submenu', label: 'Plugins', items: plugins });
   return [
     { type: 'submenu', label: 'File', items: file },
     { type: 'submenu', label: 'Edit', items: build(MENU_ORDER.Edit) },
     { type: 'submenu', label: 'View', items: build(MENU_ORDER.View) },
     { type: 'submenu', label: 'Object', items: build(MENU_ORDER.Object) },
     { type: 'submenu', label: 'Arrange', items: build(MENU_ORDER.Arrange) },
+    ...phase9,
     { type: 'submenu', label: 'Help', items: build(MENU_ORDER.Help) },
   ];
 }

@@ -3,6 +3,9 @@
  * connection at /ws, and, when asked, the built app itself. `startServer` is
  * used by `main.ts` and by the tests, which start it in the same process.
  */
+import * as community from './community.ts';
+import * as plugins from './plugins.ts';
+import * as versions from './versions.ts';
 import { createServer, type Server } from 'node:http';
 import type { Socket } from 'node:net';
 import { readFileSync } from 'node:fs';
@@ -58,7 +61,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const maxMessageBytes = options.maxMessageBytes ?? 50 * MB;
   const store = new Store(options.dataDir);
   const hub = new Hub(store, { heartbeatMs: options.heartbeatMs ?? 15_000 });
+  // The parts built on the API: their tables, then their routes.
+  for (const part of [versions, plugins, community]) part.setup(store);
   const api = createApi(store, hub, {
+    extensions: [versions.extension, plugins.extension, community.extension],
     version: packageVersion(),
     maxJsonBytes: 2 * MB,
     maxUploadBytes: maxMessageBytes,

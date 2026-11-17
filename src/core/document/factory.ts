@@ -222,7 +222,7 @@ export function createLayer(
   let node: LayerNode;
   switch (type) {
     case 'FRAME':
-      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, overflow: 'NONE', overlayPosition: 'CENTER', overlayCloseOutside: true, overlayBackground: null, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], kind: 'FRAME', description: '', componentId: null, overrides: {}, componentProps: [], variantProps: {}, propValues: {}, ...NO_AUTO_LAYOUT };
+      node = { ...base, type, fills: [solidPaint(WHITE)], clipsContent: true, overflow: 'NONE', overlayPosition: 'CENTER', overlayCloseOutside: true, overlayBackground: null, cornerRadius: 0, cornerRadii: null, layoutGrids: [], guides: [], kind: 'FRAME', description: '', componentId: null, overrides: {}, componentProps: [], variantProps: {}, propValues: {}, widget: null, ...NO_AUTO_LAYOUT };
       break;
     case 'GROUP':
       node = { ...base, type, fills: [] };

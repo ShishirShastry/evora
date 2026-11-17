@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { DocumentStorage } from '../persistence/storage';
 import { GoogleReturnScreen, InviteScreen } from './collab/Screens';
 import type { HomeView } from './collab/HomeCollab';
+import { CommunityScreen } from './community/CommunityScreen';
 import { EditorScreen } from './editor/EditorScreen';
 import { HomeScreen } from './home/HomeScreen';
 import { PrototypeScreen } from './prototype/PrototypeScreen';
@@ -12,6 +13,7 @@ type Route =
   | { screen: 'doc'; id: string; threadId?: string }
   | { screen: 'invite'; token: string }
   | { screen: 'google'; query: string }
+  | { screen: 'community'; id: string | null }
   | { screen: 'prototype'; id: string; startId?: string };
 
 /**
@@ -25,6 +27,11 @@ type Route =
  * `#/workspace/<id>` and `#/shared` are the file browser showing a
  * workspace's files or the files shared with you. `#/auth/google?ticket=…`
  * (or `?error=…`) is where signing in with Google comes back to.
+ *
+ * Phase 9: `#/community` is the Community and `#/community/<id>` one of its
+ * resources; `#/recents` and `#/favorites` are the file browser showing
+ * those; `#/workspace/<id>/project/<project>` one project's files, and
+ * `#/workspace/<id>/trash` a workspace's trash.
  */
 export function parseRoute(hash: string): Route {
   const match = /^#\/file\/([0-9A-Za-z]+)$/.exec(hash);
@@ -39,7 +46,15 @@ export function parseRoute(hash: string): Route {
   if (google) return { screen: 'google', query: google[1] ?? '' };
   const workspace = /^#\/workspace\/([0-9A-Za-z_-]+)$/.exec(hash);
   if (workspace) return { screen: 'home', view: { kind: 'workspace', id: workspace[1] as string } };
+  const project = /^#\/workspace\/([0-9A-Za-z_-]+)\/project\/([0-9A-Za-z_-]+)$/.exec(hash);
+  if (project) return { screen: 'home', view: { kind: 'workspace', id: project[1] as string, projectId: project[2] as string } };
+  const trash = /^#\/workspace\/([0-9A-Za-z_-]+)\/trash$/.exec(hash);
+  if (trash) return { screen: 'home', view: { kind: 'trash', id: trash[1] as string } };
+  const community = /^#\/community(?:\/([0-9A-Za-z_-]+))?$/.exec(hash);
+  if (community) return { screen: 'community', id: community[1] ?? null };
   if (hash === '#/shared') return { screen: 'home', view: { kind: 'shared' } };
+  if (hash === '#/recents') return { screen: 'home', view: { kind: 'recents' } };
+  if (hash === '#/favorites') return { screen: 'home', view: { kind: 'favorites' } };
   return { screen: 'home', view: { kind: 'local' } };
 }
 
@@ -74,6 +89,9 @@ export function App({ storage }: { storage: DocumentStorage }) {
       setRoute(parseRoute(hash));
     };
     return <GoogleReturnScreen key={route.query} query={route.query} onDone={replace} />;
+  }
+  if (route.screen === 'community') {
+    return <CommunityScreen storage={storage} resourceId={route.id} onNavigate={go} />;
   }
   if (route.screen === 'invite') {
     return <InviteScreen key={route.token} token={route.token} onAccepted={(workspace) => go(`#/workspace/${workspace.id}`)} onHome={() => go('#/')} />;

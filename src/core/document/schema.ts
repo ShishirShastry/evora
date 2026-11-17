@@ -1,5 +1,5 @@
 /**
- * Evora document schema, version 25 (adds space between the paragraphs of text, and prototype triggers for the pointer leaving a layer and being let go over it; version 24: a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * Evora document schema, version 26 (adds widgets: a frame can be a widget, whose layers a widget plugin draws from its state; version 25 added space between the paragraphs of text, and prototype triggers for the pointer leaving a layer and being let go over it; version 24: a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 25;
+export const CURRENT_SCHEMA_VERSION = 26;
 export const FILE_FORMAT = 'evora';
 export const FILE_EXTENSION = '.evora';
 /**
@@ -814,6 +814,33 @@ export interface FrameNode extends LayerBase {
   paddingBottom: number;
   /** Lays the children out from the top of the stack to the bottom, instead of from the bottom to the top. */
   itemsReversed: boolean;
+  /**
+   * A widget (schema 26): this frame is drawn by a widget plugin from the
+   * widget's state, and its children are the layers the plugin's render made
+   * from it. Null for every frame that is not a widget.
+   */
+  widget: WidgetData | null;
+}
+
+/** A JSON value: what a widget's state may hold. */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+/** A frame that is a widget: which plugin and widget draw it, the widget's state, and which of its layers run which click handler. */
+export interface WidgetData {
+  /** The plugin's ID, from its manifest. */
+  pluginId: string;
+  /** Which of the plugin's widgets this is. */
+  widgetId: string;
+  /** The widget's state, as the plugin's handlers left it. */
+  state: JsonValue;
+  /** Counts up with every change of state. */
+  version: number;
+  /**
+   * Click handlers by the path of the layer they are on: child indices from
+   * the widget frame down, joined with "." ("0.1" is the second child of the
+   * first child; "" is the widget frame itself). Paths, not IDs, so that a copy of the widget works too.
+   */
+  handlers: Readonly<Record<string, string>>;
 }
 
 /**
@@ -1133,6 +1160,7 @@ export type LayerPatch = Partial<Omit<LayerBase, 'id' | 'type'>> & {
   paddingTop?: number;
   paddingBottom?: number;
   itemsReversed?: boolean;
+  widget?: WidgetData | null;
   pointCount?: number;
   innerRadius?: number;
   network?: VectorNetwork;

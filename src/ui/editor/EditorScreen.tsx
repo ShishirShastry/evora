@@ -1,3 +1,5 @@
+import { PluginsMount } from '../plugins/PluginsMount';
+import { VersionsMount } from '../versions/VersionsMount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
 import { currentAuth } from '../../collab/account';
@@ -664,6 +666,9 @@ function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) 
           <RightSidebar />
         </div>
       </div>
+      {/* Phase 9: version history and plugins put their panels and dialogs here. */}
+      <VersionsMount />
+      <PluginsMount />
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {librariesOpen && <LibrariesDialog onClose={() => setLibrariesOpen(false)} />}
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}

@@ -1,0 +1,15 @@
+{
+  "id": "org.evora.vote-counter",
+  "name": "Vote counter",
+  "version": "1.0.0",
+  "description": "Widgets for the canvas: a counter with − and + buttons, and an upvote note. Everyone on a shared file sees the same count.",
+  "author": "Evora",
+  "kind": "widget",
+  "api": 1,
+  "permissions": [],
+  "widgets": [
+    { "id": "counter", "name": "Counter" },
+    { "id": "upvote", "name": "Upvote" }
+  ],
+  "main": "main.js"
+}

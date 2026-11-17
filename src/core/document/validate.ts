@@ -79,6 +79,8 @@ import {
   type TextStyleRange,
   type VectorNetwork,
   type VectorSegment,
+  type JsonValue,
+  type WidgetData,
 } from './schema';
 
 type Raw = Record<string, unknown>;
@@ -613,6 +615,59 @@ function cornerRadii(value: unknown): CornerRadii | null {
 
 const STROKE_ALIGNS: readonly StrokeAlign[] = ['INSIDE', 'CENTER', 'OUTSIDE'];
 
+/** The largest widget state kept, as JSON text: a widget's state is for its settings and counts, not for content. */
+export const MAX_WIDGET_STATE_LENGTH = 100_000;
+
+/** A copy of a JSON value, or undefined when it is not one (a function, a cycle, a number that is not finite) or is too deep. */
+export function jsonValue(value: unknown, depth = 0): JsonValue | undefined {
+  if (depth > 32) return undefined;
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (Array.isArray(value)) {
+    const out: JsonValue[] = [];
+    for (const item of value) {
+      const copy = jsonValue(item, depth + 1);
+      if (copy === undefined) return undefined;
+      out.push(copy);
+    }
+    return out;
+  }
+  if (isObject(value)) {
+    const out: { [key: string]: JsonValue } = {};
+    for (const key in value) {
+      const copy = jsonValue(value[key], depth + 1);
+      if (copy === undefined) return undefined;
+      out[key] = copy;
+    }
+    return out;
+  }
+  return undefined;
+}
+
+/** A frame's widget (schema 26): it needs a plugin and a widget; a state that is not JSON, or too large, is left empty. */
+function widgetData(value: unknown): WidgetData | null {
+  if (!isObject(value) || typeof value.pluginId !== 'string' || !value.pluginId || typeof value.widgetId !== 'string' || !value.widgetId) return null;
+  let state = jsonValue(value.state);
+  if (state === undefined || JSON.stringify(state).length > MAX_WIDGET_STATE_LENGTH) state = null;
+  const handlers: Record<string, string> = {};
+  if (isObject(value.handlers)) {
+    for (const path in value.handlers) {
+      const name = value.handlers[path];
+      if (/^(\d+(\.\d+)*)?$/.test(path) && typeof name === 'string' && name) handlers[path] = name;
+    }
+  }
+  return { pluginId: value.pluginId, widgetId: value.widgetId, state, version: Math.max(0, Math.round(finite(value.version, 0, 0, Number.MAX_SAFE_INTEGER))), handlers };
+}
+
+/**
+ * Rebuilds one node from untrusted data (a plugin's change, say), the way
+ * opening a file does: every valid field is kept, the rest defaulted or
+ * clamped. Null when it is of no known type.
+ */
+export function repairNode(id: NodeId, raw: unknown): DesignNode | null {
+  return isObject(raw) ? normalizeNode(id, raw) : null;
+}
+
 /** Rebuilds a node from raw data, keeping every valid field and defaulting or clamping the rest. */
 function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
   const type = raw.type;
@@ -721,6 +776,7 @@ function normalizeNode(id: NodeId, raw: Raw): DesignNode | null {
     layer.paddingTop = finite(raw.paddingTop, 0, 0, 100000);
     layer.paddingBottom = finite(raw.paddingBottom, 0, 0, 100000);
     layer.itemsReversed = raw.itemsReversed === true;
+    layer.widget = widgetData(raw.widget);
   } else if (layer.type === 'RECTANGLE') {
     layer.cornerRadius = finite(raw.cornerRadius, 0, 0);
     layer.cornerRadii = cornerRadii(raw.cornerRadii);

@@ -1,0 +1,32 @@
+{
+  "format": "evora-plugin",
+  "formatVersion": 1,
+  "manifest": {
+    "id": "org.evora.tidy-up",
+    "name": "Tidy up",
+    "version": "1.0.0",
+    "description": "Arranges the selected layers in a neat grid, or puts their positions and sizes on an 8 px grid. No window: choose a command and it is done.",
+    "author": "Evora",
+    "kind": "plugin",
+    "api": 1,
+    "permissions": [
+      "read",
+      "write"
+    ],
+    "commands": [
+      {
+        "id": "grid",
+        "name": "Arrange in a grid"
+      },
+      {
+        "id": "snap",
+        "name": "Snap to the 8 px grid"
+      }
+    ],
+    "widgets": [],
+    "main": "main.js",
+    "ui": null
+  },
+  "code": "// Tidy up: an example plugin without a window. It runs, changes the file as\n// one undo step, says what it did, and closes.\n\nconst GRID = 8;\nconst GAP = 16;\nconst layers = await evora.getSelection();\n\nif (layers.length === 0) {\n  evora.closePlugin('Select some layers to tidy up first.');\n  return;\n}\n\nconst snap = (value) => Math.round(value / GRID) * GRID;\nconst plural = (count) => `${count} layer${count === 1 ? '' : 's'}`;\n\nif (evora.command === 'snap') {\n  await evora.batch(async () => {\n    for (const layer of layers) {\n      await evora.setProperties(layer.id, {\n        x: snap(layer.x),\n        y: snap(layer.y),\n        width: Math.max(GRID, snap(layer.width)),\n        height: Math.max(GRID, snap(layer.height)),\n      });\n    }\n  });\n  evora.closePlugin(`Snapped ${plural(layers.length)} to the ${GRID} px grid.`);\n} else {\n  // Reading order: top to bottom, then left to right.\n  const ordered = [...layers].sort((a, b) => a.y - b.y || a.x - b.x);\n  const columns = Math.ceil(Math.sqrt(ordered.length));\n  const cell = {\n    width: Math.max(...ordered.map((layer) => layer.width)),\n    height: Math.max(...ordered.map((layer) => layer.height)),\n  };\n  const left = Math.min(...ordered.map((layer) => layer.x));\n  const top = Math.min(...ordered.map((layer) => layer.y));\n  await evora.batch(async () => {\n    for (let i = 0; i < ordered.length; i++) {\n      await evora.setProperties(ordered[i].id, {\n        x: left + (i % columns) * (cell.width + GAP),\n        y: top + Math.floor(i / columns) * (cell.height + GAP),\n      });\n    }\n  });\n  evora.closePlugin(`Arranged ${plural(ordered.length)} in ${columns} column${columns === 1 ? '' : 's'}.`);\n}\n",
+  "ui": null
+}

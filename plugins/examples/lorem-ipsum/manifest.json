@@ -1,0 +1,15 @@
+{
+  "id": "org.evora.lorem-ipsum",
+  "name": "Lorem ipsum",
+  "version": "1.0.0",
+  "description": "Fills the selected text layers with placeholder text of about the same length, or adds a paragraph of it.",
+  "author": "Evora",
+  "kind": "plugin",
+  "api": 1,
+  "permissions": ["read", "write", "storage"],
+  "commands": [
+    { "id": "fill", "name": "Fill selected text" },
+    { "id": "paragraph", "name": "Add a paragraph" }
+  ],
+  "main": "main.js"
+}

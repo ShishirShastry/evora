@@ -1,0 +1,15 @@
+{
+  "id": "org.evora.tidy-up",
+  "name": "Tidy up",
+  "version": "1.0.0",
+  "description": "Arranges the selected layers in a neat grid, or puts their positions and sizes on an 8 px grid. No window: choose a command and it is done.",
+  "author": "Evora",
+  "kind": "plugin",
+  "api": 1,
+  "permissions": ["read", "write"],
+  "commands": [
+    { "id": "grid", "name": "Arrange in a grid" },
+    { "id": "snap", "name": "Snap to the 8 px grid" }
+  ],
+  "main": "main.js"
+}

@@ -1,6 +1,6 @@
 # Evora — Document Schema
 
-Current schema version: **25**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping), version 24 a stroke weight for each side of a box, links in prototypes and Auto Layout rows aligned on the baseline of their text (all needed to open Figma files faithfully), and version 25 space between the paragraphs of a text and the prototype triggers "mouse leave" and "mouse up". This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
+Current schema version: **26**. Version 1 was Phase 1. Phase 2 so far: version 2 added the `GROUP` layer type, version 3 `TEXT`, version 4 gradient paints, stroke caps / joins / dashes, per-corner radii, effects and blend modes, version 5 image paints with the document's asset table, version 6 constraints and layout grids, and version 7 ruler guides on pages. Phase 3: version 8 adds the `VECTOR` layer type, and version 9 arcs on ellipses and arrowheads on lines and vectors. Version 10 adds masks (a Phase 2 item finished later), version 11 boolean groups, version 12 adjustments on image paints version 13 justified text, lists and styles on parts of a text layer, and version 14 mirrored text and image fills and guides on frames (Phase 2 items finished later). Phase 4: version 15 adds Auto Layout (frames that lay out their children, and how each layer is sized and placed in one), version 16 the alignment that stretches children across a layout, and version 17 columns that wrap as rows do. Phase 5: version 18 adds components and instances, version 19 component sets, variants and component properties, version 20 styles and variables with modes, and version 21 libraries. Phase 6: version 22 adds prototyping (interactions, flows, scrolling and overlays). Phase 7: version 23 adds export settings and what developers are handed (status, notes, links, code mapping), version 24 a stroke weight for each side of a box, links in prototypes and Auto Layout rows aligned on the baseline of their text (all needed to open Figma files faithfully), and version 25 space between the paragraphs of a text and the prototype triggers "mouse leave" and "mouse up". Phase 9: version 26 adds widgets (a frame drawn and kept up to date by a widget plugin). This file is the contract between the editor, the native file format, the storage layer and, later, the collaboration server. Any change to it requires a version bump and a migration (spec §32).
 
 The TypeScript source of truth is `src/core/document/schema.ts`. If this document and the code disagree, that is a bug: fix both in the same commit.
 
@@ -225,6 +225,7 @@ interface FrameNode extends LayerBase {
   cornerRadii: [number, number, number, number] | null;   // version 4; see RectangleNode
   layoutGrids: LayoutGrid[]; // version 6
   guides: Guide[];           // version 14: guides of this frame, in its own space
+  widget: WidgetData | null; // version 26: the widget this frame is (§5.13); null for an ordinary frame
 
   // Version 18: components (see §5.8)
   kind: 'FRAME' | 'COMPONENT' | 'COMPONENT_SET' | 'INSTANCE';   // an ordinary frame, a component, a set of variants (version 19), or an instance
@@ -662,6 +663,26 @@ interface ExportSetting {       // every setting has every field; the format say
 
 **Handoff.** `devStatus`, `annotations`, `devResources` and `codeConnect` belong to the layer they are put on. They are not taken into the instances of a component (a note on a component is not a note on each of its instances). A link's address is `http`, `https` or `mailto` and nothing else. `codeConnect` is for a component or a component set; its `snippet` may name variant and component properties in braces (`{Type}`), which stand for the value an instance has. What the Inspect panel says about a layer, and the CSS, SwiftUI and Compose code it shows, are not stored: they are written from the layer when it is looked at (`src/core/dev`).
 
+### 5.13 Widgets (version 26)
+
+```ts
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+interface WidgetData {
+  pluginId: string;                     // the plugin's ID, from its manifest
+  widgetId: string;                     // which of the plugin's widgets this is
+  state: JsonValue;                     // the widget's state, as its handlers left it (at most 100,000 characters as JSON)
+  version: number;                      // integer ≥ 0, counts up with every change of state
+  handlers: Record<string, string>;     // click handler names by layer path: child indices from the widget frame, joined by "." ("" is the frame itself)
+}
+```
+
+**What a widget is.** A frame whose `widget` is set. Its children are ordinary layers (with Auto Layout), drawn by the plugin's `render(state)`; their IDs are fixed (`<frameId>~<path>`), so drawing the same state again changes nothing. A click on one of its layers with the Move tool runs the handler named for that layer's path in the plugin's sandbox; the new state and the redraw are one undo step, and on a shared file they reach everyone as any other change does. Handlers are found by path, not by ID, so a copy of a widget works too. On the canvas a widget is picked and moved as one object: clicks do not go inside it, a marquee does not take its children, and nothing can be dropped into it. Without its plugin installed a widget is shown as it was last drawn and does nothing when clicked.
+
+**Repair.** A widget without a `pluginId` and a `widgetId` becomes `null`; so does one whose state is not JSON or is too long. `version` is made a whole number ≥ 0. Handler entries with a path that is not child indices, or a name that is not text, are dropped.
+
+**Not in the document.** Installed plugins (IndexedDB `evora-plugins` on each device), the plugin directory (on the collaboration server), plugin settings and stored data, and versions of a file (IndexedDB `evora-versions` for local files, the server for shared ones; a version is a copy of the document's registers) are not part of the document and do not change the schema.
+
 ## 6. Coordinate system and transforms
 
 - The page is an unbounded plane. X grows to the right, Y grows downwards. Units are CSS pixels at 100% zoom.
@@ -713,7 +734,7 @@ Repair never silently discards user content except under rule 7, and every repai
 ## 8. Migrations
 
 ```ts
-const CURRENT_SCHEMA_VERSION = 25;
+const CURRENT_SCHEMA_VERSION = 26;
 const MIGRATIONS: Record<number, (file) => file> = {
   // 1 -> 2: adds the GROUP type. A version 1 file has no groups, so only the version number changes.
   1: (file) => ({ ...file, schemaVersion: 2 }),
@@ -775,6 +796,8 @@ const MIGRATIONS: Record<number, (file) => file> = {
   23: addStrokeSides,
   // 24 -> 25: every text layer gets paragraphSpacing 0. MOUSE_LEAVE and MOUSE_UP triggers are new; no older file has them.
   24: addParagraphSpacing,
+  // 25 -> 26: every frame gets widget null. No older frame is a widget.
+  25: addWidgets,
 };
 ```
 
@@ -804,6 +827,7 @@ const MIGRATIONS: Record<number, (file) => file> = {
 | 22 | 23 | `exportSettings`, `devStatus`, `annotations`, `devResources` and `codeConnect` on every layer; `exportSettings` on pages | `src/export.test.ts` ("opens a version 22 file, which has no export settings") |
 | 23 | 24 | `strokeSides` on every layer; the `OPEN_LINK` action; `BASELINE` among the alignments across a layout | `src/export.test.ts` ("opens a version 23 file, which has none") |
 | 24 | 25 | `paragraphSpacing` on text layers (optional in text styles); the `MOUSE_LEAVE` and `MOUSE_UP` triggers; keys with modifiers | `src/gaps-proto.test.ts` ("opens a version 24 file, whose text has no space between paragraphs") |
+| 25 | 26 | `widget` on frames | `src/plugins/widgets.test.ts` ("opens a version 25 file, whose frames are not widgets, and keeps it through saving and opening") |
 
 - `migrateFile(raw)` reads `schemaVersion`, applies `migrations[v]` repeatedly until the current version, then hands the result to validation.
 - A file whose `schemaVersion` is **greater** than the current version is refused with a message telling the user to update the application. It is never opened in a degraded mode, because saving it would destroy data the older build does not understand.

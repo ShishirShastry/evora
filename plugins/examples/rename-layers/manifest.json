@@ -1,0 +1,13 @@
+{
+  "id": "org.evora.rename-layers",
+  "name": "Rename layers",
+  "version": "1.0.0",
+  "description": "Renames the selected layers in one go: a new name with a running number, the old name kept in it, or a word found and replaced.",
+  "author": "Evora",
+  "kind": "plugin",
+  "api": 1,
+  "permissions": ["read", "write", "ui"],
+  "commands": [{ "id": "rename", "name": "Rename selected layers…" }],
+  "main": "main.js",
+  "ui": "ui.html"
+}

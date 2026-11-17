@@ -1,0 +1,29 @@
+{
+  "format": "evora-plugin",
+  "formatVersion": 1,
+  "manifest": {
+    "id": "org.evora.vote-counter",
+    "name": "Vote counter",
+    "version": "1.0.0",
+    "description": "Widgets for the canvas: a counter with − and + buttons, and an upvote note. Everyone on a shared file sees the same count.",
+    "author": "Evora",
+    "kind": "widget",
+    "api": 1,
+    "permissions": [],
+    "commands": [],
+    "widgets": [
+      {
+        "id": "counter",
+        "name": "Counter"
+      },
+      {
+        "id": "upvote",
+        "name": "Upvote"
+      }
+    ],
+    "main": "main.js",
+    "ui": null
+  },
+  "code": "// Vote counter: an example widget plugin. A widget draws itself from its\n// state (render) and changes its state when a part of it is clicked\n// (handlers). Evora turns what render returns into real layers.\n\nfunction button(label, name, onClick, background, color) {\n  return {\n    type: 'frame',\n    name,\n    direction: 'horizontal',\n    width: 32,\n    height: 32,\n    cornerRadius: 16,\n    fill: background,\n    align: 'center',\n    justify: 'center',\n    onClick,\n    children: [{ type: 'text', text: label, fontSize: 18, fontWeight: 600, fill: color }],\n  };\n}\n\nevora.widget.register('counter', {\n  initialState: { count: 0 },\n  render(state) {\n    return {\n      type: 'frame',\n      name: 'Counter',\n      direction: 'horizontal',\n      padding: { vertical: 8, horizontal: 10 },\n      spacing: 10,\n      align: 'center',\n      fill: '#ffffff',\n      stroke: '#d9d9de',\n      strokeWidth: 1,\n      cornerRadius: 14,\n      children: [\n        button('−', 'Take one away', 'decrement', '#f1f1f4', '#18181c'),\n        { type: 'text', name: 'Count', text: String(state.count), fontSize: 20, fontWeight: 600, width: 48, textAlign: 'center', fill: '#18181c' },\n        button('+', 'Add one', 'increment', '#0d99ff', '#ffffff'),\n      ],\n    };\n  },\n  handlers: {\n    increment: (state) => ({ ...state, count: state.count + 1 }),\n    decrement: (state) => ({ ...state, count: state.count - 1 }),\n  },\n});\n\nevora.widget.register('upvote', {\n  initialState: { votes: 0 },\n  render(state) {\n    return {\n      type: 'frame',\n      name: 'Upvote',\n      direction: 'vertical',\n      padding: 12,\n      spacing: 4,\n      align: 'center',\n      fill: '#fff4c2',\n      cornerRadius: 10,\n      onClick: 'vote',\n      children: [\n        { type: 'text', text: '▲', fontSize: 16, fill: '#8a6d00' },\n        { type: 'text', name: 'Votes', text: String(state.votes), fontSize: 24, fontWeight: 700, fill: '#3d3000' },\n        { type: 'text', text: state.votes === 1 ? 'vote' : 'votes', fontSize: 11, fill: '#8a6d00' },\n      ],\n    };\n  },\n  handlers: {\n    vote: (state) => ({ ...state, votes: state.votes + 1 }),\n  },\n});\n",
+  "ui": null
+}

@@ -1,0 +1,33 @@
+{
+  "format": "evora-plugin",
+  "formatVersion": 1,
+  "manifest": {
+    "id": "org.evora.lorem-ipsum",
+    "name": "Lorem ipsum",
+    "version": "1.0.0",
+    "description": "Fills the selected text layers with placeholder text of about the same length, or adds a paragraph of it.",
+    "author": "Evora",
+    "kind": "plugin",
+    "api": 1,
+    "permissions": [
+      "read",
+      "write",
+      "storage"
+    ],
+    "commands": [
+      {
+        "id": "fill",
+        "name": "Fill selected text"
+      },
+      {
+        "id": "paragraph",
+        "name": "Add a paragraph"
+      }
+    ],
+    "widgets": [],
+    "main": "main.js",
+    "ui": null
+  },
+  "code": "// Lorem ipsum: fills text with placeholder words. It remembers, in its own\n// storage, where in the words it got to, so each fill reads differently.\n\nconst WORDS = (\n  'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ' +\n  'ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat duis aute irure dolor in ' +\n  'reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur excepteur sint occaecat cupidatat non proident sunt in ' +\n  'culpa qui officia deserunt mollit anim id est laborum'\n).split(' ');\n\nlet offset = (await evora.clientStorage.getAsync('offset')) || 0;\n\n/** About `count` words of placeholder text, as sentences of up to nine words. */\nfunction lorem(count) {\n  const words = [];\n  for (let i = 0; i < Math.max(1, count); i++) words.push(WORDS[(offset + i) % WORDS.length]);\n  offset = (offset + count) % WORDS.length;\n  const sentences = [];\n  for (let i = 0; i < words.length; i += 9) {\n    const part = words.slice(i, i + 9).join(' ');\n    sentences.push(part[0].toUpperCase() + part.slice(1) + '.');\n  }\n  return sentences.join(' ');\n}\n\nconst selection = await evora.getSelection();\n\nif (evora.command === 'paragraph') {\n  const anchor = selection[0];\n  await evora.createText({\n    parentId: anchor ? anchor.parentId : undefined,\n    name: 'Lorem ipsum',\n    x: anchor ? anchor.x : 0,\n    y: anchor ? anchor.y + anchor.height + 24 : 0,\n    width: 320,\n    textAutoResize: 'HEIGHT',\n    characters: lorem(40),\n  });\n  await evora.clientStorage.setAsync('offset', offset);\n  evora.closePlugin('Added a paragraph of placeholder text.');\n} else {\n  const texts = selection.filter((layer) => layer.type === 'TEXT');\n  if (texts.length === 0) {\n    evora.closePlugin('Select one or more text layers to fill.');\n  } else {\n    await evora.batch(async () => {\n      for (const text of texts) {\n        const words = text.characters.trim() ? text.characters.trim().split(/\\s+/).length : 8;\n        await evora.setProperties(text.id, { characters: lorem(words) });\n      }\n    });\n    await evora.clientStorage.setAsync('offset', offset);\n    evora.closePlugin(`Filled ${texts.length} text layer${texts.length === 1 ? '' : 's'}.`);\n  }\n}\n",
+  "ui": null
+}

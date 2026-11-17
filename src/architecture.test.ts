@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
  *   engine, persistence   may import core (and each other's types)
  *   state       may import core, engine and persistence
  *   collab      may import core, persistence and state
+ *   plugins     may import core, state and collab (no React: the sandbox host is plain TypeScript)
  *   nothing     imports ui
  */
 const sources = import.meta.glob('./**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
@@ -42,7 +43,9 @@ const ALLOWED: Record<string, string[]> = {
   state: ['core', 'engine', 'persistence', 'state'],
   // Collaboration (Phase 8): the sync engine works on the document, the editor store and the device's storage.
   collab: ['core', 'persistence', 'state', 'collab'],
-  ui: ['core', 'engine', 'persistence', 'state', 'collab', 'ui'],
+  // Plugins and widgets (Phase 9): the sandbox host and the plugin API work on the document and the editor store.
+  plugins: ['core', 'state', 'collab', 'plugins'],
+  ui: ['core', 'engine', 'persistence', 'state', 'collab', 'plugins', 'ui'],
 };
 
 describe('module boundaries', () => {
@@ -81,9 +84,9 @@ describe('module boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps React out of the engines, persistence, state and collaboration', () => {
+  it('keeps React out of the engines, persistence, state, collaboration and plugins', () => {
     const violations: string[] = [];
-    for (const file of files.filter((path) => /^\.\/(engine|persistence|state|collab)\//.test(path))) {
+    for (const file of files.filter((path) => /^\.\/(engine|persistence|state|collab|plugins)\//.test(path))) {
       for (const specifier of importsOf(sources[file] as string)) {
         if (specifier === 'react' || specifier.startsWith('react-dom') || specifier === 'zustand') {
           violations.push(`${file} imports ${specifier}`);

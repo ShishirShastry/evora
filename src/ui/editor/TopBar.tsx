@@ -10,6 +10,8 @@ import { CommentToolButton, PresenceAvatars, ShareButton, useReadOnly, ViewOnlyB
 import { statusLabel, statusTone } from '../collab/session';
 import { useCommandEnv, useEditor, useEditorContext, useRunCommand } from './EditorContext';
 import { commandItem, mainMenu } from './menus';
+import { HistoryIcon } from '../versions/icons';
+import { useVersionsUi, versionsActions } from '../versions/state';
 
 /**
  * The editor's chrome around the canvas, laid out as Figma lays its out: the
@@ -83,6 +85,7 @@ export function FileHeader() {
   const tone = shared ? statusTone(liveStatus, pending) : saveStatus === 'error' ? 'bad' : saveStatus === 'saved' ? 'ok' : 'busy';
   const [popup, openBelow, closePopup] = usePopup();
   const menuButton = useRef<HTMLButtonElement>(null);
+  const historyOpen = useVersionsUi((state) => state.panelOpen);
 
   return (
     <header className="flex flex-none items-center gap-1.5 border-b border-line px-2 py-2">
@@ -152,6 +155,16 @@ export function FileHeader() {
           {shared ? statusLabel(liveStatus, pending) : SAVE_LABELS[saveStatus]}
         </span>
       </div>
+      <button
+        type="button"
+        className="ev-icon-button flex-none"
+        aria-label="Show version history"
+        aria-pressed={historyOpen}
+        title="Version history"
+        onClick={() => versionsActions.openPanel(!historyOpen)}
+      >
+        <HistoryIcon />
+      </button>
       {popup && <PopupMenu x={popup.x} y={popup.y} items={popup.items} label={popup.label} onClose={closePopup} />}
     </header>
   );

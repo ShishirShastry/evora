@@ -97,6 +97,16 @@ export interface PointerInput {
   detail: number;
 }
 
+/**
+ * Told of every click (a press let go without a drag) the Move tool gets on
+ * the canvas, with where it was on the page. Widgets (Phase 9) run their click
+ * handlers from here; the click has already done what it does to the selection.
+ */
+export type CanvasClickListener = (store: EditorStore, world: Point, input: PointerInput) => void;
+
+/** The listeners told of canvas clicks, for every editor. Each checks the store is one it serves. */
+export const canvasClickListeners = new Set<CanvasClickListener>();
+
 export interface WheelInput {
   x: number;
   y: number;
@@ -528,6 +538,7 @@ export class InteractionController {
         else if (action.kind === 'deselect') state.setSelection(state.selection.filter((id) => id !== action.id));
         else if (action.kind === 'clear') state.setSelection([]);
         else if (action.kind === 'edit-text') state.setEditingText(action.id);
+        if (action.kind !== 'edit-text') for (const listener of canvasClickListeners) listener(this.store, this.toWorld(e), e);
         break;
       }
       case 'move':
