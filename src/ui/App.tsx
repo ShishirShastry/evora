@@ -1,21 +1,42 @@
 import { useEffect, useState } from 'react';
 import type { DocumentStorage } from '../persistence/storage';
+import { InviteScreen } from './collab/Screens';
+import type { HomeView } from './collab/HomeCollab';
 import { EditorScreen } from './editor/EditorScreen';
 import { HomeScreen } from './home/HomeScreen';
 import { PrototypeScreen } from './prototype/PrototypeScreen';
 
-type Route = { screen: 'home' } | { screen: 'file'; id: string } | { screen: 'prototype'; id: string; startId?: string };
+type Route =
+  | { screen: 'home'; view: HomeView }
+  | { screen: 'file'; id: string }
+  | { screen: 'doc'; id: string; threadId?: string }
+  | { screen: 'invite'; token: string }
+  | { screen: 'prototype'; id: string; startId?: string };
 
 /**
  * `#/` is the file browser, `#/file/<id>` is the editor for one file, and
  * `#/proto/<id>` or `#/proto/<id>/<frame>` plays that file's prototype,
  * from a frame when one is named.
+ *
+ * Collaboration (Phase 8): `#/doc/<id>` opens a shared document from the
+ * collaboration server, `#/doc/<id>/comment/<thread>` opens it at a
+ * comment, `#/invite/<token>` is an invitation to a workspace, and
+ * `#/workspace/<id>` and `#/shared` are the file browser showing a
+ * workspace's files or the files shared with you.
  */
 export function parseRoute(hash: string): Route {
   const match = /^#\/file\/([0-9A-Za-z]+)$/.exec(hash);
   if (match) return { screen: 'file', id: match[1] as string };
   const prototype = /^#\/proto\/([0-9A-Za-z-]+)(?:\/([0-9A-Za-z]+))?$/.exec(hash);
-  return prototype ? { screen: 'prototype', id: prototype[1] as string, startId: prototype[2] } : { screen: 'home' };
+  if (prototype) return { screen: 'prototype', id: prototype[1] as string, startId: prototype[2] };
+  const doc = /^#\/doc\/([0-9A-Za-z_-]+)(?:\/comment\/([0-9A-Za-z_-]+))?$/.exec(hash);
+  if (doc) return { screen: 'doc', id: doc[1] as string, threadId: doc[2] };
+  const invite = /^#\/invite\/([0-9A-Za-z_-]+)$/.exec(hash);
+  if (invite) return { screen: 'invite', token: invite[1] as string };
+  const workspace = /^#\/workspace\/([0-9A-Za-z_-]+)$/.exec(hash);
+  if (workspace) return { screen: 'home', view: { kind: 'workspace', id: workspace[1] as string } };
+  if (hash === '#/shared') return { screen: 'home', view: { kind: 'shared' } };
+  return { screen: 'home', view: { kind: 'local' } };
 }
 
 export function App({ storage }: { storage: DocumentStorage }) {
@@ -38,5 +59,12 @@ export function App({ storage }: { storage: DocumentStorage }) {
   if (route.screen === 'file') {
     return <EditorScreen key={route.id} storage={storage} fileId={route.id} onExit={() => go('#/')} />;
   }
-  return <HomeScreen storage={storage} onOpen={(id) => go(`#/file/${id}`)} />;
+  if (route.screen === 'doc') {
+    // The thread is opened once; changing to another thread of the same document does not reload it.
+    return <EditorScreen key={`doc:${route.id}`} storage={storage} fileId={route.id} source="shared" threadId={route.threadId} onExit={() => go('#/')} />;
+  }
+  if (route.screen === 'invite') {
+    return <InviteScreen key={route.token} token={route.token} onAccepted={(workspace) => go(`#/workspace/${workspace.id}`)} onHome={() => go('#/')} />;
+  }
+  return <HomeScreen storage={storage} onOpen={(id) => go(`#/file/${id}`)} view={route.view} onNavigate={go} />;
 }

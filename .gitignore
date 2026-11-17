@@ -30,3 +30,5 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+# The collaboration server's data (accounts, shared files) when run locally.
+.evora-server/

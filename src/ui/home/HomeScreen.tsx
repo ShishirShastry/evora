@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
+import { api } from '../../collab/api';
+import { AccountMenu } from '../collab/AccountMenu';
+import { HomeRail, homeViewHash, NewWorkspaceDialog, SharedPage, useWorkspaces, WorkspacePage, type HomeView } from '../collab/HomeCollab';
+import { useAccount } from '../collab/hooks';
+import { NotificationsBell } from '../collab/NotificationsBell';
 import { FigError, FileFormatError, FILE_EXTENSION, LEGACY_FILE_EXTENSIONS } from '../../core';
 import { pickFile } from '../../persistence/diskIO';
 import { importFigBytes, looksLikeFig } from '../../persistence/fig';
@@ -14,6 +19,10 @@ import { PopupMenu, type MenuItem } from '../components/Menu';
 interface HomeScreenProps {
   storage: DocumentStorage;
   onOpen: (id: string) => void;
+  /** What is shown: the files on this device (the default), a workspace's shared files, or the files shared with you. */
+  view?: HomeView;
+  /** Goes to a place in the application, by its address (`#/doc/<id>`, `#/workspace/<id>`…). */
+  onNavigate?: (hash: string) => void;
 }
 
 /** The hues a file's thumbnail is lit with; one is chosen from the file's id, so it stays put when the file is renamed. */
@@ -63,8 +72,27 @@ function formatWhen(iso: string, now: number): string {
   return new Date(then).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-/** The file browser: every design file stored on this device, with create, open, rename, duplicate, import and delete. */
-export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
+/**
+ * The file browser: every design file stored on this device, with create, open, rename, duplicate, import and delete.
+ * Signed in, a rail beside it also leads to each workspace's shared files and to the files shared with you.
+ */
+export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNavigate = (hash) => void (window.location.hash = hash) }: HomeScreenProps) {
+  const account = useAccount();
+  const { workspaces, error: workspacesError, reload: reloadWorkspaces } = useWorkspaces(api, account !== null);
+  const [newWorkspace, setNewWorkspace] = useState(false);
+  // Signed out, only the files on this device are shown, whatever the address says.
+  const shown: HomeView = account ? view : { kind: 'local' };
+  const workspace = shown.kind === 'workspace' ? workspaces?.find((candidate) => candidate.id === shown.id) : undefined;
+  // A workspace one was added to after the list was read (followed from a notification, say) is not in it yet: the list is read again, once for each.
+  const missing = shown.kind === 'workspace' && workspaces !== null && !workspace ? shown.id : null;
+  const [rechecked, setRechecked] = useState<{ id: string; list: unknown } | null>(null);
+  useEffect(() => {
+    if (missing === null || rechecked?.id === missing) return;
+    setRechecked({ id: missing, list: workspaces });
+    reloadWorkspaces();
+  }, [missing, rechecked, workspaces, reloadWorkspaces]);
+  /** Whether the list read again since the workspace was found missing has arrived. */
+  const recheckDone = rechecked !== null && rechecked.id === missing && rechecked.list !== workspaces;
   const [files, setFiles] = useState<FileSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -160,10 +188,36 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
           <Icon name="plus" size={14} />
           New design file
         </button>
+        {account && <NotificationsBell onOpen={onNavigate} />}
+        <AccountMenu />
       </header>
 
+      <div className="flex min-h-0 flex-1 gap-1.5">
+      {account && (
+        <HomeRail view={shown} onView={(next) => onNavigate(homeViewHash(next))} workspaces={workspaces} error={workspacesError} onNewWorkspace={() => setNewWorkspace(true)} />
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1120px] px-4 pb-12 pt-7 sm:px-8">
+          {shown.kind === 'workspace' &&
+            (workspace ? (
+              <WorkspacePage
+                key={workspace.id}
+                api={api}
+                workspace={workspace}
+                meId={account?.user.id ?? null}
+                onOpenDoc={(doc) => onNavigate(`#/doc/${doc.id}`)}
+                onChanged={reloadWorkspaces}
+                onGone={() => {
+                  reloadWorkspaces();
+                  onNavigate('#/');
+                }}
+              />
+            ) : (
+              <p className="m-0 text-dim">{workspaces === null || !recheckDone ? 'Loading…' : 'This workspace is not one of yours, or it no longer exists.'}</p>
+            ))}
+          {shown.kind === 'shared' && <SharedPage api={api} onOpenDoc={(doc) => onNavigate(`#/doc/${doc.id}`)} />}
+          {shown.kind === 'local' && (
+          <>
           <h2 className="m-0 mb-5 text-[18px] font-semibold tracking-[-0.015em] text-ink">Files on this device</h2>
           {error && (
             <p role="alert" className="m-0 mb-4 rounded-[8px] bg-danger/10 px-3 py-2.5 leading-relaxed text-danger ring-1 ring-danger/30 ring-inset">
@@ -251,9 +305,22 @@ export function HomeScreen({ storage, onOpen }: HomeScreenProps) {
               ))}
             </ul>
           )}
+          </>
+          )}
         </div>
       </div>
+      </div>
 
+      {newWorkspace && (
+        <NewWorkspaceDialog
+          api={api}
+          onClose={() => setNewWorkspace(false)}
+          onCreated={(created) => {
+            reloadWorkspaces();
+            onNavigate(homeViewHash({ kind: 'workspace', id: created.id }));
+          }}
+        />
+      )}
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="File menu" onClose={() => setMenu(null)} />}
       {figReport && (
         <Dialog

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
+import { currentAuth } from '../../collab/account';
+import { api, ApiError, errorMessage } from '../../collab/api';
+import { cloudAssetLoader, loadSharedDocument, openLiveDocument } from '../../collab/live';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -21,6 +24,12 @@ import { exportFigBytes } from '../../persistence/fig';
 import { exportOne, svgOf } from '../../engine/export/export';
 import { loadLibrary } from '../../persistence/libraries';
 import { Logo } from '../components/Icon';
+import { CollabContext } from '../collab/CollabContext';
+import { goToThread } from '../collab/CommentsPanel';
+import { CollabDialogs, toggleCommentTool } from '../collab/EditorChrome';
+import { useAccount, useGuest } from '../collab/hooks';
+import { GuestPrompt } from '../collab/Screens';
+import { createCollabSession } from '../collab/session';
 import { PanelResizer } from '../components/PanelResizer';
 import { RightSidebar } from '../panels/RightSidebar';
 import { ComponentsPanel } from '../panels/ComponentSections';
@@ -34,8 +43,17 @@ import { FileHeader, ToolDock, ViewControls } from './TopBar';
 
 interface EditorScreenProps {
   storage: DocumentStorage;
+  /** The file on this device, or the shared document's ID on the collaboration server. */
   fileId: string;
   onExit: () => void;
+  /**
+   * Where the document comes from: this device (the default), or the
+   * collaboration server (`#/doc/<id>`), where it is edited live with
+   * others and is not saved into the files on this device.
+   */
+  source?: 'local' | 'shared';
+  /** For a shared document: a comment thread to open (from a notification). */
+  threadId?: string;
 }
 
 type LoadState =
@@ -44,8 +62,14 @@ type LoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; store: EditorStore; meta: FileMeta; repairs: string[] };
 
-/** Loads a file from storage and shows the editor for it. */
-export function EditorScreen({ storage, fileId, onExit }: EditorScreenProps) {
+/** Loads a file from storage, or a shared document from the collaboration server, and shows the editor for it. */
+export function EditorScreen({ storage, fileId, onExit, source = 'local', threadId }: EditorScreenProps) {
+  if (source === 'shared') return <SharedEditorScreen storage={storage} docId={fileId} threadId={threadId} onExit={onExit} />;
+  return <LocalEditorScreen storage={storage} fileId={fileId} onExit={onExit} />;
+}
+
+/** A file on this device. */
+function LocalEditorScreen({ storage, fileId, onExit }: { storage: DocumentStorage; fileId: string; onExit: () => void }) {
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
 
   useEffect(() => {
@@ -104,15 +128,92 @@ export function EditorScreen({ storage, fileId, onExit }: EditorScreenProps) {
   );
 }
 
+type SharedLoadState =
+  | { status: 'identify' }
+  | { status: 'loading' }
+  | { status: 'error'; message: string; denied: boolean }
+  | { status: 'ready'; store: EditorStore; seq: number };
+
+/**
+ * A shared document (`#/doc/<id>`): read from the collaboration server (or,
+ * offline, from what this device last held of it), then edited live. Someone
+ * with neither an account nor a guest name is first asked for a name.
+ */
+function SharedEditorScreen({ storage, docId, threadId, onExit }: { storage: DocumentStorage; docId: string; threadId?: string; onExit: () => void }) {
+  const account = useAccount();
+  const guest = useGuest();
+  const identity = account?.token ?? guest?.guestToken ?? null;
+  const [load, setLoad] = useState<SharedLoadState>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const [meta] = useState<FileMeta>(() => ({ createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
+
+  useEffect(() => {
+    if (identity === null) {
+      setLoad({ status: 'identify' });
+      return;
+    }
+    let cancelled = false;
+    setLoad({ status: 'loading' });
+    loadSharedDocument(docId, currentAuth())
+      .then(async ({ doc, seq }) => {
+        if (cancelled) return;
+        await loadFonts([...bundledFonts(), ...fontsUsedBy(doc)]);
+        if (cancelled) return;
+        resetTextMeasurements();
+        const store = createEditorStore(doc, loadSession(docId), { measurer: getBrowserMeasurer() ?? undefined, ...loadPreferences() });
+        setLoad({ status: 'ready', store, seq });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const status = error instanceof ApiError ? error.status : (error as { status?: unknown })?.status;
+        setLoad({ status: 'error', message: errorMessage(error), denied: status === 401 || status === 403 || status === 404 });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [docId, identity, attempt]);
+
+  if (load.status === 'identify') return <GuestPrompt onReady={() => setAttempt((count) => count + 1)} onBack={onExit} />;
+  if (load.status === 'ready') {
+    return <Editor key={docId} storage={storage} store={load.store} meta={meta} repairs={[]} onExit={onExit} shared={{ docId, seq: load.seq, threadId }} />;
+  }
+  return (
+    <main className="flex h-full flex-col items-center justify-center gap-4 text-center">
+      <Logo size={40} />
+      {load.status === 'loading' && <p className="m-0 text-dim">Opening shared file…</p>}
+      {load.status === 'error' && (
+        <div role="alert" className="flex max-w-md flex-col gap-1.5">
+          <p className="m-0 text-danger">{load.denied ? 'This file cannot be opened with your account.' : 'The shared file could not be opened.'}</p>
+          <p className="m-0 text-dim">{load.message}</p>
+          {load.denied && <p className="m-0 text-dim">Ask someone who can share it to invite you, or to open its link to anyone. Sharing is free.</p>}
+        </div>
+      )}
+      {load.status === 'error' && (
+        <div className="flex gap-2">
+          <button type="button" className="ev-button" onClick={() => setAttempt((count) => count + 1)}>
+            Try again
+          </button>
+          <button type="button" className="ev-button" onClick={onExit}>
+            Back to files
+          </button>
+        </div>
+      )}
+    </main>
+  );
+}
+
 interface EditorProps {
   storage: DocumentStorage;
   store: EditorStore;
   meta: FileMeta;
   repairs: string[];
   onExit: () => void;
+  /** Set for a shared document: its ID, the server's sequence number it was read at, and a thread to open. */
+  shared?: { docId: string; seq: number; threadId?: string };
 }
 
-function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
+function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) {
+  const sharedId = shared?.docId ?? null;
   const controller = useRef<InteractionController | null>(null);
   const saver = useRef<Autosaver | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -137,7 +238,45 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
   }, [store, storage]);
   const exit = useRef(onExit);
   exit.current = onExit;
-  const images = useMemo(() => new ImageCache((hash) => storage.loadAsset(hash)), [storage]);
+  // A shared document's images are on the collaboration server: those this device does not have are fetched, and kept by hash.
+  const images = useMemo(
+    () => new ImageCache(sharedId === null ? (hash) => storage.loadAsset(hash) : cloudAssetLoader({ docId: sharedId, auth: currentAuth(), storage })),
+    [storage, sharedId],
+  );
+
+  // What collaboration knows and does while this file is open: for a shared document, with the live connection.
+  const session = useMemo(() => createCollabSession({ docId: sharedId, api, editor: store }), [sharedId, store]);
+  const sharedSeq = shared?.seq ?? 0;
+  useEffect(() => {
+    if (sharedId === null) return;
+    // Given this device's storage, the connection sends the images added here and fetches those others add.
+    const live = openLiveDocument({ docId: sharedId, store, auth: currentAuth(), seq: sharedSeq, storage });
+    const detach = session.attach(live);
+    void session.refresh();
+    return () => {
+      detach();
+      live.close();
+    };
+  }, [sharedId, sharedSeq, store, session, storage]);
+  // Opened from a notification: once the comments are read, go to the one it is about.
+  const threadToOpen = useRef(shared?.threadId ?? null);
+  useEffect(() => {
+    if (threadToOpen.current === null) return;
+    const goWhenRead = (): boolean => {
+      const thread = threadToOpen.current ? session.store.getState().threads[threadToOpen.current] : undefined;
+      if (!thread || store.getState().canvasSize.width === 0) return false;
+      threadToOpen.current = null;
+      goToThread(store, session, thread);
+      return true;
+    };
+    if (goWhenRead()) return;
+    const stopThreads = session.store.subscribe(() => void goWhenRead());
+    const stopEditor = store.subscribe(() => void goWhenRead());
+    return () => {
+      stopThreads();
+      stopEditor();
+    };
+  }, [session, store]);
 
   const placeFiles = useCallback(
     async (files: readonly File[], at?: Point): Promise<void> => {
@@ -230,6 +369,13 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       },
       present: (startId) => {
         const state = store.getState();
+        if (sharedId !== null) {
+          setNotice({
+            title: 'Presenting is not available for shared files yet.',
+            lines: ['The prototype viewer plays files on this device. To present this design, save a copy to disk (File menu), import it, and present it from there.'],
+          });
+          return;
+        }
         // From the frame that is named or selected; otherwise from the first flow, or the first frame.
         const selected = state.selection.length === 1 ? state.selection[0] : undefined;
         const frames = prototypeFrames(state.doc, state.pageId);
@@ -241,17 +387,32 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
           window.location.hash = `#/proto/${state.doc.id}${start ? `/${start}` : ''}`;
         });
       },
+      // A shared document is kept on the collaboration server as it changes; there is nothing to save here.
       saveNow: () => void saver.current?.flush(),
+      share: () => session.openShare(),
+      commentTool: () => toggleCommentTool(session),
       saveAs: () => setSaveAsOpen(true),
       placeImage: () => {
         void pickImageFiles().then((files) => (files.length > 0 ? placeFiles(files) : undefined));
       },
       goHome: () => {
+        if (sharedId !== null) {
+          // Back to the workspace the shared document is in, when it is one of yours; otherwise to what is shared with you.
+          const workspaceId = session.store.getState().info?.workspaceId;
+          void api
+            .listWorkspaces()
+            .then((list) => (list.some((workspace) => workspace.id === workspaceId) ? `#/workspace/${workspaceId}` : '#/shared'))
+            .catch(() => '#/')
+            .then((hash) => {
+              window.location.hash = hash;
+            });
+          return;
+        }
         const pending = saver.current?.flush() ?? Promise.resolve();
         void pending.then(() => exit.current());
       },
     }),
-    [store, meta, storage, placeFiles, images],
+    [store, meta, storage, placeFiles, images, session, sharedId],
   );
 
   const context = useMemo<EditorContextValue>(
@@ -259,11 +420,11 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
     [store, app, storage, images, placeFiles, pickImage],
   );
 
-  // Autosave, and remembering the view, for as long as the file is open.
+  // Autosave (for a file on this device; a shared document is not saved into this device's files), and remembering the view, for as long as the file is open.
   useEffect(() => {
-    const autosaver = createAutosaver(store, storage, meta);
+    const autosaver = sharedId === null ? createAutosaver(store, storage, meta) : null;
     saver.current = autosaver;
-    const docId = store.getState().doc.id;
+    const docId = sharedId ?? store.getState().doc.id;
 
     let sessionTimer: ReturnType<typeof setTimeout> | null = null;
     const writeSession = (): void => saveSession(docId, getSession(store.getState()));
@@ -289,13 +450,14 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       writeSession();
       // Text being typed lives in an open gesture; make it part of the document before saving.
       if (store.getState().editingTextId !== null) store.getState().commitGesture('Edit text');
-      void autosaver.flush();
+      void autosaver?.flush();
     };
     const onVisibility = (): void => {
       if (document.visibilityState === 'hidden') flush();
     };
     const onBeforeUnload = (event: BeforeUnloadEvent): void => {
-      if (store.getState().saveStatus === 'saved') return;
+      // A shared document asks only while changes made here have not reached the server.
+      if (autosaver === null ? session.store.getState().pending === 0 : store.getState().saveStatus === 'saved') return;
       // Start the write and ask the browser to wait so it can finish.
       flush();
       event.preventDefault();
@@ -311,10 +473,10 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', onBeforeUnload);
       writeSession();
-      void autosaver.dispose();
+      void autosaver?.dispose();
       if (saver.current === autosaver) saver.current = null;
     };
-  }, [store, storage, meta]);
+  }, [store, storage, meta, sharedId, session]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -447,6 +609,7 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
 
   return (
     <EditorContext.Provider value={context}>
+      <CollabContext.Provider value={session}>
       {/* Figma's arrangement: the panels float beside the canvas, each a card of its own on the window's dark ground. */}
       <div className="flex h-full gap-1.5 bg-bg p-1.5">
         <nav aria-label="Pages and layers" className="ev-panel relative z-10 flex flex-none flex-col overflow-hidden" style={{ width: panels.left }}>
@@ -520,6 +683,8 @@ function Editor({ storage, store, meta, repairs, onExit }: EditorProps) {
           }}
         />
       )}
+      <CollabDialogs storage={storage} />
+      </CollabContext.Provider>
     </EditorContext.Provider>
   );
 }

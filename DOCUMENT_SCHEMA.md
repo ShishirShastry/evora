@@ -813,6 +813,10 @@ const MIGRATIONS: Record<number, (file) => file> = {
 
 ---
 
+## 8a. Shared documents (Phase 8)
+
+A document shared through the collaboration server is the same document, held on the server as *registers*: one per property of each node (`n:<nodeId>:<prop>`, with `n:<nodeId>:@` saying whether the node exists), one per entry of the styles, variables and collections tables, the name, what is published, and each image's description. Each register keeps the clock of the change that set it, and the later clock wins (see `src/collab/protocol.ts`). The app rebuilds the document from its registers and passes it through validation and repair, as when a file is opened, so a document made of merged changes is always valid. Sharing does not change the schema or its version.
+
 ## 9. What is not in the document
 
 | Data | Where it lives | Why |

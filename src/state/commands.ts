@@ -782,6 +782,10 @@ export interface AppActions {
    * surroundings have one. Without it, copying still works inside the application.
    */
   copyToSystemClipboard?(): void;
+  /** Opens the Share dialog: people, roles and the link of a shared file, or sharing a file from this device. Free for everyone. */
+  share?(): void;
+  /** Picks up or puts down the Comment tool (a click on the canvas then places a comment). */
+  commentTool?(): void;
 }
 
 export interface CommandEnv {
@@ -878,6 +882,17 @@ export const COMMANDS: readonly Command[] = [
       store.getState().setTool('pencil');
     },
   },
+  {
+    id: 'tool.comment',
+    label: 'Comment',
+    group: 'Tools',
+    shortcut: 'C',
+    keys: [{ code: 'KeyC' }],
+    run: ({ app }) => {
+      app.cancelInteraction();
+      app.commentTool?.();
+    },
+  },
 
   {
     id: 'file.save',
@@ -904,6 +919,7 @@ export const COMMANDS: readonly Command[] = [
     run: ({ app }) => app.placeImage(),
   },
   { id: 'file.home', label: 'Back to files', group: 'File', run: ({ app }) => app.goHome() },
+  { id: 'file.share', label: 'Share…', group: 'File', run: ({ app }) => app.share?.() },
   { id: 'file.libraries', label: 'Libraries…', group: 'File', run: ({ app }) => app.openLibraries?.() },
   { id: 'file.export', label: 'Export…', group: 'File', shortcut: 'Ctrl+Shift+E', keys: [{ code: 'KeyE', ctrl: true, shift: true }], run: ({ app }) => app.openExport?.() },
 

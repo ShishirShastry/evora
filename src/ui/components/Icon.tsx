@@ -56,7 +56,15 @@ export type IconName =
   | 'exclude'
   | 'mask'
   | 'handles'
-  | 'play';
+  | 'play'
+  | 'comment'
+  | 'link'
+  | 'bell'
+  | 'mail'
+  | 'users'
+  | 'send'
+  | 'device'
+  | 'cloudOff';
 
 const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 
@@ -165,6 +173,29 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="8" cy="8" r="3.2" fill="currentColor" />
     </>
   ),
+  comment: <path {...s} d="M8 2.5a5.5 5.5 0 0 0-4.9 8l-.9 3 3-.9A5.5 5.5 0 1 0 8 2.5z" />,
+  link: <path {...s} d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.1-2.1a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.4 8.9a2.6 2.6 0 0 0 3.7 3.7l.8-.8" />,
+  bell: <path {...s} d="M4 11.5V7.2a4 4 0 0 1 8 0v4.3l1 1H3zM6.6 13.8a1.5 1.5 0 0 0 2.8 0" />,
+  mail: (
+    <>
+      <rect {...s} x="2" y="3.5" width="12" height="9" rx="1.5" />
+      <path {...s} d="M2.5 4.5L8 8.8l5.5-4.3" />
+    </>
+  ),
+  users: (
+    <>
+      <circle {...s} cx="6" cy="5.5" r="2.3" />
+      <path {...s} d="M1.8 13c.4-2.3 2.1-3.6 4.2-3.6s3.8 1.3 4.2 3.6M10.4 3.4a2.3 2.3 0 0 1 0 4.3M12 9.6c1.2.4 2 1.6 2.2 3.4" />
+    </>
+  ),
+  send: <path {...s} d="M8 13V3.5M3.8 7.5L8 3.3l4.2 4.2" />,
+  device: (
+    <>
+      <rect {...s} x="2" y="3" width="12" height="8" rx="1.2" />
+      <path {...s} d="M5.5 13.5h5M8 11v2.5" />
+    </>
+  ),
+  cloudOff: <path {...s} d="M2.5 2.5l11 11M6 4.4A4 4 0 0 1 11.7 7a2.8 2.8 0 0 1 2 3.8M11.3 12.5H4.6a3 3 0 0 1-.9-5.8" />,
   exclude: (
     <>
       <path {...s} d="M2.5 2.5h7V6H6v4H2.5z" />

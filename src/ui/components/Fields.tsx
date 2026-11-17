@@ -30,12 +30,18 @@ export function NumberField({ label, prefix, suffix, value, onCommit, min, max, 
   const shown = value === MIXED ? '' : formatNumber(value);
   const [text, setText] = useState(shown);
   const [editing, setEditing] = useState(false);
+  // Committed with Enter and not typed in since: the field shows the document's value again, also when someone else changes it.
+  const [committed, setCommitted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   // While nobody is typing, the field shows the document's value directly, in
   // the very render in which that value changes. (Copying it into state in an
   // effect would rewrite the input a moment later, which loses the selection
   // of someone who has already clicked into the field and started typing.)
-  const display = editing ? text : shown;
+  const display = editing && !committed ? text : shown;
+  // After Enter the whole value is selected, ready to be typed over; a value that changes after that stays so.
+  useEffect(() => {
+    if (committed && document.activeElement === inputRef.current) inputRef.current?.select();
+  }, [committed, shown]);
 
   const clamp = (n: number): number => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
 
@@ -65,16 +71,22 @@ export function NumberField({ label, prefix, suffix, value, onCommit, min, max, 
         onFocus={(event) => {
           setText(shown);
           setEditing(true);
+          setCommitted(false);
           event.currentTarget.select();
         }}
-        onChange={(event) => setText(event.currentTarget.value)}
+        onChange={(event) => {
+          setText(event.currentTarget.value);
+          setCommitted(false);
+        }}
         onBlur={(event) => {
           setEditing(false);
-          commit(event.currentTarget.value);
+          setCommitted(false);
+          if (!committed) commit(event.currentTarget.value);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             commit(event.currentTarget.value);
+            setCommitted(true);
             event.currentTarget.select();
           } else if (event.key === 'Escape') {
             setText(shown);

@@ -8,6 +8,7 @@ import { getBrowserMeasurer } from '../../engine/text/measure';
 import { zoomToFit } from '../../state/commands';
 import { PopupMenu, type MenuItem } from '../components/Menu';
 import { useEditor, useEditorContext } from './EditorContext';
+import { CollabCanvasLayer } from '../collab/CanvasLayer';
 import { canvasMenu, layerMenu } from './menus';
 import { TextEditor } from './TextEditor';
 
@@ -288,6 +289,8 @@ export function CanvasView() {
       {editingTextId && (
         <TextEditor key={editingTextId} id={editingTextId} onDone={() => overlayRef.current?.focus({ preventScroll: true })} />
       )}
+      {/* Others' cursors and selections, comment pins and threads: DOM laid over the canvases. */}
+      <CollabCanvasLayer host={hostRef} />
       {menu && <PopupMenu x={menu.x} y={menu.y} items={menu.items} label="Canvas menu" onClose={() => setMenu(null)} />}
     </div>
   );

@@ -2,6 +2,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   applyPatch,
   approximateMeasurer,
+  carryPatches,
   diffDocuments,
   getPageIdOf,
   getPages,
@@ -109,12 +110,30 @@ export interface EditorState {
   // History.
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
-  /** Snapshot taken when a continuous interaction started; null when idle. */
-  gesture: { doc: Document; selection: NodeId[]; vectorEdit?: VectorEdit | null } | null;
+  /**
+   * Snapshot taken when a continuous interaction started; null when idle.
+   * `remote` holds the changes someone else made while it was in progress
+   * (collaboration), which every step of the gesture carries (see `applyRemote`).
+   */
+  gesture: { doc: Document; selection: NodeId[]; vectorEdit?: VectorEdit | null; remote?: DocumentPatch[] } | null;
 
   // Persistence status, written by the autosaver.
   saveStatus: SaveStatus;
   saveError: string | null;
+
+  // Collaboration (Phase 8).
+  /**
+   * True while the document may only be looked at here (someone who may
+   * view a shared document but not edit it). Every change to the document
+   * through the store is then refused; selecting, panning and zooming still work.
+   */
+  readOnly: boolean;
+  /**
+   * The document as `applyRemote` last left it. While `doc` is this very
+   * object, the latest change came from someone else, so the live engine does
+   * not send it back; any other change to `doc` was made here.
+   */
+  remoteDoc: Document | null;
 }
 
 export interface ApplyOptions {
@@ -176,6 +195,18 @@ export interface EditorActions {
    */
   refitText(): void;
   setSaveStatus(status: SaveStatus, error?: string | null): void;
+  /** Allows or refuses changes to the document (see `readOnly`). Refusing them ends a gesture in progress, putting back what it changed. */
+  setReadOnly(readOnly: boolean): void;
+  /**
+   * Shows a document changed by someone else. It replaces the document as it
+   * is, without restoring layout (the change was laid out where it was made),
+   * leaves the undo and redo history alone (each person undoes only their own
+   * steps), keeps the selection and the page to what still exists, and marks
+   * the change as remote (see `remoteDoc`). A gesture in progress carries on
+   * from the changed document; if the change removed what is selected, the
+   * gesture is ended and recorded first.
+   */
+  applyRemote(next: Document): void;
 }
 
 export type EditorStore = StoreApi<EditorState & EditorActions>;
@@ -322,8 +353,11 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       gesture: null,
       saveStatus: 'saved',
       saveError: null,
+      readOnly: false,
+      remoteDoc: null,
 
       apply(label, fn, options) {
+        if (get().readOnly) return;
         if (get().gesture) get().commitGesture('Edit');
         const state = get();
         const next = normalize(state.doc, fn(state.doc));
@@ -350,14 +384,16 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
 
       beginGesture() {
         const state = get();
-        if (state.gesture) return;
+        if (state.gesture || state.readOnly) return;
         set({ gesture: { doc: state.doc, selection: state.selection, vectorEdit: state.vectorEdit } });
       },
 
       updateGesture(fn, select) {
         const state = get();
         if (!state.gesture) return;
-        const next = normalize(state.gesture.doc, fn(state.gesture.doc));
+        // Tools often work a step out from the document as the gesture found it: what others changed since is carried into it.
+        const worked = fn(state.gesture.doc);
+        const next = normalize(state.gesture.doc, state.gesture.remote ? carryPatches(worked, state.gesture.remote) : worked);
         const selection = select ? sanitizeSelection(next, state.pageId, select) : sanitizeSelection(next, state.pageId, state.selection);
         if (next === state.doc && sameIds(selection, state.selection)) return;
         set({ doc: next, selection, ...keepEdits(next, selection, state) });
@@ -395,6 +431,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       },
 
       undo() {
+        if (get().readOnly) return;
         if (get().gesture) get().cancelGesture();
         const state = get();
         const entry = state.undoStack[state.undoStack.length - 1];
@@ -413,7 +450,7 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       },
 
       redo() {
-        if (get().gesture) return;
+        if (get().gesture || get().readOnly) return;
         const state = get();
         const entry = state.redoStack[state.redoStack.length - 1];
         if (!entry) return;
@@ -570,12 +607,13 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       renameDocument(name) {
         const trimmed = name.trim();
         const state = get();
-        if (!trimmed || trimmed === state.doc.name) return;
+        if (!trimmed || trimmed === state.doc.name || state.readOnly) return;
         set({ doc: { ...state.doc, name: trimmed } });
       },
 
       addAssets(assets) {
         const state = get();
+        if (state.readOnly) return;
         const fresh: Record<string, AssetInfo> = {};
         for (const hash in assets) if (!state.doc.assets[hash]) fresh[hash] = assets[hash] as AssetInfo;
         if (Object.keys(fresh).length === 0) return;
@@ -597,6 +635,40 @@ export function createEditorStore(doc: Document, session?: Partial<SessionState>
       setSaveStatus(status, error = null) {
         const state = get();
         if (state.saveStatus !== status || state.saveError !== error) set({ saveStatus: status, saveError: error });
+      },
+
+      setReadOnly(readOnly) {
+        if (get().readOnly === readOnly) return;
+        if (readOnly && get().gesture) get().cancelGesture();
+        set({ readOnly, ...(readOnly ? { renamingId: null, editingTextId: null, textSelection: null, vectorEdit: null, paintEdit: null } : {}) });
+      },
+
+      applyRemote(next) {
+        if (next === get().doc) return;
+        // A gesture whose layers someone else has just removed cannot carry on: what it did so far is kept as one step.
+        const before = get();
+        if (before.gesture && before.selection.some((id) => !next.nodes[id])) get().commitGesture('Edit');
+        const state = get();
+        let gesture = state.gesture;
+        if (gesture) {
+          // The gesture is worked out from its snapshot each time, so the snapshot takes the change as well.
+          const remote = diffDocuments(state.doc, next);
+          // Steps worked out from the old snapshot (most tools keep their own) carry the change too, so it is not undone by the next one.
+          if (remote) gesture = { ...gesture, doc: { ...applyPatch(gesture.doc, remote, 'forward'), name: next.name, assets: next.assets }, remote: [...(gesture.remote ?? []), remote] };
+        }
+        const view = withPage(state, next, state.pageId, state.selection);
+        const keeps = (id: NodeId | null, type?: string): NodeId | null => (id !== null && next.nodes[id] && (!type || next.nodes[id]?.type === type) ? id : null);
+        const editingTextId = keeps(state.editingTextId, 'TEXT');
+        set({
+          doc: next,
+          remoteDoc: next,
+          gesture,
+          hoveredId: keeps(state.hoveredId),
+          renamingId: keeps(state.renamingId),
+          editingTextId,
+          textSelection: editingTextId === null ? null : state.textSelection,
+          ...view,
+        });
       },
     };
   });
