@@ -163,6 +163,11 @@ describe('saving to disk', () => {
     const baseline = diskBaseline(link, meta, doc);
     expect(isDiskDirty(link, baseline, doc)).toBe(false);
     expect(isDiskDirty(link, baseline, { ...doc, name: 'B' })).toBe(true);
+    // Undone back to what was saved: another object with the same content matches the disk again.
+    const copy = JSON.parse(JSON.stringify(doc)) as typeof doc;
+    expect(isDiskDirty(link, baseline, copy)).toBe(false);
+    const page = Object.keys(doc.nodes)[0] as string;
+    expect(isDiskDirty(link, baseline, { ...copy, nodes: { ...copy.nodes, [page]: { ...copy.nodes[page], name: 'Moved' } as (typeof doc.nodes)[string] } })).toBe(true);
     // Changed in the library after the last save (for instance before a crash): behind from the start.
     expect(diskBaseline(link, { ...meta, updatedAt: 'u2' }, doc)).toBeNull();
     expect(isDiskDirty(link, null, doc)).toBe(true);

@@ -1,4 +1,4 @@
-import { FileFormatError, nameFromFile, type Document, type FileMeta, type TextMeasurer } from '../core';
+import { diffDocuments, FileFormatError, nameFromFile, type Document, type FileMeta, type TextMeasurer } from '../core';
 import { canSaveInPlace, diskFileKind, type DiskFile, type DiskLink, type EvoraDesktop } from './desktopContract';
 import { exportFigBytes, importFigBytes } from './fig';
 import { createFile, exportFileName, exportFileText, importFileText, openFile } from './files';
@@ -121,12 +121,22 @@ export async function saveFigToDisk(storage: DocumentStorage, bridge: Pick<Evora
 
 /**
  * Whether the open file has changes its disk file does not: it is linked, and
- * either it was already changed when opened or the document has changed since
- * it last matched the disk (`baseline`).
+ * either it was already changed when opened or the document differs from what
+ * it was when it last matched the disk (`baseline`). Undoing back to that
+ * point makes it match again: undo builds a new document object, so the two
+ * are compared by content when they are not the same object.
  */
 export function isDiskDirty(link: DiskLink | null, baseline: Document | null, current: Document): boolean {
   if (link === null) return false;
-  return baseline === null || baseline !== current;
+  return baseline === null || !sameDocument(baseline, current);
+}
+
+/** Whether two snapshots of a document hold the same content. Untouched layers are shared by reference, so this is quick. */
+function sameDocument(a: Document, b: Document): boolean {
+  if (a === b) return true;
+  if (a.id !== b.id || a.name !== b.name) return false;
+  if (a.assets !== b.assets && JSON.stringify(a.assets) !== JSON.stringify(b.assets)) return false;
+  return diffDocuments(a, b) === null;
 }
 
 /** The document to compare against: the open document when the library file matches its disk file, else null (changed). */

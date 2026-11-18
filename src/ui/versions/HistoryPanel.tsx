@@ -129,7 +129,7 @@ export function HistoryPanel({ source, canEdit, revision, viewingId, onView, onC
       <header className="flex h-11 flex-none items-center justify-between border-b border-line pl-3.5 pr-1.5">
         <h2 className="ev-section-title text-[12.5px]">Version history</h2>
         <div className="flex items-center gap-0.5">
-          <button type="button" className="ev-icon-button" aria-label="Save to version history" title="Save to version history (Ctrl+Alt+S)" disabled={!canEdit} onClick={() => versionsActions.openSave()}>
+          <button type="button" className="ev-icon-button" aria-label="Save to version history" title="Save to version history (Ctrl+Alt+Shift+S)" disabled={!canEdit} onClick={() => versionsActions.openSave()}>
             <Icon name="plus" />
           </button>
           <button type="button" className="ev-icon-button" aria-label="Close version history" onClick={onClose}>

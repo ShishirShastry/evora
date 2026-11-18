@@ -98,10 +98,10 @@ export function VersionsMount({ api = versionsApi, local = localVersions() }: { 
     };
   }, [shared, local, store]);
 
-  // Ctrl+Alt+S: Save to version history.
+  // Ctrl+Alt+Shift+S: Save to version history (Ctrl+Alt+S is "Subtract selection", beside the other shape operations).
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.code !== 'KeyS') return;
+      if (!(event.ctrlKey || event.metaKey) || !event.altKey || !event.shiftKey || event.code !== 'KeyS') return;
       event.preventDefault();
       if (versionsUi.getState().context.canEdit) versionsActions.openSave();
     };

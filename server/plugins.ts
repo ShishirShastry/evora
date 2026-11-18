@@ -18,9 +18,10 @@
  *
  * Installs are counted once per account (or guest) and, for someone with
  * neither, once per client address, which is kept only as a keyed hash
- * (`kit.countedAs`). The address is the connection's own (the server does not
- * read X-Forwarded-For): behind a reverse proxy every such caller has the
- * proxy's address and they are counted once together. Someone with many
+ * (`kit.countedAs`). The address is the connection's own, or, when the server
+ * is set to trust its reverse proxy (EVORA_TRUST_PROXY, server/proxy.ts), the
+ * one the proxy forwarded; without that setting every caller behind a proxy has
+ * the proxy's address and they are counted once together. Someone with many
  * accounts or addresses can still be counted more than once. The route is
  * limited per address (Limits.counted, 429 beyond it).
  * - DELETE /api/plugins/directory/:id                      -> {}  (the publisher)

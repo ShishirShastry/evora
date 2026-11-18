@@ -10,7 +10,7 @@ export function menuItems(_env: CommandEnv, state: EditorState): MenuItem[] {
   const canEdit = context.canEdit && !state.readOnly;
   const items: MenuItem[] = [
     { label: 'Show version history', checked: ui.panelOpen, onSelect: () => versionsActions.openPanel(!ui.panelOpen) },
-    { label: 'Save to version history…', shortcut: 'Ctrl+Alt+S', disabled: !canEdit, onSelect: () => versionsActions.openSave() },
+    { label: 'Save to version history…', shortcut: 'Ctrl+Alt+Shift+S', disabled: !canEdit, onSelect: () => versionsActions.openSave() },
     { label: 'Compare versions…', onSelect: () => versionsActions.openCompare() },
   ];
   // Branches are of shared files: they live on the collaboration server.

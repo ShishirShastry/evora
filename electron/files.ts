@@ -85,7 +85,26 @@ export async function showOpenDialog(window: BrowserWindow | null): Promise<stri
 
 function lastFolder(): string {
   const recent = recentFiles()[0];
-  return recent ? dirname(recent) : app.getPath('documents');
+  return recent && existsSync(dirname(recent)) ? dirname(recent) : app.getPath('documents');
+}
+
+/** Errors that mean "this place cannot be written", where asking for another place helps. */
+const UNWRITABLE = new Set(['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'EROFS', 'EBUSY']);
+
+function codeOf(error: unknown): string {
+  return error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : '';
+}
+
+/** A message a person can act on, for a file that could not be written. */
+function saveFailure(path: string, error: unknown): Error {
+  const code = codeOf(error);
+  const where = `“${basename(path)}” in ${dirname(path)}`;
+  if (code === 'ENOENT' || code === 'ENOTDIR') return new Error(`The folder of ${where} no longer exists.`);
+  if (code === 'EACCES' || code === 'EPERM') return new Error(`Evora is not allowed to write ${where}.`);
+  if (code === 'EROFS') return new Error(`${where} is on a drive that cannot be written to.`);
+  if (code === 'EBUSY') return new Error(`${where} is in use by another program.`);
+  if (code === 'ENOSPC') return new Error(`There is no space left on the drive for ${where}.`);
+  return new Error(`${where} could not be written: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 /** Writes a file so that a crash in the middle leaves the old one whole: a temporary file beside it, then a rename. */
@@ -102,22 +121,49 @@ function writeAtomically(path: string, data: string | Uint8Array): void {
 
 export async function saveFile(window: BrowserWindow | null, request: SaveRequest): Promise<SavedFile | null> {
   const extension = request.kind === 'fig' ? '.fig' : '.evora';
-  let path = request.path && isGranted(request.path) ? resolve(request.path) : null;
-  if (path === null) {
+  const data = typeof request.data === 'string' ? request.data : Buffer.from(request.data.buffer, request.data.byteOffset, request.data.byteLength);
+  const known = request.path && isGranted(request.path) ? resolve(request.path) : null;
+
+  const ask = async (title: string, name: string): Promise<string | null> => {
     const options: Electron.SaveDialogOptions = {
-      title: request.kind === 'fig' ? 'Save a copy as a Figma file' : 'Save',
-      defaultPath: join(lastFolder(), basename(request.suggestedName)),
+      title,
+      defaultPath: join(lastFolder(), basename(name)),
       filters: request.kind === 'fig' ? [{ name: 'Figma file', extensions: ['fig'] }] : [{ name: 'Evora file', extensions: ['evora'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     };
     const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return null;
-    path = resolve(result.filePath);
-    if (extname(path).toLowerCase() !== extension) path += extension;
-    grant(path);
+    let chosen = resolve(result.filePath);
+    if (extname(chosen).toLowerCase() !== extension) chosen += extension;
+    grant(chosen);
+    return chosen;
+  };
+
+  let path = known;
+  if (path !== null) {
+    try {
+      writeAtomically(path, data);
+    } catch (error) {
+      // The file's folder was moved or deleted, or it cannot be written: ask where to save it instead of failing.
+      if (!UNWRITABLE.has(codeOf(error))) throw saveFailure(path, error);
+      const reason = saveFailure(path, error).message;
+      path = await ask(`${reason} Save it somewhere else`, basename(path));
+      if (path === null) return null;
+      try {
+        writeAtomically(path, data);
+      } catch (again) {
+        throw saveFailure(path, again);
+      }
+    }
+  } else {
+    path = await ask(request.kind === 'fig' ? 'Save a copy as a Figma file' : 'Save', request.suggestedName);
+    if (path === null) return null;
+    try {
+      writeAtomically(path, data);
+    } catch (error) {
+      throw saveFailure(path, error);
+    }
   }
-  const data = typeof request.data === 'string' ? request.data : Buffer.from(request.data.buffer, request.data.byteOffset, request.data.byteLength);
-  writeAtomically(path, data);
   addRecent(path);
   return { path, mtimeMs: Math.floor(statSync(path).mtimeMs) };
 }

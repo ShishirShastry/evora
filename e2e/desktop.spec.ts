@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -25,6 +26,41 @@ function tempFolder(): string {
   folders.push(folder);
   return folder;
 }
+
+/** Apps a test launched and has not closed (it failed before its end). */
+const open = new Set<ElectronApplication>();
+
+/**
+ * Closes an app a test left open, before its folders are deleted: a window still open on a
+ * deleted folder would otherwise be asked to save there as it closes. Questions on closing are
+ * answered "Don't save" (no dialog on the screen); an app that does not close is ended.
+ */
+async function closeLeftOpen(app: ElectronApplication): Promise<void> {
+  const pid = app.process()?.pid;
+  try {
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = (async () => ({ response: 1, checkboxChecked: false })) as typeof dialog.showMessageBox;
+    });
+  } catch {
+    // It has already gone.
+  }
+  const closed = await Promise.race([app.close().then(() => true, () => true), new Promise<boolean>((done) => setTimeout(() => done(false), 20_000))]);
+  if (!closed && pid !== undefined) {
+    // The app and what it started (a team server).
+    try {
+      if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      else process.kill(pid, 'SIGKILL');
+    } catch {
+      // It has gone by now.
+    }
+  }
+}
+
+test.afterEach(async () => {
+  for (const app of [...open]) await closeLeftOpen(app);
+  open.clear();
+});
+
 test.afterAll(() => {
   for (const folder of folders) {
     try {
@@ -46,6 +82,8 @@ async function launch(userData: string, files: string[] = []): Promise<Launched>
   for (const [name, value] of Object.entries(process.env)) if (value !== undefined && name !== 'EVORA_DEV_URL' && name !== 'ELECTRON_RUN_AS_NODE') env[name] = value;
   // Starting Electron can take long on a busy machine.
   const app = await electron.launch({ args: [MAIN, ...files], cwd: ROOT, env: { ...env, EVORA_USER_DATA: userData }, timeout: 180_000 });
+  open.add(app);
+  app.on('close', () => open.delete(app));
   const page = await app.firstWindow({ timeout: 180_000 });
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -69,16 +107,19 @@ async function menuClick(app: ElectronApplication, menu: string, label: string):
 /** The Save dialog answers with this path from now on. */
 async function answerSaveWith(app: ElectronApplication, path: string): Promise<void> {
   await app.evaluate(({ dialog }, target) => {
-    const record = globalThis as unknown as { saveDialogs?: number };
+    const record = globalThis as unknown as { saveDialogs?: number; saveTitles?: string[] };
     record.saveDialogs = 0;
-    dialog.showSaveDialog = (async () => {
+    record.saveTitles = [];
+    dialog.showSaveDialog = (async (...args: unknown[]) => {
       record.saveDialogs = (record.saveDialogs ?? 0) + 1;
+      record.saveTitles?.push(String((args[args.length - 1] as { title?: string }).title ?? ''));
       return { canceled: false, filePath: target };
     }) as typeof dialog.showSaveDialog;
   }, path);
 }
 
 const saveDialogsShown = (app: ElectronApplication): Promise<number> => app.evaluate(() => (globalThis as unknown as { saveDialogs?: number }).saveDialogs ?? 0);
+const saveDialogTitles = (app: ElectronApplication): Promise<string[]> => app.evaluate(() => (globalThis as unknown as { saveTitles?: string[] }).saveTitles ?? []);
 const windowTitle = (app: ElectronApplication): Promise<string> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle() ?? '');
 
 const canvas = (page: Page): Locator => page.getByRole('application', { name: 'Design canvas' });
@@ -104,6 +145,12 @@ async function newFile(page: Page): Promise<void> {
 }
 
 /** The document of a saved .evora file, without what differs between two saves of the same thing (its ID and times). */
+/** Where "Rectangle 1" is across, in a saved .evora file. */
+function rectangleX(path: string): number | undefined {
+  const file = JSON.parse(readFileSync(path, 'utf8')) as { document: { nodes: Record<string, { name?: string; x?: number }> } };
+  return Object.values(file.document.nodes).find((node) => node.name === 'Rectangle 1')?.x;
+}
+
 function documentOf(path: string): unknown {
   const file = JSON.parse(readFileSync(path, 'utf8')) as { document: Record<string, unknown>; assetData?: unknown };
   const { id: _id, ...rest } = file.document;
@@ -114,16 +161,24 @@ test('opens offline with the file browser; app://evora serves the app and keeps 
   const { app, page, errors } = await launch(tempFolder());
   await expect(page.getByRole('button', { name: 'New design file' })).toBeVisible();
   expect(page.url()).toMatch(/^app:\/\/evora\//);
+  // The window is shown (also when 'ready-to-show' does not come), here without taking the focus.
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible() ?? false)).toBe(true);
 
-  // Everything the page loaded came from the app itself: nothing from the network.
-  const loaded = await page.evaluate(() => performance.getEntriesByType('resource').map((entry) => entry.name));
-  expect(loaded.length).toBeGreaterThan(0);
+  // Everything the page loads comes from the app itself: nothing from the network. The first load
+  // was over before the test could listen (and Resource Timing does not list app:// loads), so the
+  // requests of a reload are the ones looked at.
+  const loaded: string[] = [];
+  page.on('request', (request) => loaded.push(request.url()));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'New design file' })).toBeVisible();
+  expect(loaded.some((url) => /^app:\/\/evora\/assets\/.+\.js$/.test(url))).toBe(true);
   for (const url of loaded) expect(url).toMatch(/^(app:\/\/evora\/|data:|blob:)/);
 
   // The page is isolated: no Node, the bridge only.
   expect(await page.evaluate(() => [typeof (globalThis as { require?: unknown }).require, typeof (globalThis as { process?: unknown }).process, typeof (window as { evoraDesktop?: unknown }).evoraDesktop])).toEqual(['undefined', 'undefined', 'object']);
 
   // The protocol: a strict policy on the page, nothing outside the app's folder, /api answered without a server.
+  expect(errors).toEqual([]);
   const served = await page.evaluate(async () => {
     const index = await fetch('/');
     const outside = await fetch('/%2e%2e/package.json');
@@ -150,8 +205,17 @@ test('opens offline with the file browser; app://evora serves the app and keeps 
   });
   await expect.poll(() => app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened)).toEqual(['https://example.org/popup', 'https://example.org/away']);
   expect(page.url()).toMatch(/^app:\/\/evora\//);
-  await expect(page.getByRole('button', { name: 'New design file' })).toBeVisible();
-  expect(errors).toEqual([]);
+  // The page is still there, whole. (Read with evaluate: Playwright keeps waiting for the navigation the app cancelled to
+  // finish, so its locators would wait for good.)
+  expect(
+    await page.evaluate(() => ({
+      url: location.href,
+      ready: document.readyState,
+      home: [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('New design file')),
+    })),
+  ).toEqual({ url: expect.stringMatching(/^app:\/\/evora\//), ready: 'complete', home: true });
+  // The one error is the browser's log of the 404 asked for above (the file outside the app's folder).
+  expect(errors).toEqual(['Failed to load resource: the server responded with a status of 404 (Not Found)']);
   await app.close();
 });
 
@@ -196,22 +260,31 @@ test('Save writes a .evora file that opens again identically, from the command l
   const saved = JSON.parse(readFileSync(first, 'utf8')) as { format: string; document: { name: string } };
   expect(saved.format).toBe('evora');
 
-  // Closing with unsaved changes asks; "Don't save" closes.
+  // Closing with unsaved changes asks: "Cancel" keeps the window, "Don't save" closes it.
   await one.page.keyboard.press('ArrowDown');
   await expect.poll(() => windowTitle(one.app)).toBe('• Untitled — Evora');
-  await one.app.evaluate(({ dialog }) => {
-    const asked: string[] = [];
-    (globalThis as unknown as { asked: string[] }).asked = asked;
-    dialog.showMessageBox = (async (...args: unknown[]) => {
-      const options = args[args.length - 1] as { message: string };
-      asked.push(options.message);
-      return { response: 1, checkboxChecked: false };
-    }) as typeof dialog.showMessageBox;
-  });
-  const asked = one.app.evaluate(() => new Promise<string[]>((done) => setTimeout(() => done((globalThis as unknown as { asked: string[] }).asked), 1500)));
-  await one.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
-  expect(await asked).toEqual(['Save the changes to “First.evora” before closing?']);
-  await one.app.waitForEvent('close');
+  const answerCloseWith = (response: number): Promise<void> =>
+    one.app.evaluate(({ dialog }, answer) => {
+      const record = globalThis as unknown as { asked?: string[] };
+      record.asked ??= [];
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        const options = args[args.length - 1] as { message: string };
+        record.asked?.push(options.message);
+        return { response: answer, checkboxChecked: false };
+      }) as typeof dialog.showMessageBox;
+    }, response);
+  const asked = (): Promise<string[]> => one.app.evaluate(() => (globalThis as unknown as { asked?: string[] }).asked ?? []);
+  const closeWindow = (): Promise<void> => one.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+  await answerCloseWith(2);
+  await closeWindow();
+  await expect.poll(asked).toEqual(['Save the changes to “First.evora” before closing?']);
+  // Cancelled: the window and its changes stay; it can be closed again.
+  await expect.poll(() => windowTitle(one.app)).toBe('• Untitled — Evora');
+  await expect(canvas(one.page)).toBeVisible();
+  await answerCloseWith(1);
+  const closed = one.app.waitForEvent('close');
+  await closeWindow();
+  await closed;
   expect(one.errors).toEqual([]);
 
   // The saved file, given on the command line of a new launch (a fresh data folder: nothing of it in the library), opens.
@@ -228,17 +301,84 @@ test('Save writes a .evora file that opens again identically, from the command l
   await two.app.close();
 });
 
+test('Save asks where to save when the folder of the open file was deleted, and writes it there', async () => {
+  const gone = tempFolder();
+  const original = join(gone, 'Gone.evora');
+  const elsewhere = join(tempFolder(), 'Moved.evora');
+
+  // A .evora file in a folder of its own.
+  const one = await launch(tempFolder());
+  await newFile(one.page);
+  await drawRectangle(one.page);
+  await answerSaveWith(one.app, original);
+  await menuClick(one.app, 'File', 'Save as…');
+  await expect.poll(() => existsSync(original)).toBe(true);
+  await expect.poll(() => windowTitle(one.app)).toBe('Untitled — Evora');
+  await one.app.close();
+
+  // Opened from disk (the command line), then its folder is deleted while it is open.
+  const two = await launch(tempFolder(), [original]);
+  await expect(layer(two.page, 'Rectangle 1')).toBeVisible();
+  await layer(two.page, 'Rectangle 1').click();
+  await expect.poll(() => windowTitle(two.app)).toBe('Untitled — Evora');
+  const x = Number(await field(two.page, 'X position').inputValue());
+  rmSync(gone, { recursive: true, force: true });
+  expect(existsSync(gone)).toBe(false);
+  await canvas(two.page).focus();
+  await two.page.keyboard.press('ArrowRight');
+  await expect.poll(() => windowTitle(two.app)).toBe('• Untitled — Evora');
+
+  // Save (Ctrl+S) cannot write it in place: it asks where, saying why, and writes it there.
+  await answerSaveWith(two.app, elsewhere);
+  await two.page.keyboard.press('Control+s');
+  await expect.poll(() => existsSync(elsewhere)).toBe(true);
+  await expect.poll(() => windowTitle(two.app)).toBe('Untitled — Evora');
+  expect(await saveDialogsShown(two.app)).toBe(1);
+  const [title] = await saveDialogTitles(two.app);
+  expect(title).toContain('The folder of “Gone.evora”');
+  expect(title).toContain('no longer exists');
+  await expect(two.page.getByRole('dialog', { name: 'The file could not be saved.' })).toHaveCount(0);
+  expect((JSON.parse(readFileSync(elsewhere, 'utf8')) as { format: string }).format).toBe('evora');
+  expect(rectangleX(elsewhere)).toBe(x + 1);
+  expect(existsSync(gone)).toBe(false);
+
+  // The file is now linked to its new place: the next Save writes there without asking.
+  await two.page.keyboard.press('ArrowRight');
+  await expect.poll(() => windowTitle(two.app)).toBe('• Untitled — Evora');
+  await two.page.keyboard.press('Control+s');
+  await expect.poll(() => windowTitle(two.app)).toBe('Untitled — Evora');
+  expect(await saveDialogsShown(two.app)).toBe(1);
+  expect(rectangleX(elsewhere)).toBe(x + 2);
+  expect(two.errors).toEqual([]);
+  await two.app.close();
+});
+
 test('a renderer that crashes is reloaded with the open file', async () => {
   const { app, page } = await launch(tempFolder());
   await newFile(page);
   await drawRectangle(page);
   await expect(page.getByRole('navigation', { name: 'Pages and layers' }).getByRole('status')).toHaveText('Saved');
+  const fileHash = await page.evaluate(() => location.hash);
+  expect(fileHash).toMatch(/^#\/file\//);
   await app.evaluate(({ dialog }) => {
     dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as typeof dialog.showMessageBox;
   });
+  const crashed = page.waitForEvent('crash');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
-  // "Reload" was chosen: the same file opens again from what was saved automatically.
-  await expect(layer(page, 'Rectangle 1')).toBeVisible({ timeout: 30_000 });
+  await crashed;
+  // "Reload" was chosen: the same file opens again from what was saved automatically. Playwright keeps
+  // its page as crashed for good ("Target crashed") although the window's new renderer runs, so the
+  // reloaded page is read through the window itself.
+  const reloaded = (): Promise<{ hash: string; layers: string[] } | null> =>
+    app.evaluate(async ({ BrowserWindow }) => {
+      const contents = BrowserWindow.getAllWindows()[0]?.webContents;
+      if (!contents || contents.isCrashed() || contents.isLoading()) return null;
+      return (await contents.executeJavaScript(
+        `({ hash: location.hash, layers: [...document.querySelectorAll('[role="tree"][aria-label="Layers"] [role="treeitem"]')].map((item) => (item.getAttribute('aria-label') || item.textContent || '').trim()) })`,
+      )) as { hash: string; layers: string[] };
+    });
+  await expect.poll(async () => (await reloaded())?.layers ?? [], { timeout: 30_000 }).toContain('Rectangle 1');
+  expect((await reloaded())?.hash).toBe(fileHash);
   await app.close();
 });
 
@@ -278,6 +418,8 @@ test('"Host a team server" starts the collaboration server, which answers /api/h
     await menuClick(app, 'File', 'Collaboration…');
     const dialog = page.getByRole('dialog', { name: 'Collaboration' });
     await dialog.getByRole('textbox', { name: 'Port' }).fill(String(HOST_PORT));
+    // "Use it in this app" is on: once the server runs, the window saves and reloads (its security policy names the server).
+    const reloaded = page.waitForEvent('load', { timeout: 60_000 });
     await dialog.getByRole('button', { name: 'Start the server' }).click();
     await expect(page.getByRole('status', { name: 'Team server' })).toContainText(`Running on port ${HOST_PORT}`, { timeout: 30_000 });
 
@@ -287,7 +429,10 @@ test('"Host a team server" starts the collaboration server, which answers /api/h
     // It serves the app too, for people with only a browser.
     expect(await (await fetch(`http://127.0.0.1:${HOST_PORT}/`)).text()).toContain('<div id="root">');
 
-    // "Use it in this app" was on: the window reloads, and the app's /api reaches that server.
+    // The reloaded window's /api reaches that server. (The page before the reload could already reach
+    // it, and a dialog opened on it would go with the reload: so the reload is waited for.)
+    await reloaded;
+    await expect(page.getByRole('button', { name: 'New design file' })).toBeVisible();
     await expect
       .poll(async () => {
         try {

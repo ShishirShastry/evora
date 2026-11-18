@@ -18,7 +18,7 @@
  * Environment: EVORA_DEV_URL (load a development server), EVORA_USER_DATA (the
  * data folder; the tests give each run its own).
  */
-import { app, BrowserWindow, dialog, ipcMain, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,13 @@ app.setAppUserModelId('org.evora.app');
 registerAppScheme();
 
 const DEV_URL = process.env.EVORA_DEV_URL ? new URL(process.env.EVORA_DEV_URL).origin : null;
+/**
+ * Set by the desktop tests (e2e/desktop.config.ts): windows open without taking the focus and
+ * almost entirely off the screen, so a test run does not get in the way of the person at the
+ * computer. Pages keep running at full speed there (no background throttling); the tests'
+ * input does not depend on where the window is.
+ */
+const QUIET = process.env.EVORA_DESKTOP_E2E === '1';
 const DIST = join(APP_ROOT, 'dist');
 const PRELOAD = join(here, 'preload.cjs');
 
@@ -116,13 +123,27 @@ function mainWindow(): WindowRecord | null {
 
 // ------------------------------------------------------------------ windows
 
+/** Brings a window to the front, except in a test run (QUIET), which leaves the person's own windows in front. */
+function bringForward(window: BrowserWindow): void {
+  if (QUIET) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
+/** In a test run: a place almost entirely off the bottom right of the main screen (a few pixels stay on it). */
+function quietPlace(): { x: number; y: number } {
+  const area = screen.getPrimaryDisplay().workArea;
+  return { x: area.x + area.width - 8, y: area.y + area.height - 8 };
+}
+
 function createWindow(): WindowRecord {
-  const place = savedWindowState();
+  const place = QUIET ? { ...quietPlace(), width: 1440, height: 900, maximized: false } : savedWindowState();
   const window = new BrowserWindow({
     width: place?.width ?? 1440,
     height: place?.height ?? 900,
     x: place?.x,
     y: place?.y,
+    skipTaskbar: QUIET,
     minWidth: 640,
     minHeight: 480,
     show: false,
@@ -141,12 +162,24 @@ function createWindow(): WindowRecord {
       allowRunningInsecureContent: false,
       navigateOnDragDrop: false,
       spellcheck: false,
+      // A test run's window is behind the person's own (QUIET): it must not be slowed down as hidden.
+      backgroundThrottling: !QUIET,
     },
   });
   const record: WindowRecord = { window, doc: null, ready: false, queue: [], allowClose: false, closing: false };
   records.set(window.id, record);
   if (place?.maximized) window.maximize();
-  window.once('ready-to-show', () => window.show());
+  // Shown once its page has painted (no white flash). Windows does not always paint a hidden window,
+  // so 'ready-to-show' can fail to come at all (seen on 2026-11-18: the app ran with no window).
+  // The page having loaded, or three seconds at the latest, also shows it.
+  const reveal = (): void => {
+    if (window.isDestroyed() || window.isVisible()) return;
+    if (QUIET) window.showInactive();
+    else window.show();
+  };
+  window.once('ready-to-show', reveal);
+  window.webContents.once('did-finish-load', reveal);
+  setTimeout(reveal, 3000).unref?.();
 
   // The window's title: the open file, with a mark while its disk file has unsaved changes.
   window.on('page-title-updated', (event) => {
@@ -246,8 +279,7 @@ function onClose(record: WindowRecord, event: Electron.Event): void {
     let action: CloseAction = 'flush';
     const doc = record.doc;
     if (doc?.editor && doc.dirty && doc.path) {
-      if (record.window.isMinimized()) record.window.restore();
-      record.window.focus();
+      bringForward(record.window);
       const { response } = await dialog.showMessageBox(record.window, {
         type: 'warning',
         message: `Save the changes to “${basename(doc.path)}” before closing?`,
@@ -292,8 +324,7 @@ function openPath(path: string, target: WindowRecord | null = mainWindow()): voi
   }
   addRecent(full);
   const record = target ?? createWindow();
-  if (record.window.isMinimized()) record.window.restore();
-  record.window.focus();
+  bringForward(record.window);
   send(record, CHANNELS.openFile, file);
 }
 
@@ -562,8 +593,7 @@ function start(): void {
   app.on('second-instance', (_event, argv, workingDirectory) => {
     const files = filesInArguments(argv.slice(1), workingDirectory);
     const record = mainWindow() ?? createWindow();
-    if (record.window.isMinimized()) record.window.restore();
-    record.window.focus();
+    bringForward(record.window);
     for (const file of files) openPath(file, record);
   });
 

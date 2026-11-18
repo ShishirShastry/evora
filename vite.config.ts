@@ -25,5 +25,8 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'server/**/*.test.ts'],
     restoreMocks: true,
+    // At most 4 test workers at once (or EVORA_TEST_WORKERS): one per CPU core, the default, ran a
+    // 16 GB computer out of memory on 2026-11-18, since each worker with a DOM takes a few hundred MB.
+    maxWorkers: Number(process.env.EVORA_TEST_WORKERS) || 4,
   },
 });

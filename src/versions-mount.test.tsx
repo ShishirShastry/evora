@@ -16,7 +16,7 @@ import { VersionsMount } from './ui/versions/VersionsMount';
 
 /**
  * Version history in the editor, for a file on this device: an automatic
- * version when the file is opened, "Save to version history" (Ctrl+Alt+S),
+ * version when the file is opened, "Save to version history" (Ctrl+Alt+Shift+S),
  * the panel, looking at a version and restoring it as one undo step; and for
  * a shared file that is a branch, its "Branch of …" badge.
  */
@@ -52,8 +52,11 @@ describe('version history of a file on this device', () => {
     // Opened, and never kept before: an automatic version.
     await waitFor(async () => expect(await local.list(made.doc.id)).toHaveLength(1));
 
-    // Ctrl+Alt+S: Save to version history.
+    // Ctrl+Alt+S is "Subtract selection": it does not open the version dialog.
     fireEvent.keyDown(window, { key: 's', code: 'KeyS', ctrlKey: true, altKey: true });
+    expect(screen.queryByRole('dialog', { name: 'Save to version history' })).toBeNull();
+    // Ctrl+Alt+Shift+S: Save to version history.
+    fireEvent.keyDown(window, { key: 'S', code: 'KeyS', ctrlKey: true, altKey: true, shiftKey: true });
     const dialog = await screen.findByRole('dialog', { name: 'Save to version history' });
     fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: 'Box at 10' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));

@@ -111,9 +111,9 @@ It runs at http://localhost:8787. For Docker, systemd, HTTPS behind nginx or Cad
 
 ## Where Evora is today
 
-Evora is young and moving fast. The editor, design systems, prototyping, handoff, collaboration, version history, plugins and community library are built, and more than eleven hundred automated tests and dozens of real-browser tests check them. The desktop app, self-hosting and release pipeline are new and being polished toward the **first public release**. Every known gap is listed openly in [HANDOFF.md](HANDOFF.md).
+Evora is young and moving fast. The editor, design systems, prototyping, handoff, collaboration, version history, plugins and community library are built, and more than eleven hundred automated tests and dozens of real-browser tests check them. The desktop app, self-hosting and release pipeline are new and tested on Windows, ready for the **first public release**. Every known gap is listed openly in [HANDOFF.md](HANDOFF.md).
 
-**Coming next:** the first release with installers for every platform, performance tuning for very large files, a VS Code extension and public REST API, and integrations with GitHub, Storybook and Jira. Also on the list: text on a path, variable-width strokes, video in prototypes, and audio and cursor chat.
+**Coming next:** the first release with installers for every platform, a VS Code extension and public REST API, and integrations with GitHub, Storybook and Jira. Also on the list: text on a path, variable-width strokes, video in prototypes, and audio and cursor chat.
 
 ## Build with us
 
@@ -122,6 +122,8 @@ Evora is open source and contributions are welcome: bug reports, ideas, plugins,
 - **Write a plugin:** [plugin guide](plugins/PLUGINS.md), with four examples in [plugins/examples](plugins/examples).
 - **Report a security issue:** [SECURITY.md](SECURITY.md).
 - **Ship a release:** [RELEASING.md](RELEASING.md) and [CHANGELOG.md](CHANGELOG.md).
+- **Learn Evora:** the [user guide](docs/user-guide.md), with every keyboard shortcut.
+- **Integrate with it:** the [API reference](docs/api.md) for the server's HTTP and live-editing protocol.
 - **Understand the code:** [architecture](PROJECT_ARCHITECTURE.md), [file format](DOCUMENT_SCHEMA.md), [product specification](EVORA_MASTER_SPEC.md) and the [handoff notes](HANDOFF.md).
 
 <details>
@@ -153,7 +155,8 @@ npm run dist:desktop   # desktop installers for this system, into release/
 | `server` | The collaboration server: API, live rooms, accounts, sharing, comments, versions, plugins and community. Node built-ins only. |
 | `electron` | The desktop app: windows, menus, files on disk, updates. |
 | `plugins` | The plugin guide and examples. |
-| `deploy`, `docs` | Self-hosting files and guides. |
+| `deploy`, `docs` | Self-hosting files, the user guide, the API reference and other guides. |
+| `scripts` | Small tools, such as the one that writes the shortcut table in the user guide. |
 | `e2e` | Browser and desktop tests. |
 | `.github` | Continuous integration and the release workflow. |
 

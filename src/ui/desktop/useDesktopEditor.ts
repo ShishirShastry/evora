@@ -69,13 +69,15 @@ export function useDesktopEditor(options: Options): void {
     let link: DiskLink | null = null;
     let baseline: Document | null = store.getState().doc;
     let lastSent = '';
+    let lastDirty = false;
     let disposed = false;
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const dirty = (): boolean => !shared && isDiskDirty(link, baseline, store.getState().doc);
-    const report = (): void => {
+    const report = (isDirty: boolean = dirty()): void => {
       if (disposed) return;
-      const state = { editor: true, fileId, title: store.getState().doc.name, path: link?.path ?? null, dirty: dirty(), shared };
+      lastDirty = isDirty;
+      const state = { editor: true, fileId, title: store.getState().doc.name, path: link?.path ?? null, dirty: isDirty, shared };
       const key = JSON.stringify(state);
       if (key === lastSent) return;
       lastSent = key;
@@ -126,7 +128,9 @@ export function useDesktopEditor(options: Options): void {
         }
         return true;
       } catch (error) {
-        notify('The file could not be saved.', [error instanceof Error ? error.message : String(error)]);
+        // Electron wraps errors from the main process in "Error invoking remote method '…': Error: …"; show only the message.
+        const message = (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
+        notify('The file could not be saved.', [message]);
         return false;
       }
     };
@@ -164,8 +168,12 @@ export function useDesktopEditor(options: Options): void {
 
     const unsubscribe = store.subscribe((state, previous) => {
       if (state.doc === previous.doc) return;
-      report();
-      if (dirty()) scheduleRecovery();
+      const wasDirty = lastDirty;
+      const isDirty = dirty();
+      report(isDirty);
+      if (isDirty) scheduleRecovery();
+      // Undone back to what is on disk: a recovery copy is no longer needed.
+      else if (wasDirty && link) void bridge.clearRecovery(fileId);
     });
 
     // An SVG opened from disk: placed as layers once the canvas has its size.
