@@ -1,0 +1,70 @@
+# Publish the winget instructions: the website and README changes that say
+# "winget install ShishirShastry.Evora" wait on the branch winget-install until
+# Microsoft merges the package into microsoft/winget-pkgs. Once a day this
+# checks; when the package is there it merges the branch into main, publishes
+# the website, deletes the branch and turns itself off. Until then each run
+# only asks GitHub one question and stops.
+name: Publish winget instructions
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # every day at 06:17 UTC
+  workflow_dispatch:
+
+# Nothing by default; the job asks for what it needs.
+permissions: {}
+
+concurrency:
+  group: winget-live
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish once Evora is in winget
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # merge the branch into main, then delete it
+      actions: write # start the website workflow, then turn this one off
+    steps:
+      - name: Is Evora in winget yet?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/branches/winget-install" > /dev/null 2>&1; then
+            echo "The branch winget-install is gone, so there is nothing to publish."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif gh api repos/microsoft/winget-pkgs/contents/manifests/s/ShishirShastry/Evora > /dev/null 2>&1; then
+            echo "ShishirShastry.Evora is in winget."
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ShishirShastry.Evora is not in winget yet; checking again tomorrow."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out main
+        if: steps.check.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # the whole history, to merge the branch
+
+      - name: Merge the winget instructions into main
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-edit origin/winget-install
+          git push origin HEAD:main
+          git push origin --delete winget-install
+
+      # A push made with the workflow's own token starts no other workflow, so
+      # the website is published by hand here.
+      - name: Publish the website and stop checking
+        if: steps.check.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow disable winget-live.yml --repo "$GITHUB_REPOSITORY"
