@@ -33,8 +33,15 @@
     });
   }
 
-  // ---- Reveal sections as they scroll into view. ----
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- Reveal sections as they scroll into view, siblings one after another. ----
   var items = document.querySelectorAll('.reveal');
+  items.forEach(function (item) {
+    var siblings = item.parentElement ? item.parentElement.querySelectorAll(':scope > .reveal') : [];
+    var index = Array.prototype.indexOf.call(siblings, item);
+    if (index > 0 && !reduceMotion) item.style.transitionDelay = Math.min(index, 6) * 0.08 + 's';
+  });
   if ('IntersectionObserver' in window) {
     var observer = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
@@ -47,6 +54,107 @@
     items.forEach(function (item) { observer.observe(item); });
   } else {
     items.forEach(function (item) { item.classList.add('is-visible'); });
+  }
+
+  function whenVisible(node, callback) {
+    if (!node) return;
+    if (!('IntersectionObserver' in window)) { callback(); return; }
+    var seen = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) { seen.disconnect(); callback(); }
+    }, { threshold: 0.35 });
+    seen.observe(node);
+  }
+
+  // ---- Numbers count up the first time they are seen. ----
+  document.querySelectorAll('[data-count]').forEach(function (node) {
+    if (reduceMotion) return;
+    var target = Number(node.getAttribute('data-count'));
+    var suffix = node.getAttribute('data-suffix') || '';
+    var final = node.textContent;
+    whenVisible(node, function () {
+      var start = null;
+      var duration = 1400;
+      function frame(time) {
+        if (start === null) start = time;
+        var t = Math.min(1, (time - start) / duration);
+        var eased = 1 - Math.pow(1 - t, 4);
+        node.textContent = Math.round(target * eased).toLocaleString('en-US') + suffix;
+        if (t < 1) requestAnimationFrame(frame); else node.textContent = final;
+      }
+      requestAnimationFrame(frame);
+    });
+  });
+
+  // ---- A spotlight that follows the pointer over cards. ----
+  document.querySelectorAll('.card, .mini').forEach(function (card) {
+    card.addEventListener('pointermove', function (event) {
+      var box = card.getBoundingClientRect();
+      card.style.setProperty('--mx', (event.clientX - box.left) + 'px');
+      card.style.setProperty('--my', (event.clientY - box.top) + 'px');
+    });
+  });
+
+  // ---- The terminal types its commands when it scrolls into view. ----
+  var term = document.querySelector('[data-terminal]');
+  if (term && !reduceMotion) {
+    var lines = Array.prototype.slice.call(term.querySelectorAll('.line'));
+    var texts = lines.map(function (line) {
+      var t = line.querySelector('.t');
+      return t ? t.textContent : null;
+    });
+    var replay = term.parentElement.querySelector('.term-replay');
+    var cursor = term.querySelector('.cursor');
+    var run = 0;
+
+    var wait = function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); };
+
+    var play = function () {
+      var id = ++run;
+      if (replay) replay.hidden = true;
+      lines.forEach(function (line, i) {
+        line.classList.add('is-hidden');
+        line.classList.remove('is-new');
+        var t = line.querySelector('.t');
+        if (t && texts[i] !== null) t.textContent = '';
+      });
+      var chain = wait(350);
+      lines.forEach(function (line, i) {
+        chain = chain.then(function () {
+          if (id !== run) return;
+          line.classList.remove('is-hidden');
+          var t = line.querySelector('.t');
+          var text = texts[i];
+          if (!t || !text) {
+            line.classList.add('is-new');
+            if (cursor && line.classList.contains('idle')) line.appendChild(cursor);
+            return wait(line.classList.contains('c') ? 450 : 170);
+          }
+          // A command: the cursor moves to it and types it out.
+          if (cursor) line.appendChild(cursor);
+          term.classList.add('is-typing');
+          var typed = 0;
+          var step = function () {
+            if (id !== run) return Promise.resolve();
+            if (typed >= text.length) {
+              term.classList.remove('is-typing');
+              return wait(text.length > 40 ? 650 : 380);
+            }
+            typed += 1;
+            t.textContent = text.slice(0, typed);
+            var ch = text.charAt(typed - 1);
+            return wait(ch === ' ' ? 45 : 16 + Math.random() * 30).then(step);
+          };
+          return wait(260).then(step);
+        });
+      });
+      chain.then(function () {
+        if (id === run && replay) replay.hidden = false;
+      });
+    };
+
+    lines.forEach(function (line) { line.classList.add('is-hidden'); });
+    whenVisible(term, play);
+    if (replay) replay.addEventListener('click', play);
   }
 
   // ---- A note for people who are not on Windows. ----

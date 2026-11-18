@@ -144,8 +144,8 @@
         <div class="stats reveal">
           <div class="stat"><strong class="gradient-text">$0</strong><span>for every feature and every seat</span></div>
           <div class="stat"><strong class="gradient-text">&infin;</strong><span>collaborators on every file</span></div>
-          <div class="stat"><strong class="gradient-text">100%</strong><span>open source, MIT licence</span></div>
-          <div class="stat"><strong class="gradient-text">1,300+</strong><span>automated tests</span></div>
+          <div class="stat"><strong class="gradient-text" data-count="100" data-suffix="%">100%</strong><span>open source, MIT licence</span></div>
+          <div class="stat"><strong class="gradient-text" data-count="1300" data-suffix="+">1,300+</strong><span>automated tests</span></div>
         </div>
       </div>
     </section>
@@ -395,15 +395,18 @@
             </ul>
             <p style="margin-top:28px"><a class="btn btn-ghost" href="https://github.com/ShishirShastry/evora/blob/main/docs/self-hosting.md">Read the self-hosting guide<svg aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
           </div>
-          <div class="terminal reveal" role="figure" aria-label="Starting a self-hosted Evora server">
-            <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>Terminal</span></div>
-<pre><code><span class="c"># Download evora-server-0.1.0.tar.gz from GitHub Releases, then:</span>
-<span class="p">$ </span>tar -xzf evora-server-0.1.0.tar.gz
-<span class="p">$ </span>cd evora-server-0.1.0
-<span class="p">$ </span>node server/main.ts --serve dist --host 0.0.0.0 --data ./evora-data
-<span class="ok">Evora collaboration server on http://localhost:8787 (listening on 0.0.0.0)</span>
-Data folder: ./evora-data
-Serving the app from dist</code></pre>
+          <div class="terminal reveal" role="figure" aria-label="Starting a self-hosted Evora server: download the bundle, unpack it and run one command">
+            <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>Terminal</span><button class="term-replay" type="button" tabindex="-1" hidden>Replay</button></div>
+            <div class="term-body" data-terminal aria-hidden="true">
+              <div class="line c"># Download evora-server-0.1.0.tar.gz from GitHub Releases, then:</div>
+              <div class="line cmd"><span class="p">$</span><span class="t">tar -xzf evora-server-0.1.0.tar.gz</span></div>
+              <div class="line cmd"><span class="p">$</span><span class="t">cd evora-server-0.1.0</span></div>
+              <div class="line cmd"><span class="p">$</span><span class="t">node server/main.ts --serve dist --host 0.0.0.0 --data ./evora-data</span></div>
+              <div class="line ok">Evora collaboration server on http://localhost:8787 (listening on 0.0.0.0)</div>
+              <div class="line">Data folder: ./evora-data</div>
+              <div class="line">Serving the app from dist</div>
+              <div class="line cmd idle"><span class="p">$</span><span class="t"></span><span class="cursor"></span></div>
+            </div>
           </div>
         </div>
       </div>
