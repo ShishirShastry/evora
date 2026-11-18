@@ -157,33 +157,116 @@
     if (replay) replay.addEventListener('click', play);
   }
 
-  // ---- A note for people who are not on Windows. ----
+  // ---- The right download for this computer. ----
+  // Without this script the buttons lead to the list of every download, and
+  // each file link in the page points at a real file of the current version.
   var platform = '';
   try {
     var uaPlatform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
     var ua = navigator.userAgent || '';
     if (/Win/i.test(uaPlatform) || /Windows/i.test(ua)) platform = 'windows';
     else if (/Android/i.test(ua)) platform = 'android';
-    else if (/iPhone|iPad|iPod/i.test(ua)) platform = 'ios';
+    else if (/iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(uaPlatform) && navigator.maxTouchPoints > 1)) platform = 'ios';
     else if (/Mac/i.test(uaPlatform) || /Mac OS X/i.test(ua)) platform = 'mac';
     else if (/Linux|X11|CrOS/i.test(uaPlatform + ua)) platform = 'linux';
-  } catch (error) { /* unknown platform: say nothing */ }
+  } catch (error) { /* unknown platform: offer every download */ }
 
-  var notes = {
-    mac: 'You seem to be on a Mac. The macOS app is coming soon; for now you can download Evora on a Windows PC.',
-    linux: 'You seem to be on Linux. The Linux app is coming soon; for now you can download Evora on a Windows PC.',
-    android: 'Evora is a desktop app. Open this page on a Windows PC to download it.',
-    ios: 'Evora is a desktop app. Open this page on a Windows PC to download it.'
+  // Each file the page links to, and how to find it in a release.
+  var ASSETS = {
+    'windows-installer': /^Evora-Setup-[\d.]+\.exe$/,
+    'windows-portable': /^Evora-[\d.]+-portable\.exe$/,
+    'mac-arm64': /^Evora-[\d.]+-arm64\.dmg$/,
+    'mac-x64': /^Evora-[\d.]+-x64\.dmg$/,
+    'linux-appimage': /^Evora-[\d.]+-x86_64\.AppImage$/,
+    'linux-deb': /^evora_[\d.]+_amd64\.deb$/
   };
-  if (notes[platform]) {
+
+  // Most Macs sold since 2020 have Apple silicon. Chrome and Edge can say for
+  // sure; elsewhere Apple silicon is assumed and Intel is one click away.
+  var macArch = 'arm64';
+
+  var PLATFORMS = {
+    windows: { name: 'Windows', asset: 'windows-installer', label: 'Download for Windows', detail: '' },
+    mac: { name: 'macOS', asset: 'mac-arm64', label: 'Download for macOS', detail: 'Apple silicon' },
+    linux: { name: 'Linux', asset: 'linux-appimage', label: 'Download for Linux', detail: 'AppImage' }
+  };
+
+  function el(tag, text, attrs) {
+    var node = document.createElement(tag);
+    if (text) node.textContent = text;
+    if (attrs) Object.keys(attrs).forEach(function (key) { node.setAttribute(key, attrs[key]); });
+    return node;
+  }
+
+  function assetLink(key, text) {
+    var source = document.querySelector('.platforms [data-asset="' + key + '"]');
+    return el('a', text, { href: source ? source.getAttribute('href') : '#platforms', 'data-asset': key });
+  }
+
+  function noteFor(name) {
+    var note = document.createDocumentFragment();
+    if (name === 'mac') {
+      note.appendChild(document.createTextNode(macArch === 'x64' ? 'For Macs with an Intel processor. Apple silicon Mac? ' : 'For Apple silicon Macs (M1 and later). Intel Mac? '));
+      note.appendChild(assetLink(macArch === 'x64' ? 'mac-arm64' : 'mac-x64', macArch === 'x64' ? 'Get the Apple silicon version' : 'Get the Intel version'));
+      note.appendChild(document.createTextNode('.'));
+    } else if (name === 'linux') {
+      note.appendChild(document.createTextNode('Runs on any 64-bit distribution. On Debian or Ubuntu? '));
+      note.appendChild(assetLink('linux-deb', 'Get the .deb'));
+      note.appendChild(document.createTextNode('.'));
+    } else if (name === 'windows') {
+      note.appendChild(document.createTextNode('Also for '));
+      note.appendChild(el('a', 'macOS and Linux', { href: '#platforms' }));
+      note.appendChild(document.createTextNode('.'));
+    } else if (name === 'android' || name === 'ios') {
+      note.appendChild(document.createTextNode('Evora is a desktop app for Windows, macOS and Linux. Open this page on a computer to download it.'));
+    }
+    return note;
+  }
+
+  function applyPlatform() {
+    var choice = PLATFORMS[platform];
+    if (choice && platform === 'mac') {
+      choice.asset = macArch === 'x64' ? 'mac-x64' : 'mac-arm64';
+      choice.detail = macArch === 'x64' ? 'Intel' : 'Apple silicon';
+    }
     document.querySelectorAll('[data-platform-note]').forEach(function (node) {
-      node.textContent = notes[platform];
+      node.textContent = '';
+      node.appendChild(noteFor(platform));
+    });
+    if (!choice) return;
+    var file = document.querySelector('.platforms [data-asset="' + choice.asset + '"]');
+    var size = document.querySelector('[data-asset-size="' + choice.asset + '"]');
+    document.querySelectorAll('[data-primary-download]').forEach(function (link) {
+      if (file) {
+        link.href = file.getAttribute('href');
+        link.setAttribute('data-asset', choice.asset);
+      }
+    });
+    document.querySelectorAll('[data-primary-label]').forEach(function (node) { node.textContent = choice.label; });
+    document.querySelectorAll('[data-primary-size]').forEach(function (node) {
+      node.textContent = (choice.detail ? ' \u00b7 ' + choice.detail : '') + (size ? ' \u00b7 ' + size.textContent : '');
+    });
+    document.querySelectorAll('[data-os-name]').forEach(function (node) { node.textContent = choice.name; });
+    document.querySelectorAll('.platform').forEach(function (card) {
+      var mine = card.getAttribute('data-platform') === platform;
+      card.classList.toggle('is-current', mine);
+      var badge = card.querySelector('.platform-badge');
+      if (badge) badge.hidden = !mine;
     });
   }
 
-  // ---- The newest Windows installer, from GitHub Releases. ----
-  // The links in the page already point at version 0.1.0; this only moves
-  // them on when a newer release is published.
+  applyPlatform();
+
+  if (platform === 'mac' && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+    navigator.userAgentData.getHighEntropyValues(['architecture']).then(function (values) {
+      if (values && values.architecture === 'x86') { macArch = 'x64'; applyPlatform(); }
+    }).catch(function () { /* keep Apple silicon */ });
+  }
+
+  // ---- The newest files, from GitHub Releases. ----
+  // The links in the page already point at the current version; this only
+  // moves them on when a newer release is published. A file that a newer
+  // release lacks keeps its link to the version in the page.
   function formatSize(bytes) {
     return Math.round(bytes / (1024 * 1024)) + ' MB';
   }
@@ -193,24 +276,24 @@
     .then(function (response) { return response.ok ? response.json() : null; })
     .then(function (release) {
       if (!release || !release.assets || !release.tag_name) return;
-      var version = String(release.tag_name).replace(/^v/, '');
-      var installer = null;
-      var portable = null;
+      var found = {};
       release.assets.forEach(function (asset) {
-        if (/^Evora-Setup-[\d.]+\.exe$/.test(asset.name)) installer = asset;
-        if (/^Evora-[\d.]+-portable\.exe$/.test(asset.name)) portable = asset;
-      });
-      if (!installer) return;
-      document.querySelectorAll('[data-download="windows"]').forEach(function (link) {
-        link.href = installer.browser_download_url;
-      });
-      if (portable) {
-        document.querySelectorAll('[data-download="portable"]').forEach(function (link) {
-          link.href = portable.browser_download_url;
+        Object.keys(ASSETS).forEach(function (key) {
+          if (ASSETS[key].test(asset.name)) found[key] = asset;
         });
-      }
+      });
+      if (!found['windows-installer']) return;
+      Object.keys(found).forEach(function (key) {
+        document.querySelectorAll('[data-asset="' + key + '"]').forEach(function (link) {
+          link.href = found[key].browser_download_url;
+        });
+        document.querySelectorAll('[data-asset-size="' + key + '"]').forEach(function (node) {
+          node.textContent = formatSize(found[key].size);
+        });
+      });
+      var version = String(release.tag_name).replace(/^v/, '');
       document.querySelectorAll('[data-version]').forEach(function (node) { node.textContent = version; });
-      document.querySelectorAll('[data-size]').forEach(function (node) { node.textContent = formatSize(installer.size); });
+      applyPlatform();
     })
     .catch(function () { /* offline or rate-limited: keep the links in the page */ });
 })();
