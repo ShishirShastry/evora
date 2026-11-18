@@ -32,7 +32,7 @@ import { goToThread } from '../collab/CommentsPanel';
 import { CollabDialogs, toggleCommentTool } from '../collab/EditorChrome';
 import { useAccount, useGuest } from '../collab/hooks';
 import { GuestPrompt } from '../collab/Screens';
-import { createCollabSession } from '../collab/session';
+import { createCollabSession, type CollabSession } from '../collab/session';
 import { PanelResizer } from '../components/PanelResizer';
 import { RightSidebar } from '../panels/RightSidebar';
 import { ComponentsPanel } from '../panels/ComponentSections';
@@ -43,6 +43,8 @@ import { CanvasView } from './CanvasView';
 import { EditorContext, type EditorContextValue } from './EditorContext';
 import { shortcutGroups } from './menus';
 import { useDesktopEditor } from '../desktop/useDesktopEditor';
+import { copyPrototypeLink, createPresentGate, planPrototypeLink, presentHash, SHARE_FIRST_REASON } from '../prototype/links';
+import { linkOrigin } from '../../collab/endpoint';
 import { FileHeader, ToolDock, ViewControls } from './TopBar';
 
 interface EditorScreenProps {
@@ -58,6 +60,8 @@ interface EditorScreenProps {
   source?: 'local' | 'shared';
   /** For a shared document: a comment thread to open (from a notification). */
   threadId?: string;
+  /** For a file on this device: open the Share dialog once it is open (`#/file/<id>/share`, from a prototype asking to be shared). */
+  openShare?: boolean;
 }
 
 type LoadState =
@@ -67,13 +71,13 @@ type LoadState =
   | { status: 'ready'; store: EditorStore; meta: FileMeta; repairs: string[] };
 
 /** Loads a file from storage, or a shared document from the collaboration server, and shows the editor for it. */
-export function EditorScreen({ storage, fileId, onExit, source = 'local', threadId }: EditorScreenProps) {
+export function EditorScreen({ storage, fileId, onExit, source = 'local', threadId, openShare }: EditorScreenProps) {
   if (source === 'shared') return <SharedEditorScreen storage={storage} docId={fileId} threadId={threadId} onExit={onExit} />;
-  return <LocalEditorScreen storage={storage} fileId={fileId} onExit={onExit} />;
+  return <LocalEditorScreen storage={storage} fileId={fileId} openShare={openShare} onExit={onExit} />;
 }
 
 /** A file on this device. */
-function LocalEditorScreen({ storage, fileId, onExit }: { storage: DocumentStorage; fileId: string; onExit: () => void }) {
+function LocalEditorScreen({ storage, fileId, onExit, openShare }: { storage: DocumentStorage; fileId: string; onExit: () => void; openShare?: boolean }) {
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
 
   useEffect(() => {
@@ -111,7 +115,7 @@ function LocalEditorScreen({ storage, fileId, onExit }: { storage: DocumentStora
   }, [storage, fileId]);
 
   if (load.status === 'ready') {
-    return <Editor key={fileId} storage={storage} store={load.store} meta={load.meta} repairs={load.repairs} onExit={onExit} />;
+    return <Editor key={fileId} storage={storage} store={load.store} meta={load.meta} repairs={load.repairs} onExit={onExit} openShare={openShare} />;
   }
   return (
     <main className="flex h-full flex-col items-center justify-center gap-4 text-center">
@@ -137,6 +141,34 @@ type SharedLoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string; denied: boolean; trashed: boolean }
   | { status: 'ready'; store: EditorStore; seq: number };
+
+/** Where a presentation starts from the editor: the selected frame, or else the page's first flow or first frame. */
+function presentFrom(state: ReturnType<EditorStore['getState']>): string | null {
+  const selected = state.selection.length === 1 ? state.selection[0] : undefined;
+  const frames = prototypeFrames(state.doc, state.pageId);
+  return selected !== undefined && frames.some((frame) => frame.id === selected) ? selected : startFrame(state.doc, state.pageId);
+}
+
+/** Resolves once a shared file's changes made here have reached the server, or after `limit` ms, whichever is first. */
+function untilSent(session: CollabSession, limit = 2000): Promise<void> {
+  return new Promise((resolve) => {
+    if (session.store.getState().pending === 0) {
+      resolve();
+      return;
+    }
+    let stop = (): void => undefined;
+    const timer = window.setTimeout(() => {
+      stop();
+      resolve();
+    }, limit);
+    stop = session.store.subscribe((state) => {
+      if (state.pending !== 0) return;
+      window.clearTimeout(timer);
+      stop();
+      resolve();
+    });
+  });
+}
 
 /**
  * Where a file in the trash can be restored from: the trash of the first of the person's workspaces (where they
@@ -255,9 +287,11 @@ interface EditorProps {
   onExit: () => void;
   /** Set for a shared document: its ID, the server's sequence number it was read at, and a thread to open. */
   shared?: { docId: string; seq: number; threadId?: string };
+  /** Opens the Share dialog, saying a prototype link needs the file shared (`#/file/<id>/share`). */
+  openShare?: boolean;
 }
 
-function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) {
+function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: EditorProps) {
   const sharedId = shared?.docId ?? null;
   const controller = useRef<InteractionController | null>(null);
   const saver = useRef<Autosaver | null>(null);
@@ -291,6 +325,13 @@ function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) 
 
   // What collaboration knows and does while this file is open: for a shared document, with the live connection.
   const session = useMemo(() => createCollabSession({ docId: sharedId, api, editor: store }), [sharedId, store]);
+  // Present on a shared file waits a moment for its changes to be sent; leaving the editor meanwhile calls that off.
+  const presentGate = useRef<ReturnType<typeof createPresentGate> | null>(null);
+  useEffect(() => {
+    const gate = createPresentGate();
+    presentGate.current = gate;
+    return () => gate.cancel();
+  }, []);
   const sharedSeq = shared?.seq ?? 0;
   useEffect(() => {
     if (sharedId === null) return;
@@ -303,6 +344,12 @@ function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) 
       live.close();
     };
   }, [sharedId, sharedSeq, store, session, storage]);
+  // Sent here from a prototype to be shared: the Share dialog opens, and the address goes back to the file's own.
+  useEffect(() => {
+    if (!openShare || sharedId !== null) return;
+    session.openShare(SHARE_FIRST_REASON);
+    if (/\/share$/.test(window.location.hash)) window.history.replaceState(null, '', window.location.hash.replace(/\/share$/, ''));
+  }, [openShare, sharedId, session]);
   // Opened from a notification: once the comments are read, go to the one it is about.
   const threadToOpen = useRef(shared?.threadId ?? null);
   useEffect(() => {
@@ -414,22 +461,30 @@ function Editor({ storage, store, meta, repairs, onExit, shared }: EditorProps) 
       },
       present: (startId) => {
         const state = store.getState();
+        const start = startId ?? presentFrom(state);
+        if (state.editingTextId !== null) state.commitGesture('Edit text');
         if (sharedId !== null) {
-          setNotice({
-            title: 'Presenting is not available for shared files yet.',
-            lines: ['The prototype viewer plays files on this device. To present this design, save a copy to disk (File menu), import it, and present it from there.'],
+          // A shared file is presented from the server: what was changed here is sent first (for a moment at most),
+          // and whatever has not gone is still shown, as the presentation also reads what this device keeps unsent.
+          presentGate.current?.start(untilSent(session), () => {
+            window.location.hash = presentHash(sharedId, start);
           });
           return;
         }
-        // From the frame that is named or selected; otherwise from the first flow, or the first frame.
-        const selected = state.selection.length === 1 ? state.selection[0] : undefined;
-        const frames = prototypeFrames(state.doc, state.pageId);
-        const start = startId ?? (selected !== undefined && frames.some((frame) => frame.id === selected) ? selected : startFrame(state.doc, state.pageId));
-        if (state.editingTextId !== null) state.commitGesture('Edit text');
         // The viewer reads the file from storage, so it is written first.
         const pending = saver.current?.flush() ?? Promise.resolve();
         void pending.then(() => {
           window.location.hash = `#/proto/${state.doc.id}${start ? `/${start}` : ''}`;
+        });
+      },
+      copyPrototypeLink: (startId) => {
+        // A file on this device has no link others could open: it is shared first.
+        const plan = planPrototypeLink({ sharedId, linkAccess: session.store.getState().linkAccess, startId: startId ?? presentFrom(store.getState()), origin: linkOrigin() });
+        const clipboard = typeof navigator.clipboard?.writeText === 'function' ? navigator.clipboard : null;
+        void copyPrototypeLink(plan, {
+          writeText: clipboard ? (text) => clipboard.writeText(text) : undefined,
+          said: (url, audience, copied) => setNotice({ title: copied ? 'Prototype link copied.' : 'Copy this prototype link:', lines: [url, audience] }),
+          shareFirst: (reason) => session.openShare(reason),
         });
       },
       // A shared document is kept on the collaboration server as it changes; there is nothing to save here.

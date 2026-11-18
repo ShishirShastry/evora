@@ -70,7 +70,7 @@ export function AccountDialog({ mode: initialMode = 'signin', onClose, onDone, r
             Create account
           </button>
         </div>
-        {google && <GoogleButton mode={mode} invite={invite} disabled={busy} navigate={navigate} />}
+        {google && <GoogleButton mode={mode} invite={invite} disabled={busy} navigate={navigate} onSignedIn={onClose} />}
         {mode === 'signup' && (
           <label className="flex flex-col gap-1">
             <span className="text-dim">Name</span>

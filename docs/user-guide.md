@@ -461,9 +461,11 @@ Choose **Present** (**Ctrl+Alt+Enter**). The viewer has:
 - **Back to the editor**
 - The flow, the device and the scale (**Fit to window**, **Fit width**, **Actual size**)
 - **Back** and **Restart** (or press **R**)
-- **Copy link** and **Full screen**
+- **Copy prototype link** and **Full screen**
 
-Limits: a prototype link opens only in the browser where the file is kept. Shared files cannot be presented directly yet: save a copy to disk, import it, and present it from there. There is no video or sound, scrolling has no momentum, and sticky layers stick to the top only.
+**Prototype links.** Share the file first (see [Sharing and links](#sharing-and-links)); then **Copy prototype link** (in the presentation bar, the Prototype panel, beside each flow, the View menu or the Share dialog) gives a link that opens straight into the presentation, at the chosen frame or flow. Anyone who can open the file can open its prototype: teammates, and anyone with the link when the file's link lets anyone view (they give a name first). Someone without access is told how to get it. For a file kept only on this device, the button offers to share it first.
+
+Limits: a presentation shows the file as it was when it was opened; reload to see later changes. There is no separate permission for prototypes only. There is no video or sound, scrolling has no momentum, and sticky layers stick to the top only.
 
 ---
 
@@ -512,7 +514,7 @@ Working together needs an Evora **collaboration server**. Anyone can run one, fo
 
 On the file browser, choose **Sign in**. The dialog has two tabs, **Sign in** and **Create account**. An account has a name, an email and a password of at least 8 characters. Once you are signed in, your avatar opens the account menu, with **Change name…** and **Sign out**. (A guest's menu has **Sign in…** and **Create an account…**.)
 
-**Continue with Google** appears in these dialogs when the server's owner has set it up (see the [self-hosting guide](self-hosting.md#continue-with-google)). It does not work in the desktop app.
+**Continue with Google** appears in these dialogs when the server's owner has set it up (see the [self-hosting guide](self-hosting.md#continue-with-google)). In the desktop app it opens your browser to sign in with Google, then brings you back to Evora; your browser may ask whether to open Evora. It needs the team server at its public https address.
 
 ### Workspaces and roles
 
@@ -526,7 +528,7 @@ A workspace holds shared files and projects. Invite people by email, or with an 
 | **Can edit** | Change the design, and invite people (but not make owners). |
 | **Can view** | Look and comment, but not change the design. |
 
-No email is sent. An email invitation waits until someone signs up with that address, and email addresses are not verified, so it goes to whoever signs up with it first. Invite links work at once.
+**Email.** When the server's owner has given it a mail server (see the [self-hosting guide](self-hosting.md#sending-email)), Evora emails invitations and @mentions, and asks each person to confirm their address with a link (a notice with **Resend** shows until it is confirmed). An email invitation is then taken up only by an account that has confirmed that address. You can turn mention emails off from the account menu. Without a mail server, no email is sent: an email invitation waits until someone signs up with that address, and addresses are not confirmed, so it goes to whoever signs up with it first. Invite links work at once either way.
 
 ### Sharing and links
 

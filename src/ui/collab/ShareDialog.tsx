@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { documentLink, errorMessage, type EvoraApi, type MembersResult } from '../../collab/api';
+import { linkOrigin } from '../../collab/endpoint';
 import type { DocInfo, LinkAccess, Member, Role, Workspace } from '../../collab/protocol';
 import { Dialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
+import { copyPrototypeLink, planPrototypeLink } from '../prototype/links';
 import { InviteForm, MembersList } from './Members';
 import { copyText } from './hooks';
 
@@ -67,6 +69,8 @@ interface DocumentShareDialogProps {
   origin?: string;
   /** Whether the person looking has an account (a guest may not see who has access). True by default. */
   signedIn?: boolean;
+  /** The frame its prototype link starts from; null (the default) starts where the file's first flow or frame does. */
+  prototypeStartId?: string | null;
 }
 
 /**
@@ -74,15 +78,19 @@ interface DocumentShareDialogProps {
  * role, see and change who has access, choose who can open it by its link,
  * and copy the link. Free, with no limit on the number of people.
  */
-export function DocumentShareDialog({ api, info, role, meId, onInfo, onClose, origin, signedIn = true }: DocumentShareDialogProps) {
+export function DocumentShareDialog({ api, info, role, meId, onInfo, onClose, origin, signedIn = true, prototypeStartId = null }: DocumentShareDialogProps) {
   const [members, setMembers] = useState<MembersResult | null>(null);
   const [workspaceMembers, setWorkspaceMembers] = useState<Member[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** What "Copy prototype link" did: copied, or the link shown to be copied by hand, with who it opens for. */
+  const [protoCopy, setProtoCopy] = useState<{ url: string; audience: string; copied: boolean } | null>(null);
   const [linkAccess, setLinkAccess] = useState<LinkAccess>(info.linkAccess);
   const manage = role === 'owner' || role === 'editor';
 
   useEffect(() => setLinkAccess(info.linkAccess), [info.linkAccess]);
+  // Who the copied prototype link opens for changes with link access: the old note is taken down.
+  useEffect(() => setProtoCopy(null), [linkAccess]);
 
   useEffect(() => {
     let current = true;
@@ -122,6 +130,15 @@ export function DocumentShareDialog({ api, info, role, meId, onInfo, onClose, or
   };
 
   const link = documentLink(info.id, origin);
+  const copyProtoLink = (): void => {
+    const plan = planPrototypeLink({ sharedId: info.id, linkAccess, startId: prototypeStartId, origin: origin ?? linkOrigin() });
+    const clipboard = typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function' ? navigator.clipboard : null;
+    void copyPrototypeLink(plan, {
+      writeText: clipboard ? (text) => clipboard.writeText(text) : undefined,
+      said: (url, audience, done) => setProtoCopy({ url, audience, copied: done }),
+      shareFirst: () => undefined,
+    });
+  };
   const direct = new Set(members?.members.map((member) => member.user.id) ?? []);
   const throughWorkspace = workspaceMembers.filter((member) => !direct.has(member.user.id));
 
@@ -185,6 +202,21 @@ export function DocumentShareDialog({ api, info, role, meId, onInfo, onClose, or
             <p role="status" className="m-0 text-success">
               Link copied.
             </p>
+          )}
+          {/* The prototype: the same file, opened straight into presentation, for the same people. */}
+          <div className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 text-dim">Prototype link: opens the file in presentation.</span>
+            <button type="button" className="ev-button !h-7 flex-none" onClick={copyProtoLink}>
+              <Icon name="link" size={14} />
+              Copy prototype link
+            </button>
+          </div>
+          {protoCopy && (
+            <div role="status" aria-label="Prototype link" className="flex flex-col gap-1">
+              <p className={`m-0 ${protoCopy.copied ? 'text-success' : 'text-ink'}`}>{protoCopy.copied ? 'Prototype link copied.' : 'The browser did not allow copying. Copy this prototype link yourself:'}</p>
+              {!protoCopy.copied && <input className="ev-field !h-7 text-dim" readOnly aria-label="Prototype link to copy" value={protoCopy.url} onFocus={(event) => event.currentTarget.select()} />}
+              <p className="m-0 text-[11px] text-dim">{protoCopy.audience}</p>
+            </div>
           )}
         </section>
         <p className="m-0 border-t border-line pt-3 text-center text-[11px] text-dim">Free · unlimited people. Everyone can edit, view and comment at no cost.</p>

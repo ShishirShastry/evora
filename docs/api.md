@@ -174,6 +174,10 @@ limit the route answers `429`.
 | Comments | 600 | Person | New threads, replies and comment edits |
 | Invitations | 300 | Account | `POST /api/workspaces/:id/members`, `POST /api/workspaces/:id/invites`, `POST /api/documents/:id/members` |
 | Image uploads | 5000 | Person (or client address) | `PUT /api/documents/:id/assets/:hash` |
+| New email links | 5 | Account | `POST /api/me/email/resend` |
+| Invitation emails | 50 | Account | Invitations by email beyond this are still made, without an email |
+| Wrong email links | 50 | Client address | `POST /api/auth/verify-email` with a token that is wrong, used or expired |
+| Wrong passwords for a new address | 10 | Account | `PATCH /api/me/email` with `email` |
 
 Once an address is limited on sign-in, even a correct password is refused until
 the window ends.
@@ -497,7 +501,9 @@ rest of the server is in. They accept `GET` and `HEAD`.
   1024 characters. A new account gets its own workspace (`"<name>'s
   workspace"`), and any invitations waiting for that email are taken up at
   once. `409` when the email already has an account; `429` for too many new
-  accounts from one address. The email is not verified.
+  accounts from one address. With email off the address is not verified; with
+  email on, a link to confirm it is sent, and invitations wait until it is
+  confirmed (see [Email](#email)).
 - **Sign in.** `401 "Wrong email or password"` for a wrong password or an
   unknown email (both take the same time). An account made with Google has no
   password until one is set with `PATCH /api/me`, so signing in with a password
@@ -524,9 +530,9 @@ session token is never put in an address.
 | Route | Access | Body / query | Answer |
 |---|---|---|---|
 | `GET /api/auth/providers` | Public | — | `{google: boolean}` |
-| `GET /api/auth/google/start` | Public | `?origin=<app origin>&mode=login\|signup&invite=<invite token>` | `302` to Google |
-| `GET /api/auth/google/callback` | Public (Google sends the browser here) | `?code&state` | `302` back to the app |
-| `POST /api/auth/google/redeem` | Public | `{ticket}` | `AuthResult` |
+| `GET /api/auth/google/start` | Public | `?origin=<app origin>&mode=login\|signup&invite=<invite token>&desktop=1&nonce=<nonce>&code_challenge=<challenge>&code_challenge_method=S256` | `302` to Google |
+| `GET /api/auth/google/callback` | Public (Google sends the browser here) | `?code&state` | `302` back to the app; for a desktop sign-in, `200` with a page that goes on to `evora://auth` |
+| `POST /api/auth/google/redeem` | Public | `{ticket, verifier?}` (`verifier`: only for a desktop ticket) | `AuthResult` |
 
 1. Send the browser to `/api/auth/google/start`. `origin` must be the app's
    public URL or a `localhost` / `127.0.0.1` origin (`400` otherwise). Without
@@ -546,8 +552,73 @@ session token is never put in an address.
 
 An account with the same verified email is linked to the Google account. When
 that happens, every session the account had before ends, since accounts are
-made without checking the email. Google sign-in does not work in the desktop
-app yet.
+made without checking the email.
+
+**From the desktop app.** The desktop app (whose pages are at `app://evora/`)
+opens `/api/auth/google/start` in the system's browser with `origin` set to
+the server's own origin (so it must be the public URL or a localhost one, as
+above), `desktop=1`, `nonce` (22 to 128 letters, digits, `-` or `_` that the
+app made) and `code_challenge`: the base64url SHA-256 of a random PKCE
+verifier the app keeps to itself (43 letters, digits, `-` or `_`), with
+`code_challenge_method=S256` (the default; any other method is refused). `400`
+when `desktop` is given without a good nonce and challenge, or with a value
+other than `1`. Everything else is the same, the cookie included, until the
+callback: instead of the `302` to the app, it answers `200` with a small HTML
+page (no scripts, `Cache-Control: no-store`) that says "Click Open Evora to
+finish", with an "Open Evora" link (and a meta refresh, as a best effort) to
+`evora://auth?ticket=<ticket>&nonce=<nonce>`, or
+`evora://auth?error=<message>&nonce=<nonce>`. The system hands that address to
+the desktop app, which accepts it only with its own nonce, within 10 minutes,
+once, and then posts `{ticket, verifier}` to `/api/auth/google/redeem`.
+
+A desktop ticket is bound to the challenge it was started with: it is redeemed
+only with the verifier whose SHA-256 is that challenge (compared in constant
+time). Posted without a verifier, or with another one, it is refused (`401`)
+and burned, so a program that caught the `evora://` address cannot use it. Web
+tickets need no verifier (one given is ignored). The server keeps the nonce and
+challenge of each desktop sign-in in memory (at most 10,000, each until its
+state expires): a server restarted during a desktop sign-in finishes it in the
+web app at `origin` instead. A ticket, once made, is stored with its challenge,
+so a restart does not unbind it.
+
+### Email
+
+Email is on only when the server has a mail relay (`EVORA_SMTP_URL` and
+`EVORA_MAIL_FROM`, see [Sending email](self-hosting.md#sending-email)). These
+routes exist either way; `mail` in the answer says which.
+
+| Route | Access | Body | Answer |
+|---|---|---|---|
+| `GET /api/me/email` | Account | — | `{mail: boolean, email, verified: boolean, mentionEmails: boolean}` |
+| `PATCH /api/me/email` | Account | `{mentionEmails?: boolean, email?, password?}` | the same as `GET` |
+| `POST /api/me/email/resend` | Account | — | `{sent: true}` |
+| `POST /api/auth/verify-email` | Public | `{token}` | `{email, verified: true}` |
+
+- **Confirming an address.** With email on, signing up with a password (and
+  changing the address) sends a link, `<EVORA_PUBLIC_URL>/#/verify-email/<token>`.
+  The app posts the token to `POST /api/auth/verify-email`, which needs no
+  session, so the link works on any device. A token works once, for 24 hours,
+  for the address it was sent to; only its SHA-256 is stored. `400` for a token
+  that is wrong, used, expired, or for an address the account no longer has;
+  `429` after too many such tries from one client address. Confirming takes up
+  the invitations waiting for the address. An account made through Google, or
+  linked to Google by its verified address, is confirmed already (and linking
+  takes up its waiting invitations too).
+- **`resend`** makes a new link and sends it; older links stop working. `409`
+  when email is off or the address is confirmed already; `429` beyond 5 in 15
+  minutes.
+- **`PATCH`**: `mentionEmails` turns the emails about mentions off or on (the
+  notification in the app is not affected). `email` changes the account's
+  address (up to 254 characters, lower-cased); it needs the account's current
+  `password` when it has one (`403` otherwise, `429` after 10 wrong ones), and
+  `409` when another account has it. The new address is not confirmed: with
+  email on a link is sent to it, and invitations to it wait until it is
+  confirmed. With email off, changing the address takes up no invitations.
+- **What is sent.** Invitations to a workspace or a file by email (to the
+  address, whether or not it has an account), mentions in comments (to the
+  mentioned person's confirmed address, unless `mentionEmails` is false), and
+  the links above. Sending happens in the background and never delays an
+  answer.
 
 ### Workspaces and members
 
@@ -571,7 +642,10 @@ app yet.
 - **Adding a member** by email: if the email has an account, the person is
   added at once (or their role is raised; it is never lowered here), and gets
   an `invite` notification when newly added. If not, a pending invitation is kept and taken up when
-  someone signs up with that email. No email is sent. Only owners can make
+  someone signs up with that email. With email off no email is sent. With email
+  on ([Email](#email)) the address is sent the invitation, and an account whose
+  address is not confirmed yet gets it only once it is: until then it is
+  pending (listed in `pending`). Only owners can make
   owners (`403`). Counts towards the invitation limit (`429`).
 - **`:userId` can be an email** in `PATCH` and `DELETE` of members: that
   changes or removes a pending invitation. Removing a pending invitation needs
@@ -1113,8 +1187,11 @@ These are known and listed in the project's handoff notes:
 
 - A client with edit access can still send clocks up to 24 hours ahead, which
   can make its changes win over others' until then.
-- Email invitations go to whoever signs up first with that address, since
-  email addresses are not verified. No email is ever sent.
+- With email off (the default), email invitations go to whoever signs up first
+  with that address, since addresses are not verified, and no email is sent.
+  With email on, only a confirmed address takes up an invitation; but an
+  account made with someone else's address still holds that address (it cannot
+  be signed up for again) until its owner links it with Continue with Google.
 - There is no limit on the number of connections per address.
 - `/api/health` and `/api/version` do not carry the security headers, and the
   health check's `503` includes the database's error text.
@@ -1122,9 +1199,8 @@ These are known and listed in the project's handoff notes:
   trust-proxy setting.
 - Behind a reverse proxy without the trust-proxy setting, every caller without
   an account shares the proxy's address and its rate limits.
-- "Continue with Google" does not work in the desktop app.
 - The server has no TLS of its own: put it behind a reverse proxy for the
   internet. It runs as one process, and registers are never compacted.
 
-This reference covers every route the API registers (98, the same table the
+This reference covers every route the API registers (98, plus the 4 email routes, the same table the
 security tests walk), plus `GET /api/version` and the WebSocket at `/ws`.

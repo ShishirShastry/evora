@@ -23,6 +23,7 @@ Only `electron`, `electron-builder` and `electron-updater` are added for this; e
 - `menu.ts` and `menuSpec.ts`: the native menus. Command items run the app's own commands (`src/state/commands.ts`) in the window; a unit test checks their labels and shortcuts against the commands. On Windows and Linux the shortcuts are shown but left to the window (`registerAccelerator: false`), so the editor and text fields keep their keys; on macOS, where a menu always takes its shortcut, only shortcuts with ⌘ are given.
 - `hostServer.ts`: "Host a team server from this computer" (File ▸ Collaboration…).
 - `updates.ts`: automatic updates.
+- `auth.ts`: "Continue with Google" through the system's browser, back at `evora://auth` (below).
 - `settings.ts`: the app's settings and where the window was.
 
 In the web app, `src/ui/desktop/DesktopMount.tsx` (mounted beside the app in `src/main.tsx`) and `src/ui/desktop/useDesktopEditor.ts` (one line in the editor) do the window's part. Both do nothing in a browser.
@@ -43,7 +44,20 @@ File ▸ Collaboration… (on macOS, Evora ▸ Collaboration…) sets the collab
 
 "Host a team server from this computer" starts Evora's own server (`server/main.ts`, unchanged) as a child process of the app's executable in Node mode (`ELECTRON_RUN_AS_NODE=1`; Electron's Node 24 runs the `.ts` files by stripping their types and has `node:sqlite`). It listens on every network address of the computer on the chosen port (8787 by default), keeps its data in the app's data folder (`team-server/`), serves the app to browsers too, and shows the addresses others use. It stops when the app quits. The system's firewall may ask whether Evora may accept connections.
 
-Not working in the desktop app: "Continue with Google" (the server only sends people back to a web address).
+### Continue with Google
+
+Google cannot send anyone back to `app://evora/`, so the desktop app signs in through the system's browser (`auth.ts`, the usual pattern for desktop apps):
+
+1. "Continue with Google" makes, in the main process, a random nonce and a random PKCE verifier, remembers them with the time, the window and the collaboration server's origin, and opens the server's `/api/auth/google/start?origin=<server>&mode=…&desktop=1&nonce=…&code_challenge=<base64url(SHA-256(verifier))>&code_challenge_method=S256` in the system's browser (`shell.openExternal`, awaited, only at the configured server's own http(s) address; when the browser cannot be opened, the dialog says so and nothing is left waiting). With no server chosen, the dialog says to choose one first.
+2. The server runs its usual Google flow in that browser and ends on a page that says "Click Open Evora to finish", whose "Open Evora" link (and a best-effort meta refresh) goes to `evora://auth?ticket=…&nonce=…` (or `error=…`). The system hands that address to the app: `open-url` on macOS, a second launch on Windows and Linux (the one-instance lock passes its command line to the running app).
+3. The app accepts it only with the nonce it made, within 10 minutes, for the collaboration server the sign-in started at, and once. When no sign-in is waiting, the address is ignored and the app only comes to the front; a waiting sign-in whose nonce does not match, that took too long, or whose server was changed since is refused with a message, one at a time.
+4. The main process then redeems the one-time ticket (single use, two minutes) at the server's `/api/auth/google/redeem` with the verifier, and sends the session to the window that started the sign-in (`onGoogleReturn` on `window.evoraDesktop`). The window keeps it where it is, without changing route, so an open document stays open, and the sign-in dialog says who is signed in (`src/ui/collab/google.tsx`).
+
+The server redeems a ticket made for the desktop only with the verifier whose challenge it was given at the start, and burns it when it is brought without it. So another program that registered `evora://` too and caught the address cannot use the ticket. The verifier never leaves the main process: it is in no address, no IPC message and no log. Only the one-time ticket is ever in an address.
+
+The `evora` scheme is registered by the app itself when it starts (`app.setAsDefaultProtocolClient`; in development with Electron's path and the app's folder, and never in a test run) and by the installers (`build.protocols` in `package.json`).
+
+What the server needs: Google set up as in [Continue with Google](../docs/self-hosting.md#continue-with-google), with the server's own address as the app origin. The server accepts only its public URL (`EVORA_PUBLIC_URL`) or a `localhost` address as the origin, and Google accepts only https or localhost redirect addresses, so a team server reached by a network address such as `http://192.168.1.20:8787` needs a public https URL for this to work. Not verified yet: the whole round trip with the real Google and a real browser on each system (the parts are unit-tested; the meta refresh to `evora://` may make the browser ask "Open Evora?" first, or be ignored, which is why the page asks the person to click its link).
 
 ## Installers
 

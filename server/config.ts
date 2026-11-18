@@ -16,6 +16,8 @@
  * | --max-json-mb           | EVORA_MAX_JSON_MB           | 2                |
  * | --trust-proxy           | EVORA_TRUST_PROXY           | off              |
  * | --shutdown-seconds      | EVORA_SHUTDOWN_SECONDS      | 10               |
+ * | (variable only)         | EVORA_SMTP_URL              | (email off)      |
+ * | (variable only)         | EVORA_MAIL_FROM             | (email off)      |
  * | --fresh                 | (flag only)                 | off              |
  *
  * docs/self-hosting.md has the same table with what each one means.
@@ -27,6 +29,7 @@ import { parseArgs } from 'node:util';
 import { DEFAULT_SERVER_PORT } from '../src/collab/protocol.ts';
 import { asOrigin, googleFromEnv, type GoogleConfig } from './google.ts';
 import { parseTrustProxy, type TrustProxy } from './proxy.ts';
+import { MailSettingsError, parseSender, parseSmtpUrl, type Sender, type SmtpSettings } from './mail.ts';
 
 export interface ServerConfig {
   port: number;
@@ -41,6 +44,35 @@ export interface ServerConfig {
   /** How long a stop waits for requests under way before it drops them. */
   shutdownMs: number;
   fresh: boolean;
+  /** Sending email (invitations, mentions, confirming addresses); null when it is off. */
+  mail: MailConfig | null;
+}
+
+/** Where mail goes and whom it is from. */
+export interface MailConfig {
+  smtp: SmtpSettings;
+  from: Sender;
+}
+
+/**
+ * EVORA_SMTP_URL and EVORA_MAIL_FROM, read from the environment only (the
+ * address may hold the relay's password, which must not be seen in the list
+ * of processes). Both or neither; with them, EVORA_PUBLIC_URL is needed too,
+ * for the links in the messages. A message never contains the password.
+ */
+export function readMailConfig(env: Record<string, string | undefined>, publicUrl: string | null): MailConfig | null {
+  const url = (env.EVORA_SMTP_URL ?? '').trim();
+  const from = (env.EVORA_MAIL_FROM ?? '').trim();
+  if (!url && !from) return null;
+  if (!url) throw new ConfigError('email: EVORA_MAIL_FROM was given without EVORA_SMTP_URL');
+  if (!from) throw new ConfigError('email: EVORA_SMTP_URL was given without EVORA_MAIL_FROM (the address mail is sent from, e.g. Evora <noreply@example.com>)');
+  if (!publicUrl) throw new ConfigError('email: EVORA_PUBLIC_URL is needed for the links in the messages (e.g. https://evora.example.com)');
+  try {
+    return { smtp: parseSmtpUrl(url), from: parseSender(from) };
+  } catch (error) {
+    if (error instanceof MailSettingsError) throw new ConfigError(`email: ${error.message}`);
+    throw error;
+  }
 }
 
 /** A setting that is not one; its message is for the person starting the server. */
@@ -144,5 +176,7 @@ export function readConfig(args: string[], env: Record<string, string | undefine
     }
   }
 
-  return { port, host: listenHost, dataDir, serveDir, publicUrl, google, maxUploadBytes, maxJsonBytes, trustProxy, shutdownMs, fresh };
+  const mail = readMailConfig(env, publicUrl);
+
+  return { port, host: listenHost, dataDir, serveDir, publicUrl, google, maxUploadBytes, maxJsonBytes, trustProxy, shutdownMs, fresh, mail };
 }

@@ -6,7 +6,8 @@ import { createApi, googleStartUrl } from '../../collab/api';
 import type { AuthResult } from '../../collab/protocol';
 import { parseRoute } from '../App';
 import { AccountDialog } from './AccountDialog';
-import { GOOGLE_RETURN_KEY, readGoogleReturn, rememberGoogleReturn } from './google';
+import type { GoogleSignInResult } from '../../persistence/desktopContract';
+import { GOOGLE_RETURN_KEY, GoogleButton, finishDesktopGoogleSignIn, listenForDesktopGoogleReturn, readGoogleReturn, rememberGoogleReturn } from './google';
 import { GoogleReturnScreen } from './Screens';
 
 /**
@@ -117,6 +118,94 @@ describe('Continue with Google', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Sign in' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
     expect(visited[1]).toContain('mode=login');
+  });
+
+  it('in the desktop app, opens the sign-in in the system browser instead of leaving the window', async () => {
+    window.location.hash = '#/doc/abc';
+    const visited: string[] = [];
+    const asked: Array<{ mode: string; invite: string | null }> = [];
+    let answer = { ok: true, message: null as string | null };
+    const desktop = {
+      startGoogleSignIn: async (request: { mode: 'login' | 'signup'; invite: string | null }) => {
+        asked.push(request);
+        return answer;
+      },
+    };
+    render(<GoogleButton mode="signup" invite="inv123" navigate={(url) => visited.push(url)} desktop={desktop} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    expect(asked).toEqual([{ mode: 'signup', invite: 'inv123' }]);
+    expect(visited).toEqual([]);
+    expect(JSON.parse(sessionStorage.getItem(GOOGLE_RETURN_KEY) as string)).toEqual({ hash: '#/doc/abc', invite: 'inv123' });
+    expect((await screen.findByRole('status')).textContent).toMatch(/in your browser, then click Open Evora/);
+
+    // No server chosen: said, as an alert.
+    answer = { ok: false, message: 'Choose a collaboration server first.' };
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Choose a collaboration server first.');
+  });
+
+  it('in the desktop app, keeps the session that comes back where the window is, and says so', async () => {
+    window.location.hash = '#/doc/abc';
+    let deliver: ((result: GoogleSignInResult) => void) | null = null;
+    const desktop = {
+      startGoogleSignIn: async () => ({ ok: true, message: null }),
+      onGoogleReturn: (callback: (result: GoogleSignInResult) => void) => {
+        deliver = callback;
+        return () => {
+          deliver = null;
+        };
+      },
+    };
+    const { calls, api } = server(true);
+    const stop = listenForDesktopGoogleReturn(desktop, { api });
+    let signedIn = 0;
+    render(<GoogleButton mode="signin" desktop={desktop} onSignedIn={() => signedIn++} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    expect((await screen.findByRole('status')).textContent).toMatch(/Open Evora/);
+
+    (deliver as unknown as (result: GoogleSignInResult) => void)({ ok: true, account: result });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('You are signed in as Hedy (hedy@gmail.example).'));
+    expect(getAccount()).toEqual({ token: 'session-token', user: result.user });
+    expect(signedIn).toBe(1);
+    // The window stayed where it was: the open document is not left.
+    expect(window.location.hash).toBe('#/doc/abc');
+    expect(sessionStorage.getItem(GOOGLE_RETURN_KEY)).toBeNull();
+    // The main process redeemed the ticket: the page asks the server nothing.
+    expect(calls).toEqual([]);
+    stop();
+    expect(deliver).toBeNull();
+  });
+
+  it('in the desktop app, says why a sign-in did not finish', async () => {
+    let deliver: ((result: GoogleSignInResult) => void) | null = null;
+    const desktop = {
+      startGoogleSignIn: async () => ({ ok: true, message: null }),
+      onGoogleReturn: (callback: (result: GoogleSignInResult) => void) => {
+        deliver = callback;
+        return () => undefined;
+      },
+    };
+    listenForDesktopGoogleReturn(desktop, { api: server(true).api });
+    render(<GoogleButton mode="signin" desktop={desktop} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    await screen.findByRole('status');
+    (deliver as unknown as (result: GoogleSignInResult) => void)({ ok: false, message: 'Signing in with Google was cancelled' });
+    expect((await screen.findByRole('alert')).textContent).toBe('Signing in with Google was cancelled');
+    expect(getAccount()).toBeNull();
+  });
+
+  it('in the desktop app, a sign-in started from an invite joins the workspace, and opens it only from the invitation', async () => {
+    const { api } = server(true);
+    const store = new MemoryKeyValues();
+    rememberGoogleReturn('#/invite/inv123', 'inv123', store);
+    const onInvite = { hash: '#/invite/inv123' };
+    expect(await finishDesktopGoogleSignIn({ ok: true, account: result }, { api, store, location: onInvite })).toEqual({ ok: true, name: 'Hedy', email: result.user.email });
+    expect(onInvite.hash).toBe('#/workspace/w9');
+
+    rememberGoogleReturn('#/invite/inv123', 'inv123', store);
+    const elsewhere = { hash: '#/doc/abc' };
+    await finishDesktopGoogleSignIn({ ok: true, account: result }, { api, store, location: elsewhere });
+    expect(elsewhere.hash).toBe('#/doc/abc');
   });
 
   it('only remembers places in the app', () => {

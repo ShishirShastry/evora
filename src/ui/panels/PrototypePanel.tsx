@@ -488,6 +488,10 @@ function PagePrototype() {
           </span>
           Present
         </button>
+        {/* A link others can open, at the start of the prototype; for a file on this device, the way to share it first. */}
+        <button type="button" className="ev-button !h-7 w-full !gap-1.5" onClick={() => app.copyPrototypeLink?.()}>
+          Copy prototype link
+        </button>
       </Section>
       <Section title="Flows">
         {flows.length === 0 && <p className={EMPTY}>No flows yet. Select a frame and choose “Start a flow here”. Without a flow, the prototype starts on the selected frame or the first one.</p>}
@@ -513,6 +517,9 @@ function PagePrototype() {
                     <Icon name="play" size={9} />
                   </span>
                   Present
+                </button>
+                <button type="button" className="ev-button !h-6 flex-none !rounded-[7px] !px-2 text-[11px]" aria-label={`Copy prototype link for flow ${flow.name}`} title="Copy a link that opens this flow" onClick={() => app.copyPrototypeLink?.(flow.startId)}>
+                  Link
                 </button>
                 <button type="button" className="ev-icon-button flex-none" aria-label={`Remove flow ${flow.name}`} title="Remove flow" onClick={() => store.getState().apply('Remove flow', (d) => removeFlow(d, pageId, flow.id))}>
                   <Icon name="close" />

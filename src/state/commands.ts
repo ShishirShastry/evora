@@ -770,6 +770,12 @@ export interface AppActions {
   copyAs?(kind: 'PNG' | 'SVG' | 'CSS'): void;
   /** Plays the prototype of the page, from a frame or from where it starts. */
   present?(startId?: NodeId): void;
+  /**
+   * Copies a link that opens the prototype for others, from a frame or from
+   * where it starts. Only a shared file has one: for a file on this device it
+   * opens the Share dialog, saying why, instead.
+   */
+  copyPrototypeLink?(startId?: NodeId): void;
   /** Writes the file to local storage immediately. */
   saveNow(): void;
   /** Saves a `.evora` copy to disk. */
@@ -1110,6 +1116,12 @@ export const COMMANDS: readonly Command[] = [
     shortcut: 'Ctrl+Alt+Enter',
     keys: [{ code: 'Enter', ctrl: true, alt: true }],
     run: ({ app }) => app.present?.(),
+  },
+  {
+    id: 'view.copyPrototypeLink',
+    label: 'Copy prototype link',
+    group: 'View',
+    run: ({ app }) => app.copyPrototypeLink?.(),
   },
   {
     id: 'view.prototypeTab',

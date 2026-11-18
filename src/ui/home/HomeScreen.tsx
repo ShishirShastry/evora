@@ -9,6 +9,7 @@ import { QuickPage, TrashPage } from '../files/FilePages';
 import { FileTable, FileToolbar, Glyph, useFilesStore, useListPrefs, useLocalFileMarks } from '../files/parts';
 import { useAccount } from '../collab/hooks';
 import { NotificationsBell } from '../collab/NotificationsBell';
+import { VerifyEmailNotice } from '../collab/Email';
 import { FigError, FileFormatError, FILE_EXTENSION, LEGACY_FILE_EXTENSIONS } from '../../core';
 import { pickFile } from '../../persistence/diskIO';
 import { importFigBytes, looksLikeFig } from '../../persistence/fig';
@@ -257,7 +258,8 @@ export function HomeScreen({ storage, onOpen, view = { kind: 'local' }, onNaviga
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1120px] px-4 pb-12 pt-7 sm:px-8">
-          {search.trim() && <QuickPage key={`search:${search.trim()}`} kind="search" query={search.trim()} storage={storage} files={filesApi} signedIn={account !== null} onOpenLocal={openLocal} onOpenDoc={openDoc} />}
+          {account && <VerifyEmailNotice />}
+          {search.trim() &&<QuickPage key={`search:${search.trim()}`} kind="search" query={search.trim()} storage={storage} files={filesApi} signedIn={account !== null} onOpenLocal={openLocal} onOpenDoc={openDoc} />}
           {!search.trim() && (
           <>
           {(shown.kind === 'recents' || shown.kind === 'favorites') && (

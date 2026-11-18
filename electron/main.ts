@@ -14,6 +14,8 @@
  *   changes asks first; a copy is kept until it is saved and offered after a crash.
  * - Native menus wired to the app's commands; the collaboration server to work
  *   with, and a team server this computer can host; automatic updates.
+ * - "Continue with Google" through the system's browser, coming back at
+ *   evora://auth (electron/auth.ts).
  *
  * Environment: EVORA_DEV_URL (load a development server), EVORA_USER_DATA (the
  * data folder; the tests give each run its own).
@@ -22,8 +24,23 @@ import { app, BrowserWindow, dialog, ipcMain, screen, session, shell, type IpcMa
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHANNELS, desktopCsp, normalizeServerUrl, type CloseAction, type DesktopInfo, type DiskLink, type DocState, type NativeEdit, type RecoveryEntry, type SaveRequest, type ServerCheck } from '../src/persistence/desktopContract.js';
+import { CHANNELS, desktopCsp, normalizeServerUrl, type CloseAction, type DesktopInfo, type DiskLink, type DocState, type GoogleSignInResult, type NativeEdit, type RecoveryEntry, type SaveRequest, type ServerCheck } from '../src/persistence/desktopContract.js';
 import { APP_ORIGIN, APP_URL, hasBuiltApp, registerAppScheme, serveApp } from './appProtocol.js';
+import {
+  AUTH_SCHEME,
+  acceptReturn,
+  authUrlInArgv,
+  codeChallenge,
+  googleDesktopStartUrl,
+  newNonce,
+  newVerifier,
+  parseAuthUrl,
+  redeemTicket,
+  refusalMessage,
+  refusalShown,
+  type PendingSignIn,
+  type RefusalReason,
+} from './auth.js';
 import { APP_ROOT } from './paths.js';
 import {
   addRecent,
@@ -509,6 +526,7 @@ function registerBridge(): void {
   handle(CHANNELS.checkUpdates, () => checkForUpdates(true));
   on(CHANNELS.installUpdate, () => installUpdate());
   on(CHANNELS.openExternal, (_event, url: string) => openExternal(String(url)));
+  handle(CHANNELS.startGoogle, (event, request: { mode?: unknown; invite?: unknown }) => startGoogleSignIn(windowOf(event), request ?? {}));
 }
 
 function openExternal(url: string): void {
@@ -518,6 +536,111 @@ function openExternal(url: string): void {
   } catch {
     // Not an address: nothing is opened.
   }
+}
+
+// ------------------------------------------------------------------ "Continue with Google" (electron/auth.ts)
+
+/** The sign-in started in the system's browser and not yet back: one at a time, a new start replaces it. */
+let pendingSignIn: PendingSignIn | null = null;
+/** evora:// addresses given before there was a window (macOS's open-url can come before ready). */
+const authUrlsAtStart: string[] = [];
+/** Whether the first window was made: until then evora:// addresses wait (authUrlsAtStart). */
+let firstWindowMade = false;
+
+/** Makes this app the one the system opens evora:// addresses with. The installers register it too (build.protocols). */
+function registerAuthScheme(): void {
+  // Not in a test run: it would change which program this computer opens evora:// addresses with.
+  if (QUIET) return;
+  if (process.defaultApp) {
+    // In development the executable is Electron itself, which needs the app's folder to start Evora.
+    if (process.argv[1]) app.setAsDefaultProtocolClient(AUTH_SCHEME, process.execPath, [resolve(process.argv[1])]);
+  } else {
+    app.setAsDefaultProtocolClient(AUTH_SCHEME);
+  }
+}
+
+async function startGoogleSignIn(window: BrowserWindow | null, request: { mode?: unknown; invite?: unknown }): Promise<{ ok: boolean; message: string | null }> {
+  const server = normalizeServerUrl(loadSettings().serverUrl ?? '');
+  if (!server) return { ok: false, message: 'Choose a collaboration server first (File ▸ Collaboration…).' };
+  const nonce = newNonce();
+  // The PKCE verifier stays here, in the main process: only its challenge goes into the address.
+  const verifier = newVerifier();
+  const url = googleDesktopStartUrl(
+    server,
+    request.mode === 'signup' ? 'signup' : 'login',
+    typeof request.invite === 'string' ? request.invite : null,
+    nonce,
+    await codeChallenge(verifier),
+  );
+  if (!url) return { ok: false, message: 'The collaboration server’s address cannot be used to sign in.' };
+  // Opened only at the configured server's own http(s) address (googleDesktopStartUrl builds nothing else).
+  const pending: PendingSignIn = { nonce, verifier, server, startedAt: Date.now(), windowId: window?.id ?? -1 };
+  pendingSignIn = pending;
+  try {
+    await shell.openExternal(url);
+  } catch {
+    if (pendingSignIn === pending) pendingSignIn = null;
+    return { ok: false, message: 'Your browser could not be opened.' };
+  }
+  return { ok: true, message: null };
+}
+
+/** Whether a message about a refused return is on the screen: at most one at a time. */
+let refusalShowing = false;
+
+function showRefusal(reason: RefusalReason): void {
+  if (refusalShowing || !refusalShown(reason)) return;
+  refusalShowing = true;
+  void dialog
+    .showMessageBox({ type: 'warning', message: 'Signing in with Google', detail: refusalMessage(reason), buttons: ['OK'] })
+    .finally(() => {
+      refusalShowing = false;
+    });
+}
+
+/**
+ * An evora://auth address from the system: accepted only for the sign-in this app started (its nonce, in time, for
+ * the same server, once). The ticket is redeemed here, with the verifier, and the session goes to the window that
+ * started the sign-in, which keeps it without leaving what it shows.
+ */
+function handleAuthUrl(value: string): void {
+  if (!firstWindowMade) {
+    authUrlsAtStart.push(value);
+    return;
+  }
+  const back = parseAuthUrl(value);
+  const pending = pendingSignIn;
+  const check = back ? acceptReturn(pending, back, Date.now(), loadSettings().serverUrl) : ({ ok: false, reason: 'none' } as const);
+  if (!check.ok) {
+    // No sign-in waits (or the address is not one): ignored, the app only comes to the front.
+    if (check.reason === 'none') {
+      const record = mainWindow();
+      if (record) bringForward(record.window);
+      return;
+    }
+    const record = (pending && records.get(pending.windowId)) || mainWindow();
+    if (record) bringForward(record.window);
+    // Too late, or for another server: that sign-in is over, and its window stops waiting.
+    if ((check.reason === 'expired' || check.reason === 'server') && pending) {
+      pendingSignIn = null;
+      if (record) send(record, CHANNELS.googleReturn, { ok: false, message: refusalMessage(check.reason) } satisfies GoogleSignInResult);
+    }
+    showRefusal(check.reason);
+    return;
+  }
+  pendingSignIn = null;
+  const record = records.get(check.windowId) ?? mainWindow() ?? createWindow();
+  bringForward(record.window);
+  if (check.ticket === null) {
+    send(record, CHANNELS.googleReturn, { ok: false, message: check.error } satisfies GoogleSignInResult);
+    return;
+  }
+  const windowId = record.window.id;
+  void redeemTicket(check.server, check.ticket, check.verifier).then((result) => {
+    // To the same window, unless it was closed meanwhile.
+    const target = records.get(windowId) ?? mainWindow();
+    if (target) send(target, CHANNELS.googleReturn, result);
+  });
 }
 
 // ------------------------------------------------------------------ security of every page
@@ -590,7 +713,19 @@ function start(): void {
     else filesAtStart.push(path);
   });
 
+  // "Continue with Google" comes back at evora://auth: on macOS as open-url, on Windows and Linux as a second launch.
+  registerAuthScheme();
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleAuthUrl(url);
+  });
+
   app.on('second-instance', (_event, argv, workingDirectory) => {
+    const authUrl = authUrlInArgv(argv.slice(1));
+    if (authUrl) {
+      handleAuthUrl(authUrl);
+      return;
+    }
     const files = filesInArguments(argv.slice(1), workingDirectory);
     const record = mainWindow() ?? createWindow();
     bringForward(record.window);
@@ -638,6 +773,10 @@ function start(): void {
     recoveriesAtStart = [];
     // Files from the command line (Windows and Linux file associations open the app with the file's path).
     for (const path of [...filesInArguments(process.argv.slice(1), process.cwd()), ...filesAtStart.splice(0)]) openPath(path, first);
+    firstWindowMade = true;
+    // An evora:// address that started the app: no sign-in was waiting in it, so it is ignored.
+    const startUrl = authUrlInArgv(process.argv.slice(1));
+    for (const url of [...(startUrl ? [startUrl] : []), ...authUrlsAtStart.splice(0)]) handleAuthUrl(url);
 
     if (app.isPackaged && loadSettings().checkUpdates) {
       setTimeout(() => void checkForUpdates(false), 8000);

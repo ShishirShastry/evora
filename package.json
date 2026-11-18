@@ -107,6 +107,14 @@
         "role": "Editor"
       }
     ],
+    "protocols": [
+      {
+        "name": "Evora sign-in",
+        "schemes": [
+          "evora"
+        ]
+      }
+    ],
     "win": {
       "target": [
         {

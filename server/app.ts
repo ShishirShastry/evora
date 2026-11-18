@@ -23,6 +23,7 @@ import { MB } from './http.ts';
 import { WebSocketConnection, handshake } from './websocket.ts';
 import { serveStatic } from './static.ts';
 import type { GoogleConfig } from './google.ts';
+import type { Mailer } from './mail.ts';
 import { TRUST_NOTHING, resolveClientAddress, setClientAddress, type TrustProxy } from './proxy.ts';
 
 /** The close code live connections get when the server stops (1012, "service restart"): the app reconnects on it. */
@@ -54,6 +55,8 @@ export interface ServerOptions {
   trustProxy?: TrustProxy;
   /** How long `close()` waits for requests under way before it drops them (default 10 s). */
   shutdownMs?: number;
+  /** Where email goes out (server/mail.ts): off when not given. Closed when the server stops. */
+  mailer?: Mailer | null;
 }
 
 export interface RunningServer {
@@ -103,6 +106,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     limits: { ...DEFAULT_LIMITS, ...options.limits },
     google: options.google ?? null,
     publicUrl: options.publicUrl ?? null,
+    mailer: options.mailer ?? null,
   });
 
   let stopping = false;
@@ -249,6 +253,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     } catch {
       // A database that cannot be checkpointed is still closed; SQLite finishes the log when it is next opened.
     }
+    options.mailer?.close();
     store.close();
   }
 

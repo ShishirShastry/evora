@@ -4,6 +4,7 @@ import { api } from '../../collab/api';
 import { PopupMenu, type MenuItem } from '../components/Menu';
 import { AccountDialog, ChangeNameDialog, type AccountMode } from './AccountDialog';
 import { Avatar } from './Avatar';
+import { EmailSettingsDialog } from './Email';
 import { useAccount, useGuest } from './hooks';
 
 interface AccountMenuProps {
@@ -21,7 +22,7 @@ export function AccountMenu({ compact = false }: AccountMenuProps) {
   const guest = useGuest();
   const button = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const [dialog, setDialog] = useState<AccountMode | 'name' | null>(null);
+  const [dialog, setDialog] = useState<AccountMode | 'name' | 'email' | null>(null);
   const size = compact ? 24 : 28;
 
   const openMenu = (): void => {
@@ -44,6 +45,7 @@ export function AccountMenu({ compact = false }: AccountMenuProps) {
       { label: account.user.email, disabled: true, onSelect: () => undefined },
       { type: 'separator' },
       { label: 'Change name…', onSelect: () => setDialog('name') },
+      { label: 'Email settings…', onSelect: () => setDialog('email') },
       { label: 'Sign out', onSelect: signOut },
     ];
   } else if (guest) {
@@ -77,6 +79,7 @@ export function AccountMenu({ compact = false }: AccountMenuProps) {
       {menu && <PopupMenu x={menu.x} y={menu.y} items={items} label="Account" onClose={() => setMenu(null)} />}
       {(dialog === 'signin' || dialog === 'signup') && <AccountDialog mode={dialog} onClose={() => setDialog(null)} />}
       {dialog === 'name' && account && <ChangeNameDialog current={account.user.name} onClose={() => setDialog(null)} />}
+      {dialog === 'email' && account && <EmailSettingsDialog onClose={() => setDialog(null)} />}
     </>
   );
 }

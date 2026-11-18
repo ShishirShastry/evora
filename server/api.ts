@@ -52,6 +52,8 @@ import {
 import type { Hub } from './hub.ts';
 import {
   CALLBACK_PATH,
+  DESKTOP_PAGE_CSP,
+  DesktopFlows,
   GoogleError,
   STATE_COOKIE,
   STATE_TTL_MS,
@@ -60,11 +62,19 @@ import {
   asOrigin,
   consentUrl,
   cookieValue,
+  desktopReturnPage,
+  desktopReturnUrl,
+  desktopStart,
   fetchProfile,
   pkce,
+  ticketKey,
+  ticketKeyRange,
+  ticketRedeemable,
   type GoogleConfig,
   type GoogleProfile,
 } from './google.ts';
+import { EmailService, emailRoutes } from './email.ts';
+import type { Mailer } from './mail.ts';
 
 export interface Limits {
   /** Wrong passwords allowed per address and email in a window. */
@@ -83,6 +93,10 @@ export interface Limits {
   invites: number;
   /** Images one person may upload in a window. */
   uploads: number;
+  /** Links that confirm an email address one account may ask for again in a window (server/email.ts). */
+  emailResends: number;
+  /** Wrong, used or expired email links one address may try in a window. */
+  emailTokenFailures: number;
   windowMs: number;
 }
 
@@ -95,6 +109,8 @@ export const DEFAULT_LIMITS: Limits = {
   comments: 600,
   invites: 300,
   uploads: 5000,
+  emailResends: 5,
+  emailTokenFailures: 50,
   windowMs: 15 * 60 * 1000,
 };
 
@@ -114,6 +130,8 @@ export interface ApiOptions {
   publicUrl?: string | null;
   /** More routes, from the parts of the server built on this one (version history, plugins, community). */
   extensions?: ApiExtension[];
+  /** Where email goes out (server/mail.ts); email is off when not given (server/email.ts says what changes). */
+  mailer?: Mailer | null;
 }
 
 /**
@@ -241,10 +259,14 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
   const loginAddressFailures = new RateLimiter(limits.loginAddressFailures, limits.windowMs);
   const signups = new RateLimiter(limits.signups, limits.windowMs);
   const guests = new RateLimiter(limits.guests, limits.windowMs);
+  /** Google sign-ins started by the desktop app, which end at evora://auth (server/google.ts). */
+  const desktopFlows = new DesktopFlows();
   const counted = new RateLimiter(limits.counted, limits.windowMs);
   const commentLimit = new RateLimiter(limits.comments, limits.windowMs);
   const inviteLimit = new RateLimiter(limits.invites, limits.windowMs);
   const uploadLimit = new RateLimiter(limits.uploads, limits.windowMs);
+  /** Email: confirming addresses, invitations and mentions (server/email.ts); off without a mailer. */
+  const emails = new EmailService({ store, mailer: options.mailer ?? null, publicUrl: options.publicUrl ?? null, limits });
 
   /** Counts one more of something limited for `key`, refusing it (429) beyond the limit. */
   function limited(limiter: RateLimiter, key: string, message: string): void {
@@ -365,41 +387,36 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
     return ctx.who.user;
   }
 
-  function addPending(table: 'workspace_invites' | 'document_invites', column: 'workspace_id' | 'doc_id', id: string, address: string, wanted: Role, by: string): void {
+  /** Keeps an invitation for an address until an account takes it up; true when it is new or now gives a stronger role. */
+  function addPending(table: 'workspace_invites' | 'document_invites', column: 'workspace_id' | 'doc_id', id: string, address: string, wanted: Role, by: string): boolean {
     const held = store.one<{ role: Role }>(`SELECT role FROM ${table} WHERE ${column} = ? AND email = ?`, id, address);
     if (!held) store.run(`INSERT INTO ${table} (${column}, email, role, invited_by, created_at) VALUES (?, ?, ?, ?, ?)`, id, address, wanted, by, now());
     else if (ROLE_RANK[wanted] > ROLE_RANK[held.role]) store.run(`UPDATE ${table} SET role = ? WHERE ${column} = ? AND email = ?`, wanted, id, address);
+    else return false;
+    return true;
   }
 
-  /** Takes up the invitations waiting for an email address (a new account was made with it). */
-  function takeUpInvites(user: UserRow): void {
-    for (const invite of store.all<{ workspace_id: string; role: Role; invited_by: string }>(
-      `SELECT workspace_id, role, invited_by FROM workspace_invites WHERE email = ? ORDER BY created_at, rowid`,
-      user.email,
-    )) {
-      const workspace = store.workspaceById(invite.workspace_id);
-      if (!workspace) continue;
-      if (store.addWorkspaceMember(workspace.id, user.id, invite.role))
-        store.notify(user.id, 'invite', { id: invite.invited_by, guest: false }, workspace.name, { workspaceId: workspace.id });
-    }
-    store.run(`DELETE FROM workspace_invites WHERE email = ?`, user.email);
-    for (const invite of store.all<{ doc_id: string; role: Role; invited_by: string }>(
-      `SELECT doc_id, role, invited_by FROM document_invites WHERE email = ? ORDER BY created_at, rowid`,
-      user.email,
-    )) {
-      const doc = store.docById(invite.doc_id);
-      if (!doc) continue;
-      if (store.addDocMember(doc.id, user.id, invite.role))
-        store.notify(user.id, 'shared', { id: invite.invited_by, guest: false }, doc.name, { docId: doc.id, workspaceId: doc.workspace_id });
-    }
-    store.run(`DELETE FROM document_invites WHERE email = ?`, user.email);
-  }
-
-  /** Makes an account with its own workspace, and takes up the invitations waiting for its email. Run inside a transaction. */
+  /**
+   * Makes an account with its own workspace, and takes up the invitations
+   * waiting for its email: at once with email off (as before) or when Google
+   * verified the address; with email on otherwise only once the address is
+   * confirmed (server/email.ts). Run inside a transaction.
+   */
   function createUser(address: string, name: string, hashed: string, googleSub: string | null): UserRow {
-    const user: UserRow = { id: newId(), email: address, name, color: store.nextColor(), password: hashed, created_at: now(), google_sub: googleSub };
+    const user: UserRow = {
+      id: newId(),
+      email: address,
+      name,
+      color: store.nextColor(),
+      password: hashed,
+      created_at: now(),
+      google_sub: googleSub,
+      // Made through Google, which only gives an address it has verified.
+      email_verified: googleSub ? 1 : 0,
+      mention_emails: 1,
+    };
     store.run(
-      `INSERT INTO users (id, email, name, color, password, created_at, google_sub) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, email, name, color, password, created_at, google_sub, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       user.id,
       user.email,
       user.name,
@@ -407,9 +424,10 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       user.password,
       user.created_at,
       googleSub,
+      user.email_verified as number,
     );
     store.createWorkspace(`${name}'s workspace`, user.id);
-    takeUpInvites(user);
+    if (emails.takesInvites(user)) store.takeUpInvites(user);
     return user;
   }
 
@@ -458,6 +476,9 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
         if (store.userByEmail(address)) throw new HttpError(409, 'There is already an account with this email');
         return startSession(createUser(address, name, hashed, null));
       });
+      // With email on, a link to confirm the address (sent in the background).
+      const made = store.userById(result.user.id);
+      if (made) emails.sendVerification(made);
       return new Reply(201, result);
     }),
 
@@ -505,6 +526,11 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       const origin = allowedOrigin(query.get('origin'), options.publicUrl);
       if (!origin) throw new HttpError(400, 'origin must be the address of the app: its public URL, or localhost');
       const mode = query.get('mode') === 'signup' ? 'signup' : 'login';
+      // From the desktop app: the sign-in ends at evora://auth with this nonce, not in the web app,
+      // and its ticket is bound to this PKCE challenge (server/google.ts).
+      const desktop = desktopStart(query);
+      if (desktop === 'invalid')
+        throw new HttpError(400, 'desktop=1 needs a nonce of 22 to 128 letters, digits, - or _, and an S256 code_challenge (43 letters, digits, - or _)');
       const invite = query.get('invite');
       const state = newToken();
       const { verifier, challenge } = pkce();
@@ -522,6 +548,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
           nowMs + STATE_TTL_MS,
         );
       });
+      if (desktop) desktopFlows.begin(hashToken(state), desktop, nowMs);
       const secure = origin.startsWith('https:') ? '; Secure' : '';
       ctx.res.writeHead(302, {
         Location: consentUrl(google, `${origin}${CALLBACK_PATH}`, state, challenge),
@@ -560,7 +587,22 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
         if (fallback) return back(fallback, { error: 'This sign-in link is not valid: try again' });
         throw new HttpError(400, 'This sign-in link is not valid: go back to Evora and try again');
       }
-      const fail = (message: string): typeof HANDLED => back(found.origin, { error: message });
+      // A sign-in the desktop app started ends at evora://auth, through a page that says so (server/google.ts).
+      const desktop = desktopFlows.take(stateHash);
+      const end = (params: { ticket: string } | { error: string }): typeof HANDLED => {
+        if (!desktop) return back(found.origin, params);
+        const page = desktopReturnPage(desktopReturnUrl(desktop.nonce, params), 'error' in params ? params.error : null);
+        ctx.res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': Buffer.byteLength(page),
+          'Cache-Control': 'no-store',
+          'Content-Security-Policy': DESKTOP_PAGE_CSP,
+          'Set-Cookie': `${STATE_COOKIE}=; Path=/api/auth/google; Max-Age=0; HttpOnly; SameSite=Lax`,
+        });
+        ctx.res.end(page);
+        return HANDLED;
+      };
+      const fail = (message: string): typeof HANDLED => end({ error: message });
       // Used once only, whatever happens next.
       if (found.used || store.run(`UPDATE google_states SET used = 1 WHERE state_hash = ? AND used = 0`, stateHash) === 0)
         return fail('This sign-in was already used: try again');
@@ -594,7 +636,9 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
           if (byEmail) {
             if (byEmail.google_sub) throw new HttpError(409, 'The account with this email is linked to another Google account');
             // Google has verified that the address is theirs: the account is linked to this Google account.
-            store.run(`UPDATE users SET google_sub = ? WHERE id = ?`, profile.sub, byEmail.id);
+            // That also confirms the address (server/email.ts): invitations waiting for it are taken up.
+            store.run(`UPDATE users SET google_sub = ?, email_verified = 1 WHERE id = ?`, profile.sub, byEmail.id);
+            store.takeUpInvites(byEmail);
             // Accounts are made without checking the email, so whoever made this one may not be the address's owner:
             // every session started before Google proved who owns it ends now (their live connections are closed below).
             linkedSessions = store.all<{ token_hash: string }>(`SELECT token_hash FROM sessions WHERE user_id = ?`, byEmail.id).map((row) => row.token_hash);
@@ -625,22 +669,41 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       const nowMs = Date.now();
       store.tx(() => {
         store.run(`DELETE FROM google_tickets WHERE expires_at <= ?`, nowMs);
-        store.run(`INSERT INTO google_tickets (ticket_hash, user_id, expires_at) VALUES (?, ?, ?)`, hashToken(ticket), user.id, nowMs + TICKET_TTL_MS);
+        // A desktop ticket is kept with its PKCE challenge: only the app holding the verifier can redeem it.
+        store.run(
+          `INSERT INTO google_tickets (ticket_hash, user_id, expires_at) VALUES (?, ?, ?)`,
+          ticketKey(hashToken(ticket), desktop?.challenge ?? null),
+          user.id,
+          nowMs + TICKET_TTL_MS,
+        );
       });
-      return back(found.origin, { ticket });
+      return end({ ticket });
     }),
 
     route('POST', '/api/auth/google/redeem', async (ctx) => {
-      const hash = hashToken(text(await ctx.json(), 'ticket', 200));
-      return store.tx(() => {
-        const held = store.one<{ user_id: string; expires_at: number }>(`SELECT user_id, expires_at FROM google_tickets WHERE ticket_hash = ?`, hash);
-        // Once only.
-        store.run(`DELETE FROM google_tickets WHERE ticket_hash = ?`, hash);
+      const body = await ctx.json();
+      const hash = hashToken(text(body, 'ticket', 200));
+      // The desktop app's PKCE verifier; a web ticket needs none.
+      const verifier = body.verifier;
+      const outcome = store.tx(() => {
+        const [from, to] = ticketKeyRange(hash);
+        const held = store.one<{ ticket_hash: string; user_id: string; expires_at: number }>(
+          `SELECT ticket_hash, user_id, expires_at FROM google_tickets WHERE ticket_hash >= ? AND ticket_hash < ?`,
+          from,
+          to,
+        );
+        // Once only, whether or not it is redeemed: a desktop ticket brought without its verifier is burned too
+        // (the refusals are returned, not thrown, so that this deletion is kept).
+        if (held) store.run(`DELETE FROM google_tickets WHERE ticket_hash = ?`, held.ticket_hash);
+        if (held && !ticketRedeemable(held.ticket_hash, verifier)) return 'unbound' as const;
         const user = held && held.expires_at > Date.now() ? store.userById(held.user_id) : undefined;
-        if (!user) throw new HttpError(401, 'This sign-in has expired or was already used: try again');
+        if (!user) return 'gone' as const;
         // The session starts here, so its token is only ever in this answer, never in a URL.
         return startSession(user);
       });
+      if (outcome === 'unbound') throw new HttpError(401, 'This sign-in can only be finished by the app that started it: try again');
+      if (outcome === 'gone') throw new HttpError(401, 'This sign-in has expired or was already used: try again');
+      return outcome;
     }),
 
     route('POST', '/api/guests', async (ctx) => {
@@ -712,14 +775,19 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       const wanted = role(body);
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
       limited(inviteLimit, user.id, 'Too many invitations: try again later');
-      const invitee = store.userByEmail(address);
-      store.tx(() => {
+      // With email on, an account whose address is not confirmed yet gets the invitation once it is (server/email.ts).
+      const found = store.userByEmail(address);
+      const invitee = found && emails.takesInvites(found) ? found : undefined;
+      const told = store.tx(() => {
         if (invitee) {
-          if (store.addWorkspaceMember(workspace.id, invitee.id, wanted) && invitee.id !== user.id)
-            store.notify(invitee.id, 'invite', { id: user.id, guest: false }, workspace.name, { workspaceId: workspace.id });
-        } else addPending('workspace_invites', 'workspace_id', workspace.id, address, wanted, user.id);
+          const added = store.addWorkspaceMember(workspace.id, invitee.id, wanted) && invitee.id !== user.id;
+          if (added) store.notify(invitee.id, 'invite', { id: user.id, guest: false }, workspace.name, { workspaceId: workspace.id });
+          return added;
+        }
+        return addPending('workspace_invites', 'workspace_id', workspace.id, address, wanted, user.id);
       });
       if (invitee) hub.recheck(workspaceDocIds(workspace.id));
+      if (told && address !== user.email) emails.invited(address, user, { kind: 'workspace', id: workspace.id, name: workspace.name }, wanted, !!invitee);
       return store.workspaceMembers(workspace.id);
     }),
 
@@ -868,14 +936,19 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       const wanted = role(body);
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
       limited(inviteLimit, user.id, 'Too many invitations: try again later');
-      const invitee = store.userByEmail(address);
-      store.tx(() => {
+      // With email on, an account whose address is not confirmed yet gets the invitation once it is (server/email.ts).
+      const found = store.userByEmail(address);
+      const invitee = found && emails.takesInvites(found) ? found : undefined;
+      const told = store.tx(() => {
         if (invitee) {
-          if (store.addDocMember(doc.id, invitee.id, wanted) && invitee.id !== user.id)
-            store.notify(invitee.id, 'shared', { id: user.id, guest: false }, doc.name, { docId: doc.id, workspaceId: doc.workspace_id });
-        } else addPending('document_invites', 'doc_id', doc.id, address, wanted, user.id);
+          const added = store.addDocMember(doc.id, invitee.id, wanted) && invitee.id !== user.id;
+          if (added) store.notify(invitee.id, 'shared', { id: user.id, guest: false }, doc.name, { docId: doc.id, workspaceId: doc.workspace_id });
+          return added;
+        }
+        return addPending('document_invites', 'doc_id', doc.id, address, wanted, user.id);
       });
       if (invitee) hub.recheck([doc.id]);
+      if (told && address !== user.email) emails.invited(address, user, { kind: 'file', id: doc.id, name: doc.name }, wanted, !!invitee);
       return store.docMembers(doc.id);
     }),
 
@@ -1097,6 +1170,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
     maxUploadBytes: options.maxUploadBytes,
   };
   for (const extension of options.extensions ?? []) routes.push(...extension(kit));
+  // Email: confirming addresses and the mention setting (server/email.ts); the routes exist with email off too.
+  routes.push(...emailRoutes(kit, emails));
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     securityHeaders(req, res);

@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
-import { googleStartUrl, type EvoraApi } from '../../collab/api';
+import { setAccount } from '../../collab/account';
+import { api as defaultApi, googleStartUrl, type EvoraApi } from '../../collab/api';
 import { GOOGLE_RETURN_ROUTE } from '../../collab/protocol';
+import type { EvoraDesktop, GoogleSignInResult } from '../../persistence/desktopContract';
 
 /**
  * "Continue with Google" in the app: the button (shown only when the server
  * says Google is set up), remembering where the person was before the window
  * leaves for Google, and finding it again when it comes back to
  * `#/auth/google`.
+ *
+ * In the desktop app the window cannot leave for Google (its pages are at
+ * app://evora/): the sign-in opens in the system's browser instead. When it
+ * comes back, the main process redeems the ticket (with the PKCE verifier
+ * only it holds, electron/auth.ts) and sends the session here through
+ * `onGoogleReturn`: it is kept where the window is, without changing the
+ * route, so an open document stays open (`listenForDesktopGoogleReturn`).
  */
 
 export const GOOGLE_RETURN_KEY = 'evora:google-return';
@@ -103,6 +112,79 @@ export function GoogleMark({ size = 16 }: { size?: number }) {
   );
 }
 
+// ------------------------------------------------------------------ the desktop app's return
+
+/** How a desktop sign-in ended, as the buttons waiting for it show it. */
+export type GoogleOutcome = { ok: true; name: string; email: string } | { ok: false; message: string };
+
+/** The buttons waiting for a desktop sign-in to end. */
+const outcomeListeners = new Set<(outcome: GoogleOutcome) => void>();
+
+/** Hears how desktop sign-ins end (after the account is kept); returns a function that stops. */
+export function onGoogleOutcome(listener: (outcome: GoogleOutcome) => void): () => void {
+  outcomeListeners.add(listener);
+  return () => {
+    outcomeListeners.delete(listener);
+  };
+}
+
+interface FinishOptions {
+  api?: Pick<EvoraApi, 'acceptInvite'>;
+  store?: SessionStore | null;
+  /** The window's location (tests give their own). */
+  location?: Pick<Location, 'hash'>;
+}
+
+/**
+ * Keeps the session a desktop sign-in brought back, where the window is: the
+ * route does not change, so whatever is open (a document in the editor) stays.
+ * When it was started from an invite link, the workspace is joined too, and
+ * only when the window still shows that invitation does it go on to the
+ * workspace, as the web app does.
+ */
+export async function finishDesktopGoogleSignIn(
+  result: GoogleSignInResult,
+  { api = defaultApi, store = sessionStore(), location = window.location }: FinishOptions = {},
+): Promise<GoogleOutcome> {
+  if (!result.ok) {
+    forgetGoogleReturn(store);
+    return { ok: false, message: result.message };
+  }
+  setAccount(result.account);
+  const back = readGoogleReturn(store);
+  forgetGoogleReturn(store);
+  if (back.invite) {
+    const workspace = await api.acceptInvite(back.invite).catch(() => null);
+    if (workspace && location.hash === `#/invite/${back.invite}`) location.hash = `#/workspace/${workspace.id}`;
+  }
+  return { ok: true, name: result.account.user.name, email: result.account.user.email };
+}
+
+/** Listens for the desktop app's Google returns, keeps each session and tells the waiting buttons; returns a function that stops. */
+export function listenForDesktopGoogleReturn(desktop: Pick<EvoraDesktop, 'onGoogleReturn'>, options: FinishOptions = {}): () => void {
+  return desktop.onGoogleReturn((result) => {
+    void finishDesktopGoogleSignIn(result, options)
+      .catch((): GoogleOutcome => ({ ok: false, message: 'Signing in with Google did not finish. Try again.' }))
+      .then((outcome) => {
+        for (const listener of [...outcomeListeners]) listener(outcome);
+      });
+  });
+}
+
+// In the desktop app, the return is heard from the start, whatever is open then (the dialog with the button may have
+// been closed meanwhile). Once per page, also when this module is loaded again in development.
+const INSTALLED = Symbol.for('evora.googleReturnListener');
+{
+  const scope = globalThis as { evoraDesktop?: EvoraDesktop; [INSTALLED]?: boolean };
+  const bridge = scope.evoraDesktop;
+  if (bridge && typeof bridge.onGoogleReturn === 'function' && !scope[INSTALLED]) {
+    scope[INSTALLED] = true;
+    listenForDesktopGoogleReturn(bridge);
+  }
+}
+
+// ------------------------------------------------------------------ the button
+
 interface GoogleButtonProps {
   mode: 'signin' | 'signup';
   /** The invite link being followed, if the dialog was opened from one. */
@@ -110,13 +192,57 @@ interface GoogleButtonProps {
   disabled?: boolean;
   /** Sends the window somewhere; the browser's own navigation by default (tests give their own). */
   navigate?: (url: string) => void;
+  /** The desktop app's bridge; null in a browser (tests give their own). */
+  desktop?: Pick<EvoraDesktop, 'startGoogleSignIn'> | null;
+  /** In the desktop app: called once the sign-in this button started has ended signed in. */
+  onSignedIn?: () => void;
 }
 
+type Status = { kind: 'waiting' | 'done' | 'failed'; message: string };
+
 /** "Continue with Google", full width, followed by an "or" before the email form. */
-export function GoogleButton({ mode, invite = null, disabled = false, navigate = (url) => window.location.assign(url) }: GoogleButtonProps) {
+export function GoogleButton({
+  mode,
+  invite = null,
+  disabled = false,
+  navigate = (url) => window.location.assign(url),
+  desktop = (globalThis as { evoraDesktop?: EvoraDesktop }).evoraDesktop ?? null,
+  onSignedIn,
+}: GoogleButtonProps) {
+  const [status, setStatus] = useState<Status | null>(null);
+  const waiting = status?.kind === 'waiting';
+
+  // While waiting, the end of the sign-in is shown here: signed in, or why not.
+  useEffect(() => {
+    if (!waiting) return undefined;
+    return onGoogleOutcome((outcome) => {
+      if (outcome.ok) {
+        setStatus({ kind: 'done', message: `You are signed in as ${outcome.name} (${outcome.email}).` });
+        onSignedIn?.();
+      } else {
+        setStatus({ kind: 'failed', message: outcome.message });
+      }
+    });
+  }, [waiting, onSignedIn]);
+
   const start = (): void => {
     rememberGoogleReturn(window.location.hash || '#/', invite);
-    navigate(googleStartUrl(window.location.origin, mode === 'signup' ? 'signup' : 'login', invite));
+    const startMode = mode === 'signup' ? 'signup' : 'login';
+    if (desktop) {
+      setStatus(null);
+      desktop
+        .startGoogleSignIn({ mode: startMode, invite })
+        .then((started) =>
+          setStatus(
+            started.ok
+              ? { kind: 'waiting', message: 'Finish signing in with Google in your browser, then click Open Evora there. Evora carries on by itself.' }
+              : { kind: 'failed', message: started.message ?? 'Your browser could not be opened.' },
+          ),
+        )
+        .catch(() => setStatus({ kind: 'failed', message: 'Your browser could not be opened.' }));
+      return;
+    }
+    navigate(googleStartUrl(window.location.origin, startMode, invite));
   };
   return (
     <>
@@ -124,6 +250,11 @@ export function GoogleButton({ mode, invite = null, disabled = false, navigate =
         <GoogleMark />
         Continue with Google
       </button>
+      {status && (
+        <p role={status.kind === 'failed' ? 'alert' : 'status'} className={`m-0 leading-relaxed ${status.kind === 'failed' ? 'text-danger' : 'text-dim'}`}>
+          {status.message}
+        </p>
+      )}
       <div className="flex items-center gap-2 text-[11px] text-dim" aria-hidden="true">
         <span className="h-px flex-1 bg-current opacity-25" />
         or

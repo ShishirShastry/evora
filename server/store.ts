@@ -49,6 +49,10 @@ export interface UserRow {
   created_at: string;
   /** The Google account's ID (its `sub`), once the account signs in with Google. */
   google_sub?: string | null;
+  /** 1 once the address is known to be the account's: its link was followed, or Google has verified it (schema 3). */
+  email_verified?: number;
+  /** 0 when the account does not want an email when someone mentions it (schema 3; 1 by default). */
+  mention_emails?: number;
 }
 
 export interface GuestRow {
@@ -153,6 +157,15 @@ export interface TrashRow {
   members: string;
   trashed_by: string;
   trashed_at: number;
+}
+
+/** A notification as it was just stored, for `Store.onNotify`. */
+export interface NotificationEvent {
+  recipientId: string;
+  kind: Notification['kind'];
+  from: { id: string; guest: boolean };
+  text: string;
+  where: { docId?: string | null; threadId?: string | null; workspaceId?: string | null };
 }
 
 /** The workspace a file in the trash belongs to: one with no members, so that nobody can open it. */
@@ -415,8 +428,9 @@ CREATE TABLE IF NOT EXISTS file_trash (
 /**
  * 1: the first schema (Phase 8).
  * 2: users.google_sub (signing in with Google), google_states and google_tickets; a password may be ''.
+ * 3: users.email_verified (accounts linked to Google start verified) and users.mention_emails; email_tokens.
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /** A session ends when it has not been used for this long. */
 export const SESSION_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -501,6 +515,21 @@ export class Store {
     if (!columns.includes('google_sub')) this.db.exec(`ALTER TABLE users ADD COLUMN google_sub TEXT`);
     // Unique, but any number of accounts may have none (NULLs are distinct in SQLite).
     this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)`);
+    // 3: email. Google links only an account whose address it has verified, so those accounts start verified.
+    if (!columns.includes('email_verified')) {
+      this.db.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
+      this.db.exec(`UPDATE users SET email_verified = 1 WHERE google_sub IS NOT NULL`);
+    }
+    if (!columns.includes('mention_emails')) this.db.exec(`ALTER TABLE users ADD COLUMN mention_emails INTEGER NOT NULL DEFAULT 1`);
+    // Links that confirm an address: only their hash is kept, with the address they were sent to.
+    this.db.exec(`CREATE TABLE IF NOT EXISTS email_tokens (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS email_tokens_user ON email_tokens(user_id);`);
   }
 
   close(): void {
@@ -577,7 +606,7 @@ export class Store {
   /** The user a session token (by its hash) belongs to; a session not used for SESSION_IDLE_MS has ended. */
   sessionUser(tokenHash: string): UserRow | undefined {
     const row = this.one<UserRow & { last_used: number; started: string }>(
-      `SELECT u.id, u.email, u.name, u.color, u.password, u.created_at, s.last_used, s.created_at AS started FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
+      `SELECT u.id, u.email, u.name, u.color, u.password, u.created_at, u.email_verified, u.mention_emails, s.last_used, s.created_at AS started FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
       tokenHash,
     );
     if (!row) return undefined;
@@ -590,7 +619,16 @@ export class Store {
     }
     // Noted at most once an hour, so that reading does not mean writing every time.
     if (idle > 60 * 60 * 1000) this.run(`UPDATE sessions SET last_used = ? WHERE token_hash = ?`, nowMs, tokenHash);
-    return { id: row.id, email: row.email, name: row.name, color: row.color, password: row.password, created_at: row.created_at };
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      color: row.color,
+      password: row.password,
+      created_at: row.created_at,
+      email_verified: row.email_verified,
+      mention_emails: row.mention_emails,
+    };
   }
 
   /** Starts a session for a user; returns the token (only its hash is kept). */
@@ -1023,6 +1061,44 @@ export class Store {
 
   // -------------------------------------------------------------- notifications
 
+  private notifyListeners: ((note: NotificationEvent) => void)[] = [];
+
+  /** Runs `listener` after each notification is stored (server/email.ts sends mention emails from here). */
+  onNotify(listener: (note: NotificationEvent) => void): () => void {
+    this.notifyListeners.push(listener);
+    return () => {
+      this.notifyListeners = this.notifyListeners.filter((other) => other !== listener);
+    };
+  }
+
+  /**
+   * Takes up the invitations by email waiting for an account's address: a new
+   * account, or one whose address has just been confirmed. Run inside a
+   * transaction.
+   */
+  takeUpInvites(user: UserRow): void {
+    for (const invite of this.all<{ workspace_id: string; role: Role; invited_by: string }>(
+      `SELECT workspace_id, role, invited_by FROM workspace_invites WHERE email = ? ORDER BY created_at, rowid`,
+      user.email,
+    )) {
+      const workspace = this.workspaceById(invite.workspace_id);
+      if (!workspace) continue;
+      if (this.addWorkspaceMember(workspace.id, user.id, invite.role))
+        this.notify(user.id, 'invite', { id: invite.invited_by, guest: false }, workspace.name, { workspaceId: workspace.id });
+    }
+    this.run(`DELETE FROM workspace_invites WHERE email = ?`, user.email);
+    for (const invite of this.all<{ doc_id: string; role: Role; invited_by: string }>(
+      `SELECT doc_id, role, invited_by FROM document_invites WHERE email = ? ORDER BY created_at, rowid`,
+      user.email,
+    )) {
+      const doc = this.docById(invite.doc_id);
+      if (!doc) continue;
+      if (this.addDocMember(doc.id, user.id, invite.role))
+        this.notify(user.id, 'shared', { id: invite.invited_by, guest: false }, doc.name, { docId: doc.id, workspaceId: doc.workspace_id });
+    }
+    this.run(`DELETE FROM document_invites WHERE email = ?`, user.email);
+  }
+
   notify(
     recipientId: string,
     kind: Notification['kind'],
@@ -1044,6 +1120,14 @@ export class Store {
       text,
       now(),
     );
+    for (const listener of this.notifyListeners) {
+      try {
+        listener({ recipientId, kind, from, text, where });
+      } catch (error) {
+        // A listener's failure (an email that could not be queued) never undoes the notification.
+        console.error('A notification listener failed:', error);
+      }
+    }
   }
 
   notificationsOf(recipientId: string, limit = 200): Notification[] {

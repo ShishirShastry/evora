@@ -31,6 +31,8 @@ const CHANNELS = {
   checkUpdates: 'evora:check-updates',
   installUpdate: 'evora:install-update',
   openExternal: 'evora:open-external',
+  startGoogle: 'evora:start-google',
+  googleReturn: 'evora:google-return',
   openFile: 'evora:open-file',
   menu: 'evora:menu',
   prepareClose: 'evora:prepare-close',
@@ -75,6 +77,9 @@ const bridge: EvoraDesktop = {
   checkForUpdates: () => ipcRenderer.invoke(CHANNELS.checkUpdates),
   installUpdate: () => ipcRenderer.send(CHANNELS.installUpdate),
   openExternal: (url) => ipcRenderer.send(CHANNELS.openExternal, url),
+  startGoogleSignIn: (request) => ipcRenderer.invoke(CHANNELS.startGoogle, request),
+  // "Continue with Google" came back (electron/auth.ts): the main process redeemed the ticket; the page keeps the session where it is.
+  onGoogleReturn: (callback) => listen(CHANNELS.googleReturn, callback),
   onOpenFile: (callback) => listen(CHANNELS.openFile, callback),
   onMenu: (callback) => listen(CHANNELS.menu, callback),
   onPrepareClose: (callback) =>
@@ -90,3 +95,4 @@ const bridge: EvoraDesktop = {
 };
 
 contextBridge.exposeInMainWorld('evoraDesktop', bridge);
+

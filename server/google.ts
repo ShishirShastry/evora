@@ -16,10 +16,13 @@
  *    for a session at /api/auth/google/redeem. The session token itself is
  *    never in a URL.
  *
+ * The desktop app ends its sign-ins differently (evora://auth): see "the desktop
+ * app" below.
+ *
  * Google is off unless a client ID and secret are configured
  * (EVORA_GOOGLE_CLIENT_ID and EVORA_GOOGLE_CLIENT_SECRET).
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export interface GoogleEndpoints {
   /** Where the browser is sent to give consent. */
@@ -183,4 +186,208 @@ export function cookieValue(header: string | undefined, name: string): string | 
     if (part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
   }
   return null;
+}
+
+// ------------------------------------------------------------------ the desktop app
+
+/*
+ * The desktop app (Electron) cannot be sent back to: its pages are at
+ * app://evora/, which Google cannot redirect to. So it signs in through the
+ * system's browser:
+ *
+ * 1. The app makes a random PKCE verifier, which stays in its main process,
+ *    and opens /api/auth/google/start?…&desktop=1&nonce=<random>
+ *    &code_challenge=<base64url(SHA-256(verifier))>&code_challenge_method=S256
+ *    in the system's browser (the origin is the server's own). The nonce and
+ *    the challenge are kept here, in memory, beside the state, for as long as
+ *    the state lives.
+ * 2. Google comes back to the callback in that browser as usual (the state
+ *    cookie is checked as usual). The one-time ticket is made as usual, but
+ *    bound to the challenge (`ticketKey`), and instead of going to the web app
+ *    the browser is shown a page that says "Click Open Evora to finish", with
+ *    a link to evora://auth?ticket=…&nonce=…, which the system hands to the app.
+ * 3. The app checks that the nonce is the one it started with, then redeems
+ *    the ticket at /api/auth/google/redeem with the verifier. A desktop ticket
+ *    is redeemed only with the verifier its challenge was made from; one
+ *    brought without it, or with another, is refused and burned. So another
+ *    program that registered evora:// too and caught the address cannot use
+ *    the ticket: it does not have the verifier, which is never in an address.
+ *
+ * The nonce lets the app refuse a return it did not ask for. The flow is kept
+ * in memory only: a server restarted in the middle of a sign-in has forgotten
+ * that it was the desktop's, and that sign-in finishes in the web app at the
+ * origin instead (a known, safe failure: the origin is one the server accepts
+ * anyway). A ticket, once made, is in the database with its challenge, so a
+ * restart never makes a desktop ticket redeemable without the verifier.
+ */
+
+/** The address the desktop app is registered for, where a desktop sign-in ends. */
+export const DESKTOP_RETURN = 'evora://auth';
+/** A nonce the desktop app makes: 16 to 96 random bytes, in base64url. */
+export const NONCE_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
+/** A PKCE S256 challenge: a SHA-256 hash in base64url, without padding. */
+export const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+/** A PKCE verifier (RFC 7636): 43 to 128 unreserved characters. */
+export const VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
+
+/** What a desktop start brings: the nonce of the return, and the challenge its ticket is bound to. */
+export interface DesktopStart {
+  nonce: string;
+  challenge: string;
+}
+
+/**
+ * Whether a start asks for the desktop flow: null when it does not (the web
+ * flow, unchanged), its nonce and challenge when it does, or 'invalid' when it
+ * asks with a missing or malformed nonce or challenge.
+ */
+export function desktopStart(query: URLSearchParams): DesktopStart | null | 'invalid' {
+  if (!query.has('desktop')) return null;
+  if (query.get('desktop') !== '1') return 'invalid';
+  const nonce = query.get('nonce') ?? '';
+  const challenge = query.get('code_challenge') ?? '';
+  const method = query.get('code_challenge_method') ?? 'S256';
+  if (!NONCE_PATTERN.test(nonce) || !CHALLENGE_PATTERN.test(challenge) || method !== 'S256') return 'invalid';
+  return { nonce, challenge };
+}
+
+/** The S256 challenge of a verifier. */
+export function challengeOf(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url');
+}
+
+/** Whether `verifier` is the one `challenge` was made from, compared in constant time. */
+export function verifierMatches(verifier: unknown, challenge: string): boolean {
+  if (typeof verifier !== 'string' || !VERIFIER_PATTERN.test(verifier)) return false;
+  const made = Buffer.from(challengeOf(verifier));
+  const expected = Buffer.from(challenge);
+  return made.length === expected.length && timingSafeEqual(made, expected);
+}
+
+/*
+ * How a ticket is kept (google_tickets.ticket_hash): the SHA-256 of the ticket
+ * in hex for a web ticket, and that followed by "." and its challenge for a
+ * desktop ticket. Both are found by one range over the hash (`ticketKeyRange`),
+ * so a desktop ticket brought without its verifier is still found, and burned.
+ */
+
+/** The key a ticket is kept under: its hash, and the challenge it is bound to (desktop) or none (web). */
+export function ticketKey(ticketHash: string, challenge: string | null): string {
+  return challenge ? `${ticketHash}.${challenge}` : ticketHash;
+}
+
+/** The range of keys [from, to) a ticket with this hash may be kept under. */
+export function ticketKeyRange(ticketHash: string): [string, string] {
+  // "/" comes right after ".": every `${hash}.${challenge}` is below `${hash}/`, and no other hash (all 64 hex digits) is in between.
+  return [ticketHash, `${ticketHash}/`];
+}
+
+/** The challenge a kept ticket is bound to, or null for a web ticket. */
+export function challengeOfKey(key: string): string | null {
+  const dot = key.indexOf('.');
+  return dot < 0 ? null : key.slice(dot + 1);
+}
+
+/** Whether a kept ticket may be redeemed with this verifier: a web ticket always, a desktop one only with its own. */
+export function ticketRedeemable(key: string, verifier: unknown): boolean {
+  const challenge = challengeOfKey(key);
+  return challenge === null || verifierMatches(verifier, challenge);
+}
+
+/**
+ * The desktop sign-ins under way: the nonce and challenge of each, by the hash
+ * of its state, until the state expires. Bounded, since anyone may start a
+ * sign-in: when full, the oldest is forgotten first (that sign-in then finishes
+ * in the web app).
+ */
+export class DesktopFlows {
+  private readonly flows = new Map<string, DesktopStart & { expiresAt: number }>();
+
+  private readonly max: number;
+  private readonly ttlMs: number;
+
+  constructor(max = 10_000, ttlMs = STATE_TTL_MS) {
+    this.max = max;
+    this.ttlMs = ttlMs;
+  }
+
+  get size(): number {
+    return this.flows.size;
+  }
+
+  begin(stateHash: string, start: DesktopStart, now = Date.now()): void {
+    for (const [key, flow] of this.flows) {
+      // Kept in the order they began, all with the same lifetime: the expired ones are at the front.
+      if (flow.expiresAt > now) break;
+      this.flows.delete(key);
+    }
+    while (this.flows.size >= this.max) {
+      const oldest = this.flows.keys().next().value;
+      if (oldest === undefined) break;
+      this.flows.delete(oldest);
+    }
+    this.flows.set(stateHash, { nonce: start.nonce, challenge: start.challenge, expiresAt: now + this.ttlMs });
+  }
+
+  /** A desktop sign-in's nonce and challenge, once only; null for a web sign-in, one already taken, or one expired. */
+  take(stateHash: string, now = Date.now()): DesktopStart | null {
+    const flow = this.flows.get(stateHash);
+    if (!flow) return null;
+    this.flows.delete(stateHash);
+    return flow.expiresAt > now ? { nonce: flow.nonce, challenge: flow.challenge } : null;
+  }
+}
+
+/** evora://auth?ticket=…&nonce=… (or error=… in place of the ticket). */
+export function desktopReturnUrl(nonce: string, params: { ticket: string } | { error: string }): string {
+  const query = new URLSearchParams('ticket' in params ? { ticket: params.ticket } : { error: params.error });
+  query.set('nonce', nonce);
+  return `${DESKTOP_RETURN}?${query.toString()}`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+/** Only the page below's own inline style; no scripts, frames or forms. */
+export const DESKTOP_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+/**
+ * The page the system's browser shows at the end of a desktop sign-in. Its
+ * main action is the "Open Evora" link to `returnUrl` (evora://…), which the
+ * text asks the person to click; it also tries to go there by itself with a
+ * meta refresh, as a best effort (browsers may ask first, or not follow it).
+ */
+export function desktopReturnPage(returnUrl: string, error: string | null): string {
+  const url = escapeHtml(returnUrl);
+  const heading = error ? 'Signing in with Google did not finish' : 'Click Open Evora to finish';
+  const body = error
+    ? `<p>${escapeHtml(error)}</p><p>Click Open Evora to go back to Evora, then try again.</p>`
+    : `<p>Google has confirmed who you are. Click <strong>Open Evora</strong> to finish signing in; if your browser asks whether to open Evora, allow it.</p>`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0;url=${url}">
+<title>${heading} - Evora</title>
+<style>
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 15px/1.5 system-ui, sans-serif; background: #f6f6f7; color: #18181b; }
+main { max-width: 26rem; padding: 2rem; }
+h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+.open { display: inline-block; padding: .6rem 1.2rem; border-radius: 8px; background: #0b6bcb; color: #fff; font-weight: 600; text-decoration: none; }
+.open:focus-visible { outline: 3px solid #6cb6ff; outline-offset: 2px; }
+@media (prefers-color-scheme: dark) { body { background: #0b0b0d; color: #ececef; } .open { background: #3d8fe0; } }
+</style>
+</head>
+<body>
+<main>
+<h1>${heading}</h1>
+${body}
+<p><a class="open" href="${url}">Open Evora</a></p>
+<p>You can close this tab afterwards.</p>
+</main>
+</body>
+</html>
+`;
 }

@@ -109,6 +109,8 @@ with a message saying which setting was wrong (exit code 1).
 | `--max-json-mb` | `EVORA_MAX_JSON_MB` | `2` | The largest JSON body of other requests, in MB. |
 | `--trust-proxy` | `EVORA_TRUST_PROXY` | off | Read the client's address from `X-Forwarded-For` (see [below](#trust-proxy)). Off by default. |
 | `--shutdown-seconds` | `EVORA_SHUTDOWN_SECONDS` | `10` | On SIGTERM or SIGINT, how long requests under way may take to finish before they are dropped (0 to 600). |
+| (variable only) | `EVORA_SMTP_URL` | (email off) | The mail relay that sends Evora's email, with its account: `smtps://user:password@smtp.example.com:465` or `smtp://user:password@smtp.example.com:587` (see [Sending email](#sending-email)). Only ever read from the environment, because it holds a password. |
+| (variable only) | `EVORA_MAIL_FROM` | (email off) | The sender of that email: `noreply@example.com` or `Evora <noreply@example.com>`. Needed with `EVORA_SMTP_URL`, and both need `EVORA_PUBLIC_URL` for the links. |
 | `--fresh` | (flag only) | off | Empty the data folder first: for tests. Refused unless the folder is empty or holds an `evora.db`, so it never deletes some other folder named by mistake. |
 
 Examples:
@@ -179,6 +181,68 @@ Optional; accounts with an email and a password always work.
 Keep the secret out of git and out of command lines: an environment file
 readable only by root (`/etc/evora/evora.env`), Docker secrets or an `.env` file
 next to `docker-compose.yml` that is not committed.
+
+## Sending email
+
+Optional. Without it Evora sends no email at all and behaves as it always has.
+With it, Evora sends three kinds of short, plain messages (text and HTML, in
+UTF-8), each with a link to the app at `EVORA_PUBLIC_URL`:
+
+- **Confirm your email address**: to every new account made with a password,
+  and to an account whose address changes. The link works once, for 24 hours,
+  and only for the address it was sent to; only a hash of it is kept, and asking
+  for a new one (the "Resend" button in the app, at most 5 times in 15 minutes)
+  makes the older links stop working. An account made or linked through
+  Continue with Google counts as confirmed, because Google has verified the
+  address.
+- **Invitations**: when someone invites an address to a workspace or a file
+  (at most 50 such emails per account in 15 minutes; beyond that the
+  invitation is still made, without an email).
+- **Mentions**: when someone mentions a person in a comment, to their confirmed
+  address. Each person can turn these off in the app (account menu ▸ Email
+  settings…); the notification inside the app still comes.
+
+**What changes for invitations.** With email off, an invitation by email goes to
+whichever account has that address, or is made with it first: nothing proves the
+address belongs to that person. With email on, an invitation is taken up only
+by an account whose address is confirmed; an account that has not confirmed it
+yet gets the invitation the moment it does. Someone who makes an account with
+another person's address can therefore no longer receive their invitations.
+
+To turn it on, give the server a mail relay (your provider's SMTP service, or a
+relay such as Postfix on the same machine) and restart it:
+
+```sh
+EVORA_SMTP_URL='smtps://evora%40example.com:app-password@smtp.example.com:465' \
+EVORA_MAIL_FROM='Evora <noreply@example.com>' \
+EVORA_PUBLIC_URL=https://evora.example.com \
+node server/main.ts --serve dist
+```
+
+The server prints `Email: on, through smtps://evora%40example.com@smtp.example.com:465 (TLS), from noreply@example.com`
+(never the password), or `Email: off` when the two variables are not set.
+
+- `smtps://` is TLS from the first byte (port 465 unless given). `smtp://` to
+  another machine must switch to TLS with STARTTLS (port 587 unless given):
+  if the relay does not offer it, nothing is sent. Unencrypted SMTP is used only
+  for a relay on the same machine (`smtp://localhost:25`, `127.0.0.1`, `::1`).
+  Certificates are always checked.
+- The user name and password in the address are percent-encoded: an `@` is
+  `%40`, a `:` is `%3A`. Signing in uses AUTH PLAIN, or AUTH LOGIN when the
+  relay does not offer PLAIN; without a user name nothing is signed in.
+- The sender's domain should allow your relay to send for it (SPF, DKIM), or
+  messages may land in spam. Evora does not sign messages itself.
+- Mail goes out in the background: no request waits for it. A message that fails
+  for a passing reason (the relay busy, the connection dropped) is tried again
+  after 10 seconds, 1 minute and 5 minutes; one the relay refuses (a 5xx answer,
+  e.g. a wrong password) is not. Failures are written to the server's error
+  output with the recipient's domain only, never the address or the password.
+  The queue is in memory: messages not yet sent when the server stops are lost
+  (the log says how many). Each step of talking to the relay may take at most
+  30 seconds.
+- An account's address can be changed with `PATCH /api/me/email` (with the
+  account's password); the new address is confirmed again. There is no screen
+  for it in the app yet.
 
 ## Backups and restoring
 

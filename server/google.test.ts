@@ -6,7 +6,21 @@ import { join } from 'node:path';
 import { PEOPLE_COLORS, type AuthResult } from '../src/collab/protocol.ts';
 import { call, newDoc, personalWorkspace, signUp, tempDir, testServer, type TestServer } from './testing.ts';
 import { Store } from './store.ts';
-import { allowedOrigin, asOrigin, cookieValue, googleFromEnv } from './google.ts';
+import {
+  DesktopFlows,
+  allowedOrigin,
+  asOrigin,
+  challengeOf,
+  cookieValue,
+  desktopReturnPage,
+  desktopReturnUrl,
+  desktopStart,
+  googleFromEnv,
+  ticketKey,
+  ticketKeyRange,
+  ticketRedeemable,
+  verifierMatches,
+} from './google.ts';
 
 /**
  * "Continue with Google", against a fake Google: a small HTTP server in this
@@ -415,6 +429,204 @@ describe('Continue with Google', () => {
   });
 });
 
+describe('Continue with Google from the desktop app', () => {
+  const NONCE = 'n0nce-from-the-desktop_app-abc123';
+  /** The desktop app's PKCE verifier (it never leaves the app's main process) and its challenge. */
+  const VERIFIER = randomBytes(32).toString('base64url');
+  const CHALLENGE = createHash('sha256').update(VERIFIER).digest('base64url');
+  const DESKTOP = { desktop: '1', nonce: NONCE, code_challenge: CHALLENGE, code_challenge_method: 'S256' };
+
+  /** The callback, as the system's browser follows it in a desktop sign-in: the page it shows and the evora:// address in it. */
+  async function desktopCallback(url: URL, cookie: string): Promise<{ res: Response; page: string; returnUrl: URL }> {
+    const res = await fetch(`${server.url}${url.pathname}${url.search}`, { redirect: 'manual', headers: cookie ? { Cookie: cookie } : {} });
+    const page = await res.text();
+    const refresh = /<meta http-equiv="refresh" content="0;url=([^"]+)">/.exec(page);
+    if (!refresh) throw new Error(`No evora:// address in the page: ${page.slice(0, 200)}`);
+    return { res, page, returnUrl: new URL((refresh[1] as string).replaceAll('&amp;', '&')) };
+  }
+
+  /** A whole desktop sign-in up to the evora:// address; resolves with its ticket. */
+  async function desktopTicket(who: Profile, challenge = CHALLENGE): Promise<string> {
+    google.next = who;
+    const started = await start({ origin: server.url, mode: 'login', ...DESKTOP, code_challenge: challenge });
+    const ticket = (await desktopCallback(await consent(started), started.cookie)).returnUrl.searchParams.get('ticket');
+    if (!ticket) throw new Error('No ticket');
+    return ticket;
+  }
+
+  it('ends at evora://auth with a one-time ticket and the nonce, on a page whose main action is Open Evora', async () => {
+    const who = profile('Desk');
+    google.next = who;
+    const started = await start({ origin: server.url, mode: 'login', ...DESKTOP });
+    // The callback is still on the server's own origin; Google sees nothing of the desktop.
+    expect(started.consent.searchParams.get('redirect_uri')).toBe(`${server.url}/api/auth/google/callback`);
+    expect(started.consent.toString()).not.toContain(NONCE);
+    // Google gets the server's own PKCE challenge, not the app's.
+    expect(started.consent.searchParams.get('code_challenge')).not.toBe(CHALLENGE);
+    const { res, page, returnUrl } = await desktopCallback(await consent(started), started.cookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+    expect(res.headers.get('content-type')).toMatch(/^text\/html/);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('content-security-policy')).toMatch(/default-src 'none'/);
+    expect(res.headers.get('set-cookie')).toMatch(/evora_google_state=; .*Max-Age=0/);
+    expect(page).toContain('Click Open Evora to finish');
+    expect(page).toMatch(/<a class="open" href="evora:\/\/auth\?[^"]+">Open Evora<\/a>/);
+    expect(page).not.toMatch(/<script/i);
+    expect(returnUrl.protocol).toBe('evora:');
+    expect(returnUrl.host).toBe('auth');
+    expect(returnUrl.searchParams.get('nonce')).toBe(NONCE);
+    // Neither the challenge nor, of course, the verifier is in the address.
+    expect(returnUrl.toString()).not.toContain(CHALLENGE);
+    expect(page).not.toContain(VERIFIER);
+    const ticket = returnUrl.searchParams.get('ticket') as string;
+    expect(ticket).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    // The app trades the ticket with its verifier: once only, and the session token is in no address.
+    const first = await call<AuthResult>(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } });
+    expect(first.status).toBe(200);
+    expect(first.body.user.email).toBe(who.email);
+    expect(page).not.toContain(first.body.token);
+    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(401);
+  });
+
+  it('refuses a desktop ticket without the verifier, and burns it', async () => {
+    const who = profile('Caught');
+    const ticket = await desktopTicket(who);
+    // Another program that caught the evora:// address has the ticket, not the verifier.
+    const stolen = await call<{ error: string }>(server, 'POST', '/api/auth/google/redeem', { body: { ticket } });
+    expect(stolen.status).toBe(401);
+    expect(stolen.body.error).toMatch(/app that started it/);
+    // Burned: the app itself can no longer redeem it either (the person tries again).
+    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(401);
+    expect(server.store.all(`SELECT * FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = ?`, who.email)).toHaveLength(0);
+  });
+
+  it('refuses a desktop ticket with a wrong verifier, and burns it', async () => {
+    // Another verifier, the challenge itself, an empty one, one of another type, and one too short.
+    for (const verifier of [randomBytes(32).toString('base64url'), CHALLENGE, '', 42, 'short']) {
+      const who = profile('Wrong');
+      const ticket = await desktopTicket(who);
+      expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier } })).status, String(verifier)).toBe(401);
+      expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(401);
+      expect(server.store.all(`SELECT * FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = ?`, who.email)).toHaveLength(0);
+    }
+  });
+
+  it('redeems a desktop ticket with the right verifier once only, and keeps it bound across a restart', async () => {
+    const who = profile('Right');
+    const ticket = await desktopTicket(who);
+    // Kept with its challenge in the database, not only in memory.
+    const kept = server.store.all<{ ticket_hash: string }>(`SELECT ticket_hash FROM google_tickets WHERE ticket_hash LIKE ?`, `${createHash('sha256').update(ticket).digest('hex')}%`);
+    expect(kept.map((row) => row.ticket_hash)).toEqual([ticketKey(createHash('sha256').update(ticket).digest('hex'), CHALLENGE)]);
+    const first = await call<AuthResult>(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } });
+    expect(first.status).toBe(200);
+    expect(first.body.user.email).toBe(who.email);
+    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(401);
+  });
+
+  it('keeps web tickets working without a verifier (one given is ignored)', async () => {
+    const who = profile('Webby');
+    const result = await signInWithGoogle(who);
+    expect(result.user.email).toBe(who.email);
+    google.next = profile('WebbyToo');
+    const started = await start({ origin: server.url, mode: 'login' });
+    const ticket = (await callback(await consent(started), started.cookie)).params.get('ticket') as string;
+    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(200);
+  });
+
+  it('refuses a desktop start without a good nonce or challenge', async () => {
+    const queries: Array<Record<string, string>> = [
+      { desktop: '1' },
+      { desktop: '1', nonce: NONCE },
+      { desktop: '1', nonce: 'short', code_challenge: CHALLENGE },
+      { desktop: '1', nonce: 'has spaces and is long enough to pass', code_challenge: CHALLENGE },
+      { desktop: '1', nonce: 'x'.repeat(129), code_challenge: CHALLENGE },
+      { desktop: '1', nonce: NONCE, code_challenge: 'too-short' },
+      { desktop: '1', nonce: NONCE, code_challenge: CHALLENGE, code_challenge_method: 'plain' },
+      { desktop: 'yes', nonce: NONCE, code_challenge: CHALLENGE },
+    ];
+    for (const query of queries) {
+      const res = await fetch(`${server.url}/api/auth/google/start?${new URLSearchParams({ origin: server.url, mode: 'login', ...query })}`, { redirect: 'manual' });
+      expect(res.status, JSON.stringify(query)).toBe(400);
+    }
+  });
+
+  it('sends failures to the app too, with the nonce, and never a ticket', async () => {
+    const started = await start({ origin: server.url, mode: 'login', ...DESKTOP });
+    const state = started.consent.searchParams.get('state') as string;
+    const { page, returnUrl } = await desktopCallback(new URL(`${server.url}/api/auth/google/callback?error=access_denied&state=${state}`), started.cookie);
+    expect(page).toContain('Signing in with Google did not finish');
+    expect(page).toContain('Signing in with Google was cancelled');
+    expect(returnUrl.searchParams.get('error')).toBe('Signing in with Google was cancelled');
+    expect(returnUrl.searchParams.get('nonce')).toBe(NONCE);
+    expect(returnUrl.searchParams.get('ticket')).toBeNull();
+  });
+
+  it('uses a desktop state once only: a second callback gets no ticket', async () => {
+    google.next = profile('DeskTwice');
+    const started = await start({ origin: server.url, mode: 'login', ...DESKTOP });
+    const url = await consent(started);
+    expect((await desktopCallback(url, started.cookie)).returnUrl.searchParams.get('ticket')).toBeTruthy();
+    // The nonce went with the first use: the second is refused, as a web sign-in is.
+    const second = await callback(url, started.cookie);
+    expect(second.params.get('ticket')).toBeNull();
+    expect(second.params.get('error')).toMatch(/already used/);
+  });
+
+  it('keeps each flow until its state expires, once only, and a bounded number of them', () => {
+    const flows = new DesktopFlows(3, 1000);
+    const flow = (nonce: string) => ({ nonce, challenge: CHALLENGE });
+    flows.begin('a', flow('nonce-a'), 0);
+    expect(flows.take('a', 999)).toEqual(flow('nonce-a'));
+    expect(flows.take('a', 999)).toBeNull();
+    flows.begin('b', flow('nonce-b'), 0);
+    expect(flows.take('b', 1000)).toBeNull();
+    expect(flows.take('never', 0)).toBeNull();
+    // Expired ones are let go when another begins; when full, the oldest goes.
+    flows.begin('c', flow('nonce-c'), 0);
+    flows.begin('d', flow('nonce-d'), 5000);
+    expect(flows.size).toBe(1);
+    flows.begin('e', flow('nonce-e'), 5001);
+    flows.begin('f', flow('nonce-f'), 5002);
+    flows.begin('g', flow('nonce-g'), 5003);
+    expect(flows.size).toBe(3);
+    expect(flows.take('d', 5004)).toBeNull();
+    expect(flows.take('g', 5004)).toEqual(flow('nonce-g'));
+  });
+
+  it('checks a verifier against its challenge, and keeps tickets under keys found by one range', () => {
+    expect(challengeOf(VERIFIER)).toBe(CHALLENGE);
+    expect(verifierMatches(VERIFIER, CHALLENGE)).toBe(true);
+    expect(verifierMatches(`${VERIFIER.slice(0, -1)}${VERIFIER.endsWith('A') ? 'B' : 'A'}`, CHALLENGE)).toBe(false);
+    expect(verifierMatches(undefined, CHALLENGE)).toBe(false);
+    expect(verifierMatches('a'.repeat(129), CHALLENGE)).toBe(false);
+    const hash = 'ab'.repeat(32);
+    const [from, to] = ticketKeyRange(hash);
+    for (const key of [ticketKey(hash, null), ticketKey(hash, CHALLENGE), ticketKey(hash, '-'.repeat(43)), ticketKey(hash, '_'.repeat(43))]) {
+      expect(key >= from && key < to, key).toBe(true);
+    }
+    for (const other of ['ab'.repeat(31) + 'ac', 'ab'.repeat(31) + 'aa', `${'ab'.repeat(31)}ac.${CHALLENGE}`]) expect(other >= from && other < to, other).toBe(false);
+    expect(ticketRedeemable(ticketKey(hash, null), undefined)).toBe(true);
+    expect(ticketRedeemable(ticketKey(hash, CHALLENGE), undefined)).toBe(false);
+    expect(ticketRedeemable(ticketKey(hash, CHALLENGE), VERIFIER)).toBe(true);
+  });
+
+  it('reads the desktop flag and builds the return address and page safely', () => {
+    expect(desktopStart(new URLSearchParams('origin=x'))).toBeNull();
+    expect(desktopStart(new URLSearchParams(`desktop=1&nonce=${NONCE}&code_challenge=${CHALLENGE}`))).toEqual({ nonce: NONCE, challenge: CHALLENGE });
+    expect(desktopStart(new URLSearchParams(`desktop=1&nonce=${NONCE}`))).toBe('invalid');
+    expect(desktopStart(new URLSearchParams(`desktop=1&nonce=a&code_challenge=${CHALLENGE}`))).toBe('invalid');
+    expect(desktopReturnUrl(NONCE, { ticket: 'T' })).toBe(`evora://auth?ticket=T&nonce=${NONCE}`);
+    expect(desktopReturnUrl(NONCE, { error: 'No & "way"' })).toBe(`evora://auth?error=No+%26+%22way%22&nonce=${NONCE}`);
+    const page = desktopReturnPage('evora://auth?error=a&nonce=b', '<img src=x onerror=alert(1)>');
+    expect(page).not.toContain('<img');
+    expect(page).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(page).toContain('evora://auth?error=a&amp;nonce=b');
+    expect(page).toContain('>Open Evora</a>');
+  });
+});
+
 describe('the database before Google', () => {
   it('is brought up to date, keeping its accounts', () => {
     const dir = tempDir();
@@ -427,7 +639,7 @@ describe('the database before Google', () => {
     const store = new Store(dir);
     try {
       expect(store.userByEmail('old@example.com')).toMatchObject({ id: 'u1', name: 'Old', google_sub: null });
-      expect(store.one<{ user_version: number }>(`PRAGMA user_version`)?.user_version).toBe(2);
+      expect(store.one<{ user_version: number }>(`PRAGMA user_version`)?.user_version).toBe(3); // brought all the way up: version 3 added verified email addresses
       store.run(`UPDATE users SET google_sub = 'g1' WHERE id = 'u1'`);
       expect(store.userByGoogle('g1')?.id).toBe('u1');
       store.run(`INSERT INTO users (id, email, name, color, password, created_at) VALUES ('u2', 'b@example.com', 'B', '#0d99ff', '', 'x')`);

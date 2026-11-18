@@ -170,6 +170,11 @@ const ACCESS: Record<string, Persona[] | 'public'> = {
   'GET /api/recents': [A, G],
   'POST /api/recents/:docId': [A, O, G],
   'GET /api/files/search': [A, G],
+  // email.ts
+  'GET /api/me/email': [A, G],
+  'PATCH /api/me/email': [A, G],
+  'POST /api/me/email/resend': [A, G],
+  'POST /api/auth/verify-email': 'public',
 };
 
 interface World {

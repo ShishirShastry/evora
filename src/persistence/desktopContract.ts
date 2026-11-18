@@ -120,6 +120,28 @@ export interface ServerCheck {
   message: string | null;
 }
 
+/** What starting "Continue with Google" in the system's browser did. */
+export interface GoogleSignInStart {
+  /** Whether the browser was opened. */
+  ok: boolean;
+  /** Why not, when it was not. */
+  message: string | null;
+}
+
+/** A session from "Continue with Google": the shape of the server's AuthResult (src/collab/protocol.ts). */
+export interface GoogleAccount {
+  token: string;
+  user: { id: string; email: string; name: string; color: string; createdAt: string };
+}
+
+/**
+ * How a desktop "Continue with Google" ended, once the system's browser came
+ * back to the app: the main process has already redeemed the one-time ticket
+ * (with the PKCE verifier only it holds), so this carries the session, or a
+ * message to show.
+ */
+export type GoogleSignInResult = { ok: true; account: GoogleAccount } | { ok: false; message: string };
+
 /** Edit actions done by the system itself, in a text field. */
 export type NativeEdit = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll' | 'delete';
 
@@ -150,6 +172,16 @@ export interface EvoraDesktop {
   checkForUpdates(): Promise<UpdateStatus>;
   installUpdate(): void;
   openExternal(url: string): void;
+  /**
+   * "Continue with Google": opens the collaboration server's Google sign-in in the system's browser. When it ends,
+   * the result comes to `onGoogleReturn` (the window stays where it is).
+   */
+  startGoogleSignIn(request: { mode: 'login' | 'signup'; invite: string | null }): Promise<GoogleSignInStart>;
+  /**
+   * A desktop "Continue with Google" this window started has ended: signed in (the main process redeemed the ticket),
+   * or why not. Sent to the window that started it; nothing navigates.
+   */
+  onGoogleReturn(callback: (result: GoogleSignInResult) => void): () => void;
   /** A file to open: from the command line, a double-click, the dock, a second launch or Open Recent. */
   onOpenFile(callback: (file: DiskFile) => void): () => void;
   /** A menu item was chosen: the ID of an app command (src/state/commands.ts) or a `desktop.*` one. */
@@ -190,7 +222,9 @@ export const CHANNELS = {
   checkUpdates: 'evora:check-updates',
   installUpdate: 'evora:install-update',
   openExternal: 'evora:open-external',
+  startGoogle: 'evora:start-google',
   // main → app
+  googleReturn: 'evora:google-return',
   openFile: 'evora:open-file',
   menu: 'evora:menu',
   prepareClose: 'evora:prepare-close',
