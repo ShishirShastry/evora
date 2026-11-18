@@ -492,6 +492,10 @@
                 <li><a href="https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-Setup-0.2.0.exe" data-asset="windows-installer"><svg aria-hidden="true"><use href="#i-download"/></svg><span class="file"><b>Installer</b><small>.exe &middot; <span data-asset-size="windows-installer">121 MB</span></small></span></a></li>
                 <li><a href="https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-portable.exe" data-asset="windows-portable"><svg aria-hidden="true"><use href="#i-download"/></svg><span class="file"><b>Portable, no install</b><small>.exe &middot; <span data-asset-size="windows-portable">110 MB</span></small></span></a></li>
               </ul>
+              <div class="platform-cmd">
+                <span>Or in a terminal, with no SmartScreen warning:</span>
+                <div class="cmd"><code>winget install ShishirShastry.Evora</code><button type="button" class="copy" data-copy="winget install ShishirShastry.Evora" aria-label="Copy the winget command">Copy</button></div>
+              </div>
             </section>
             <section class="platform" data-platform="mac" aria-labelledby="platform-mac">
               <div class="platform-head">
@@ -543,7 +547,7 @@
             <div>
               <p><strong>The installers aren&rsquo;t code-signed yet,</strong> so your computer may ask you to confirm the first time you open Evora. Every installer is built in public by GitHub Actions from the open-source code.</p>
               <ul class="notice-steps">
-                <li><b>Windows:</b> if you see &ldquo;Windows protected your PC&rdquo;, choose <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+                <li><b>Windows:</b> if you see &ldquo;Windows protected your PC&rdquo;, choose <strong>More info</strong>, then <strong>Run anyway</strong>. Installing with <code>winget install ShishirShastry.Evora</code> skips this warning.</li>
                 <li><b>macOS:</b> open the .dmg and drag Evora into Applications. If macOS says it can&rsquo;t verify Evora, choose <strong>Done</strong>, then open <strong>System Settings</strong> &rarr; <strong>Privacy &amp; Security</strong> and choose <strong>Open Anyway</strong>.</li>
                 <li><b>Linux:</b> make the AppImage executable (<code>chmod +x Evora-*.AppImage</code>) and open it, or install the .deb with <code>sudo apt install ./evora_*_amd64.deb</code>.</li>
               </ul>
@@ -579,7 +583,7 @@
           </details>
           <details class="reveal">
             <summary>Why does my computer warn me when I install it?</summary>
-            <div class="answer"><p>Evora's installers aren't code-signed yet, so Windows and macOS don't recognise who made them. On Windows, SmartScreen shows &ldquo;Windows protected your PC&rdquo;: choose <strong>More info</strong>, then <strong>Run anyway</strong>. On a Mac, the first time you open Evora macOS says it can&rsquo;t verify the app: choose <strong>Done</strong>, open <strong>System Settings</strong> &rarr; <strong>Privacy &amp; Security</strong>, and choose <strong>Open Anyway</strong> next to the message about Evora. You only need to do this once. The installers are built by GitHub Actions straight from the public source code, and you can check how in the repository.</p></div>
+            <div class="answer"><p>Evora's installers aren't code-signed yet, so Windows and macOS don't recognise who made them. On Windows, SmartScreen shows &ldquo;Windows protected your PC&rdquo;: choose <strong>More info</strong>, then <strong>Run anyway</strong>, or install with <code>winget install ShishirShastry.Evora</code> in a terminal, which doesn&rsquo;t show the warning. On a Mac, the first time you open Evora macOS says it can&rsquo;t verify the app: choose <strong>Done</strong>, open <strong>System Settings</strong> &rarr; <strong>Privacy &amp; Security</strong>, and choose <strong>Open Anyway</strong> next to the message about Evora. You only need to do this once. The installers are built by GitHub Actions straight from the public source code, and you can check how in the repository.</p></div>
           </details>
           <details class="reveal">
             <summary>How does working together work?</summary>

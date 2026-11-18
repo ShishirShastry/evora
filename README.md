@@ -91,7 +91,11 @@ Not sure which Mac you have? Apple menu → **About This Mac**: a **Chip** such 
 
 #### Installing
 
-- **Windows:** run the installer. Evora isn't code-signed yet, so SmartScreen may say "Windows protected your PC": choose **More info → Run anyway**. The portable `.exe` runs without installing.
+- **Windows:** run the installer. Evora isn't code-signed yet, so SmartScreen may say "Windows protected your PC": choose **More info → Run anyway**. The portable `.exe` runs without installing. Or install it with [winget](https://learn.microsoft.com/windows/package-manager/), which doesn't show that warning:
+
+  ```powershell
+  winget install ShishirShastry.Evora
+  ```
 - **macOS:** open the `.dmg` and drag **Evora** into **Applications**. Evora isn't signed by Apple yet, so the first time you open it macOS says it can't verify the app: choose **Done**, then go to **System Settings → Privacy & Security** and choose **Open Anyway**. You only do this once. Automatic updates need a signed app, so on a Mac download each new version from here.
 - **Linux (AppImage):** make it executable and run it; it updates itself.
 

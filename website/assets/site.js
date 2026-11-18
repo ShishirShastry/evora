@@ -199,6 +199,20 @@
     if (replay) replay.addEventListener('click', play);
   }
 
+  // ---- Copy buttons beside commands. ----
+  document.querySelectorAll('[data-copy]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var text = button.getAttribute('data-copy');
+      var done = function () {
+        button.textContent = 'Copied';
+        setTimeout(function () { button.textContent = 'Copy'; }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { /* blocked: the command stays visible to copy by hand */ });
+      }
+    });
+  });
+
   // ---- The right download for this computer. ----
   // Without this script the buttons lead to the list of every download, and
   // each file link in the page points at a real file of the current version.

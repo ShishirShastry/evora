@@ -538,6 +538,19 @@ code, kbd { font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consol
 .platform-files .file { display: flex; flex-direction: column; min-width: 0; }
 .platform-files .file b { font-size: 15px; font-weight: 600; }
 .platform-files .file small { font-size: 12.5px; color: var(--subtle); }
+.platform-cmd { margin-top: 12px; font-size: 13px; color: var(--subtle); }
+.platform-cmd .cmd {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 6px 6px 12px; border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35); box-shadow: inset 0 0 0 1px var(--line);
+}
+.platform-cmd code { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.copy {
+  flex: none; padding: 5px 10px; border: 0; border-radius: 7px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text);
+  background: rgba(255, 255, 255, 0.08); transition: background-color 0.15s ease;
+}
+.copy:hover { background: rgba(255, 255, 255, 0.14); }
+.copy:focus-visible { outline: 2px solid #c9b8ff; outline-offset: 2px; }
 
 /* AI agents: the MCP server, under the three systems. */
 .agent-dl {
