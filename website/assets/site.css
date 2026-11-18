@@ -616,6 +616,7 @@ code, kbd { font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consol
 .js .reveal.is-visible .ticks li:nth-child(1) { transition-delay: 0.25s; }
 .js .reveal.is-visible .ticks li:nth-child(2) { transition-delay: 0.35s; }
 .js .reveal.is-visible .ticks li:nth-child(3) { transition-delay: 0.45s; }
+.js .reveal.is-visible .ticks li:nth-child(4) { transition-delay: 0.55s; }
 
 /* Comparison rows light up under the pointer; Evora's column shimmers once. */
 .compare tbody tr { transition: background-color 0.2s ease; }

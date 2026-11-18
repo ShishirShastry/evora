@@ -11,6 +11,32 @@ them together with Phase 10.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
+Evora 0.2.0 brings design libraries your whole team can share, prototype links you can send, email from your own team server, and Continue with Google in the desktop app.
+
+**Downloads** (below, under Assets): **Windows** 10 and 11, 64-bit: `Evora-Setup-0.2.0.exe` (installer) or `Evora-0.2.0-portable.exe` (no install). macOS (`Evora-0.2.0-arm64.dmg`, `Evora-0.2.0-x64.dmg`) and Linux (`.AppImage`, `.deb`) builds are attached too, not yet tried on real machines. Self-hosting: `evora-server-0.2.0.tar.gz` or `ghcr.io/shishirshastry/evora:0.2.0`. Installed 0.1.0 apps on Windows should offer this update by themselves (the first real test of automatic updates).
+
+**These builds are not code-signed.** Windows shows "Windows protected your PC": choose *More info*, then *Run anyway*.
+
+### Added
+
+- **Team libraries.** A shared file published as a library can be used by everyone who can view it: the Libraries dialog lists your team's libraries by workspace beside the files on this device; adding one copies its components, styles, variables and images into your file (so it still opens offline); files that use it are told when a newer version is published and can take it as one undo step.
+- **Prototype links.** Shared files can be presented, and "Copy prototype link" (presentation bar, Prototype panel, each flow, View menu, Share dialog) opens the presentation at the chosen frame for anyone who can open the file, guests through the file's link included. People without access are told how to get it.
+- **Email from your team server** (optional, off by default): with `EVORA_SMTP_URL` and `EVORA_MAIL_FROM`, the server sends invitations, mention emails (each person can turn them off) and links to confirm an address; an email invitation then goes only to someone who has confirmed that address. Capped at 100 emails a day, 30 an hour and 5 a day to one address (`EVORA_MAIL_DAILY_LIMIT`, `EVORA_MAIL_HOURLY_LIMIT`), so a relay never costs money.
+- **Continue with Google in the desktop app**, through your browser and back to Evora, without leaving the design you have open; the sign-in is bound to the app (PKCE).
+
+### Changed
+
+- File format version 27: a page that holds a library also records when its version was published. Version 26 files open unchanged.
+- Restoring or merging a version no longer brings back an old library publication.
+
+### Fixed
+
+- On a computer several people use, a shared file's offline copy is shown only to the person who kept it.
+- Changing an account's email address is rate-limited, keeps the confirmed address until the new one is confirmed, and needs a recent sign-in for accounts without a password.
+- The server's log no longer shows whole email addresses from a relay's errors.
+
 ## [0.1.0] - 2026-11-18
 
 The first release of Evora: a free, open-source design tool for interfaces,
