@@ -63,7 +63,16 @@ It is **free for everyone, for good**: no plans, no seats to count, no "upgrade 
 
 A native app that works fully offline, opens and saves files on disk, recovers your work after a crash, keeps itself up to date once releases are published, and can host a team server for your office.
 
-> **No release has been published yet.** Until the first release, build the installer yourself with `npm run dist:desktop` (see below). Early builds are not code-signed, so Windows shows an "unknown publisher" notice (**More info → Run anyway**) and macOS asks you to allow the app in **Privacy & Security**. [More about the desktop app](electron/README.md).
+| Your system | Download |
+|---|---|
+| **Windows** 10 and 11 (64-bit) | [Installer (.exe)](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-Setup-0.1.0.exe) · [Portable, no install (.exe)](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-portable.exe) |
+| **macOS**, Apple silicon (M1 and later) | [Disk image (.dmg)](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-arm64.dmg) · [.zip](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-mac-arm64.zip) |
+| **macOS**, Intel | [Disk image (.dmg)](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-x64.dmg) · [.zip](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-mac-x64.zip) |
+| **Linux** (64-bit) | [AppImage, any distribution](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-x86_64.AppImage) · [Debian and Ubuntu (.deb)](https://github.com/ShishirShastry/evora/releases/download/v0.1.0/evora_0.1.0_amd64.deb) |
+
+Every version is on the **[Releases page](https://github.com/ShishirShastry/evora/releases/latest)**.
+
+> **The first release, 0.1.0, is on its way.** These links start working once it is published; until then you can build the installer yourself with `npm run dist:desktop` (see below). Early builds are not code-signed, so Windows shows an "unknown publisher" notice (**More info → Run anyway**) and macOS asks you to allow the app in **Privacy & Security** (or right-click the app and choose **Open**). On Linux, make the AppImage executable first (`chmod +x Evora-*.AppImage`). [More about the desktop app](electron/README.md).
 
 ### 🌐 In your browser
 
