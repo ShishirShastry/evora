@@ -20,6 +20,12 @@
   <img src="https://img.shields.io/badge/runs%20on-web%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-f97316" alt="Web, Windows, macOS, Linux" />
 </p>
 
+<p align="center">
+  <a href="https://shishirshastry.github.io/evora/"><b>Website</b></a> &middot;
+  <a href="https://shishirshastry.github.io/evora/#download"><b>Download for Windows</b></a> &middot;
+  <a href="docs/user-guide.md"><b>User guide</b></a>
+</p>
+
 ---
 
 Evora is where screens, flows and design systems come to life. Sketch an idea, shape it with real layout and components, click through it as a working prototype, and hand it to developers, alone or with your whole team on the same canvas at once.

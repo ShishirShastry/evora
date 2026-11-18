@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evora: the free, open-source design tool</title>
+  <meta name="description" content="Evora is a free, open-source design and prototyping tool. Design, prototype and hand off together with an infinite canvas, real-time collaboration and developer handoff. Every feature, free for everyone. Download for Windows.">
+  <meta name="theme-color" content="#07060d">
+  <meta name="color-scheme" content="dark">
+  <link rel="canonical" href="https://shishirshastry.github.io/evora/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Evora">
+  <meta property="og:title" content="Evora: design without limits. Free, open and yours.">
+  <meta property="og:description" content="The all-in-one design tool with an infinite canvas, real-time teamwork, interactive prototypes and developer handoff. Every feature free for everyone, files on your own computer, open source.">
+  <meta property="og:url" content="https://shishirshastry.github.io/evora/">
+  <meta property="og:image" content="https://shishirshastry.github.io/evora/assets/img/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Evora design editor with a mobile app design on the canvas">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/img/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+  <link rel="preload" href="assets/fonts/inter-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/site.css">
+  <script>document.documentElement.classList.add('js');</script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Evora",
+    "applicationCategory": "DesignApplication",
+    "operatingSystem": "Windows 10, Windows 11",
+    "softwareVersion": "0.1.0",
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "downloadUrl": "https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-Setup-0.1.0.exe",
+    "url": "https://shishirshastry.github.io/evora/",
+    "description": "A free, open-source design and prototyping tool with real-time collaboration and developer handoff."
+  }
+  </script>
+</head>
+<body>
+  <!-- Icons, drawn once and reused. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="m8 12.2 2.8 2.8L16.2 9"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+      <symbol id="i-part" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M8 12h8"/></symbol>
+      <symbol id="i-gift" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></symbol>
+      <symbol id="i-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01M10 16h.01"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></symbol>
+      <symbol id="i-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></symbol>
+      <symbol id="i-import" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6m0 6-3-3m3 3 3-3"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 9v6M18 9a9 9 0 0 1-9 9"/></symbol>
+      <symbol id="i-comment" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/></symbol>
+      <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+      <symbol id="i-buoy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.9 4.9 4.3 4.3M14.8 14.8l4.3 4.3M14.8 9.2l4.3-4.3M4.9 19.1l4.3-4.3"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-5-6-5M12 19h8"/></symbol>
+      <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19 7-7 3 3-7 7z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18z"/><path d="m2 2 7.6 7.6"/><circle cx="11" cy="11" r="2"/></symbol>
+      <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.29-1.69-1.29-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></symbol>
+    </defs>
+  </svg>
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="./" aria-label="Evora home">
+        <img src="assets/img/logo.svg" alt="" width="30" height="30">
+        <span>Evora</span>
+      </a>
+      <nav class="nav" id="site-nav" aria-label="Main">
+        <a href="#why">Why Evora</a>
+        <a href="#features">Features</a>
+        <a href="#compare">Compare</a>
+        <a href="#teams">For teams</a>
+        <a href="#faq">FAQ</a>
+        <a class="nav-download" href="#download">Download for Windows</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-link" href="https://github.com/ShishirShastry/evora" aria-label="Evora on GitHub"><svg aria-hidden="true"><use href="#i-github"/></svg></a>
+        <a class="btn btn-primary btn-sm" href="#download"><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+      </div>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+        <svg aria-hidden="true"><use href="#i-menu"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ================= Hero ================= -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container">
+        <div class="hero-copy">
+          <a class="pill" href="#download"><b>New</b><span>Evora <span data-version>0.1.0</span> is out for Windows</span><svg aria-hidden="true"><use href="#i-arrow"/></svg></a>
+          <h1 id="hero-title">Design without limits.<br><span class="gradient-text">Free, open and yours.</span></h1>
+          <p class="hero-lede">Evora is the all-in-one design tool for interfaces and products: an infinite canvas, real-time teamwork, interactive prototypes and developer handoff. <strong>Every feature is free for everyone</strong>, your files stay on your computer, and the code is open source.</p>
+          <div class="cta-row">
+            <a class="btn btn-primary btn-lg" href="https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-Setup-0.1.0.exe" data-download="windows">
+              <svg aria-hidden="true"><use href="#i-download"/></svg>
+              <span class="btn-label">Download for Windows<small>Free &middot; Version <span data-version>0.1.0</span></small></span>
+            </a>
+            <a class="btn btn-ghost btn-lg" href="https://github.com/ShishirShastry/evora">
+              <svg aria-hidden="true"><use href="#i-github"/></svg>View on GitHub
+            </a>
+          </div>
+          <div class="download-meta">
+            <span>Windows 10 and 11, 64-bit</span><span class="dot" aria-hidden="true"></span>
+            <span><span data-size>121 MB</span></span><span class="dot" aria-hidden="true"></span>
+            <span>MIT licence</span><span class="dot" aria-hidden="true"></span>
+            <span>macOS and Linux coming soon</span>
+          </div>
+          <p class="platform-note" data-platform-note></p>
+        </div>
+
+        <figure class="hero-shot reveal">
+          <div class="window">
+            <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>Voyage app &mdash; Evora</span></div>
+            <img src="assets/screenshots/editor.jpg" width="2880" height="1800" alt="The Evora editor with a travel planner app on the canvas, the layers and components panels on the left and the design properties on the right" fetchpriority="high">
+          </div>
+          <figcaption class="visually-hidden">A real screenshot of Evora 0.1.0.</figcaption>
+        </figure>
+
+        <ul class="chips" aria-label="Highlights">
+          <li class="chip"><svg aria-hidden="true"><use href="#i-check"/></svg>No account needed</li>
+          <li class="chip"><svg aria-hidden="true"><use href="#i-check"/></svg>Works offline</li>
+          <li class="chip"><svg aria-hidden="true"><use href="#i-check"/></svg>Unlimited collaborators</li>
+          <li class="chip"><svg aria-hidden="true"><use href="#i-check"/></svg>No paywalls, ever</li>
+        </ul>
+
+        <div class="stats reveal">
+          <div class="stat"><strong class="gradient-text">$0</strong><span>for every feature and every seat</span></div>
+          <div class="stat"><strong class="gradient-text">&infin;</strong><span>collaborators on every file</span></div>
+          <div class="stat"><strong class="gradient-text">100%</strong><span>open source, MIT licence</span></div>
+          <div class="stat"><strong class="gradient-text">1,300+</strong><span>automated tests</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Why ================= -->
+    <section class="section" id="why" aria-labelledby="why-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="eyebrow">Why Evora</div>
+          <h2 id="why-title">Everything a pro design tool should do. <span class="gradient-text">None of the strings.</span></h2>
+          <p>Most design tools charge for every editor, keep your work in their cloud and hold their best features back for paid plans. Evora doesn't.</p>
+        </div>
+
+        <div class="cards">
+          <article class="card reveal">
+            <div class="icon-badge"><svg aria-hidden="true"><use href="#i-gift"/></svg></div>
+            <h3>Free for everyone, for good</h3>
+            <p>Every feature, for every person, on every file. No plans, no per-editor seats and no &ldquo;upgrade to unlock&rdquo;. Bring your whole team, your clients and your developers.</p>
+          </article>
+          <article class="card reveal">
+            <div class="icon-badge cool"><svg aria-hidden="true"><use href="#i-drive"/></svg></div>
+            <h3>Your files stay yours</h3>
+            <p>Evora is local-first. Designs are saved on your own computer as open <code>.evora</code> files and keep working with no internet connection. Your designs don't leave your computer unless you choose to share them.</p>
+          </article>
+          <article class="card reveal">
+            <div class="icon-badge"><svg aria-hidden="true"><use href="#i-users"/></svg></div>
+            <h3>Real-time, together</h3>
+            <p>Edit the same file at once with live cursors and selections, follow a teammate around the canvas, and leave comments with @mentions. Changes made offline merge when you reconnect.</p>
+          </article>
+          <article class="card reveal">
+            <div class="icon-badge cool"><svg aria-hidden="true"><use href="#i-server"/></svg></div>
+            <h3>Host it yourself</h3>
+            <p>Run Evora's team server on your own machine or cloud. Your designs, your server, your rules, with guides for Docker, HTTPS behind nginx or Caddy, and backups.</p>
+          </article>
+          <article class="card reveal">
+            <div class="icon-badge"><svg aria-hidden="true"><use href="#i-code"/></svg></div>
+            <h3>Open source, no lock-in</h3>
+            <p>MIT licensed and built in the open. Read the code, fork it and extend it with plugins. No company can take your tools away or change the price on you.</p>
+          </article>
+          <article class="card reveal">
+            <div class="icon-badge cool"><svg aria-hidden="true"><use href="#i-import"/></svg></div>
+            <h3>Bring your work with you</h3>
+            <p>Open Figma <code>.fig</code> files and SVGs as editable layers, and export PNG, JPG, SVG and PDF. Switching to Evora doesn't mean starting over.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Features ================= -->
+    <section class="section" id="features" aria-labelledby="features-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="eyebrow">Features</div>
+          <h2 id="features-title">One tool, from first idea <span class="gradient-text">to final handoff.</span></h2>
+          <p>Design, prototype, build a design system and hand off to developers, all in the same file.</p>
+        </div>
+
+        <div class="feature warm">
+          <div class="feature-copy reveal">
+            <div class="eyebrow">Design</div>
+            <h3>Design anything, precisely</h3>
+            <p>An infinite canvas with frames, shapes, pen and pencil, rich text and images, plus smart guides, snapping and measurements that keep everything pixel-perfect.</p>
+            <ul class="ticks">
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Vector networks and boolean shapes that stay editable</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Auto layout with wrapping, padding, gaps, hug and fill sizing</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Gradients, image fills, shadows, blurs and blend modes</li>
+            </ul>
+          </div>
+          <div class="feature-media reveal">
+            <div class="window">
+              <img src="assets/screenshots/design.jpg" width="1200" height="900" alt="Three screens of a travel planner app designed in Evora: home, trip details and budget" loading="lazy" decoding="async">
+            </div>
+          </div>
+        </div>
+
+        <div class="feature flip">
+          <div class="feature-copy reveal">
+            <div class="eyebrow">Prototype</div>
+            <h3>Prototypes that feel real</h3>
+            <p>Link screens together and present them on phone, tablet or desktop frames. Test the flow before a single line of code is written.</p>
+            <ul class="ticks">
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Clicks, hovers, key presses and timers</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Smart animate, overlays and scrolling</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Variables and conditions for real logic</li>
+            </ul>
+          </div>
+          <div class="feature-media reveal">
+            <div class="window">
+              <img src="assets/screenshots/prototype.jpg" width="2880" height="1800" alt="Evora's prototype view, with Smart Animate connections drawn between four app screens" loading="lazy" decoding="async">
+            </div>
+          </div>
+        </div>
+
+        <div class="feature warm">
+          <div class="feature-copy reveal">
+            <div class="eyebrow">Handoff</div>
+            <h3>Developer handoff, included</h3>
+            <p>Developer Mode is part of Evora for everyone, not an extra seat. Developers inspect any layer and copy what they need.</p>
+            <ul class="ticks">
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Sizes, spacing, colours and type, measured</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Code for CSS, SwiftUI and Jetpack Compose</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Export PNG, JPG, SVG and PDF at any scale</li>
+            </ul>
+          </div>
+          <div class="feature-media reveal">
+            <div class="window">
+              <img src="assets/screenshots/devmode.jpg" width="2880" height="1800" alt="Evora's Inspect panel showing colours, effects and CSS for a selected card, with screens marked Ready for dev" loading="lazy" decoding="async">
+            </div>
+          </div>
+        </div>
+
+        <div class="feature flip">
+          <div class="feature-copy reveal">
+            <div class="eyebrow">Design systems</div>
+            <h3>A design system that scales</h3>
+            <p>Build once, reuse everywhere. Keep products consistent across files and teams with components, styles and variables.</p>
+            <ul class="ticks">
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Components and variants with overrides and properties</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Colour, text and effect styles</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Variables with modes for light and dark themes</li>
+            </ul>
+          </div>
+          <div class="feature-media reveal">
+            <div class="window">
+              <img src="assets/screenshots/variables.jpg" width="2880" height="1800" alt="The same app screen in light and dark themes, switched with a variable mode in Evora" loading="lazy" decoding="async">
+            </div>
+          </div>
+        </div>
+
+        <div class="mini-grid">
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-history"/></svg><h4>Version history</h4><p>Automatic and named versions. Compare side by side or overlaid, and restore in one click.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-branch"/></svg><h4>Branching</h4><p>Explore ideas on a branch and merge them back, with every conflict laid out for you.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-comment"/></svg><h4>Comments</h4><p>Pin feedback to the canvas, reply in threads and @mention teammates.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-plug"/></svg><h4>Plugins</h4><p>Extend Evora with plugins that run in a sandbox, with only the permissions you grant.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-grid"/></svg><h4>Widgets</h4><p>Drop interactive widgets made by plugins straight onto the canvas.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-book"/></svg><h4>Community library</h4><p>Publish and reuse templates, UI kits and libraries on your team's server.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-buoy"/></svg><h4>Crash recovery</h4><p>The desktop app keeps a recovery copy, so unsaved work survives a crash.</p></div>
+          <div class="mini reveal"><svg aria-hidden="true"><use href="#i-terminal"/></svg><h4>Documented API</h4><p>Build on the team server with its documented HTTP and live-editing API.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Compare ================= -->
+    <section class="section" id="compare" aria-labelledby="compare-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="eyebrow">Compare</div>
+          <h2 id="compare-title">How Evora <span class="gradient-text">compares</span></h2>
+          <p>The features are what you'd expect from a professional design tool. The difference is who it works for.</p>
+        </div>
+
+        <div class="compare-wrap reveal" role="region" aria-labelledby="compare-title" tabindex="0">
+          <table class="compare">
+            <caption class="visually-hidden">Evora compared with Figma, Sketch and Penpot</caption>
+            <thead>
+              <tr>
+                <th scope="col"><span class="visually-hidden">Feature</span></th>
+                <th scope="col" class="us"><span><img src="assets/img/logo.svg" alt="" width="22" height="22">Evora</span></th>
+                <th scope="col">Figma</th>
+                <th scope="col">Sketch</th>
+                <th scope="col">Penpot</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Every feature free, for every editor</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v part"><svg aria-hidden="true"><use href="#i-part"/></svg>Free plan with limits, paid seats</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>Paid per editor</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Free plan or self-hosted</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Open source</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes, MIT</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>No</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>No</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes, MPL 2.0</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Design offline, files on your own computer</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>No offline mode</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes, on a Mac</span></td>
+                <td><span class="v part"><svg aria-hidden="true"><use href="#i-part"/></svg>Needs a Penpot server</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Host it on your own server</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>No</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>No</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Real-time collaboration</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes, on paid plans</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Developer handoff with code</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>CSS, SwiftUI, Compose</span></td>
+                <td><span class="v part"><svg aria-hidden="true"><use href="#i-part"/></svg>Dev Mode needs a paid seat</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Free for viewers</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>CSS, HTML, SVG</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Design on Windows</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Desktop app</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Desktop app</span></td>
+                <td><span class="v no"><svg aria-hidden="true"><use href="#i-x"/></svg>Mac only</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>In the browser</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Opens Figma <code>.fig</code> files</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Its own format</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes, Mac app</span></td>
+                <td><span class="v part"><svg aria-hidden="true"><use href="#i-part"/></svg>Via a plugin in Figma</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Plugins</th>
+                <td class="us"><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+                <td><span class="v yes"><svg aria-hidden="true"><use href="#i-check"/></svg>Yes</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="compare-note">Based on each product's own public information on 18 November 2026. Plans, prices and features change, so check their websites for the latest. Penpot is also free and open source, and a good choice if you work in the browser; Evora is built for working on your own computer first. Figma, Sketch and Penpot are trademarks of their respective owners. Evora is an independent project and is not affiliated with or endorsed by them.</p>
+      </div>
+    </section>
+
+    <!-- ================= Teams ================= -->
+    <section class="section" id="teams" aria-labelledby="teams-title">
+      <div class="container">
+        <div class="split">
+          <div class="panel reveal">
+            <div class="eyebrow">For teams</div>
+            <h3 id="teams-title">Your team. <span class="gradient-text">Your server.</span></h3>
+            <p>Run Evora for your whole organisation on a machine you control. Everyone gets accounts, workspaces, roles, share links and live co-editing, with no per-seat fees and no designs leaving your infrastructure.</p>
+            <ul class="ticks">
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Workspaces with unlimited members, roles and guest links</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Health checks, graceful shutdown and online backups</li>
+              <li><svg aria-hidden="true"><use href="#i-check"/></svg>Guides for Docker, systemd, nginx and Caddy</li>
+            </ul>
+            <p style="margin-top:28px"><a class="btn btn-ghost" href="https://github.com/ShishirShastry/evora/blob/main/docs/self-hosting.md">Read the self-hosting guide<svg aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
+          </div>
+          <div class="terminal reveal" role="figure" aria-label="Starting a self-hosted Evora server">
+            <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>Terminal</span></div>
+<pre><code><span class="c"># Download evora-server-0.1.0.tar.gz from GitHub Releases, then:</span>
+<span class="p">$ </span>tar -xzf evora-server-0.1.0.tar.gz
+<span class="p">$ </span>cd evora-server-0.1.0
+<span class="p">$ </span>node server/main.ts --serve dist --host 0.0.0.0 --data ./evora-data
+<span class="ok">Evora collaboration server on http://localhost:8787 (listening on 0.0.0.0)</span>
+Data folder: ./evora-data
+Serving the app from dist</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Download ================= -->
+    <section class="section" id="download" aria-labelledby="download-title">
+      <div class="container">
+        <div class="download-card reveal">
+          <img class="app-icon" src="assets/img/logo.svg" alt="" width="96" height="96">
+          <h2 id="download-title">Get Evora for <span class="gradient-text">Windows</span></h2>
+          <p>Free forever. No account, no trial, no credit card. Install it and start designing in a minute.</p>
+          <a class="btn btn-primary btn-lg" href="https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-Setup-0.1.0.exe" data-download="windows">
+            <svg aria-hidden="true"><use href="#i-download"/></svg>
+            <span class="btn-label">Download for Windows<small>Version <span data-version>0.1.0</span> &middot; <span data-size>121 MB</span></small></span>
+          </a>
+          <p class="platform-note" data-platform-note></p>
+          <p class="download-alt">Prefer not to install? Get the <a href="https://github.com/ShishirShastry/evora/releases/download/v0.1.0/Evora-0.1.0-portable.exe" data-download="portable">portable version</a> that runs without installing. &middot; <a href="https://github.com/ShishirShastry/evora/releases">All releases</a></p>
+
+          <dl class="reqs">
+            <div><dt>Works on</dt><dd>Windows 10 and 11, 64-bit</dd></div>
+            <div><dt>Version</dt><dd><span data-version>0.1.0</span></dd></div>
+            <div><dt>Price</dt><dd>Free, MIT licence</dd></div>
+          </dl>
+
+          <div class="notice" role="note">
+            <svg aria-hidden="true"><use href="#i-warn"/></svg>
+            <p><strong>Windows may show a SmartScreen warning.</strong> Evora's installer isn't code-signed yet, so Windows may say &ldquo;Windows protected your PC&rdquo;. Choose <strong>More info</strong>, then <strong>Run anyway</strong>. Every installer is built in public by GitHub Actions from the open-source code.</p>
+          </div>
+
+          <div class="soon" aria-label="Other platforms">
+            <span>macOS <em>Coming soon</em></span>
+            <span>Linux <em>Coming soon</em></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FAQ ================= -->
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="eyebrow">FAQ</div>
+          <h2 id="faq-title">Questions, <span class="gradient-text">answered</span></h2>
+        </div>
+        <div class="faq">
+          <details class="reveal">
+            <summary>Is Evora really free?</summary>
+            <div class="answer"><p>Yes. Every feature is available to everyone, with no paid plans, no seat limits and nothing locked away. Evora is open source under the MIT licence, so you can use it for personal and commercial work alike.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>Do I need an account?</summary>
+            <div class="answer"><p>No. The desktop app saves your files on your computer and works without an internet connection. Accounts only come into it when you want to work with others through a team server: one you host yourself, or one your company runs.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>Can I open my Figma files?</summary>
+            <div class="answer"><p>Yes. Open a <code>.fig</code> file and its layers, components, styles, variables, auto layout and prototype interactions come in as editable Evora layers. It was checked against a real Figma file with more than 7,600 layers, and every layer came through. SVG files open as editable layers too. If something in your file doesn't come through as expected, please <a href="https://github.com/ShishirShastry/evora/issues">tell us on GitHub</a>.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>Why does Windows warn me when I install it?</summary>
+            <div class="answer"><p>Evora's installer isn't code-signed yet, so Windows SmartScreen doesn't recognise it and shows &ldquo;Windows protected your PC&rdquo;. Choose <strong>More info</strong>, then <strong>Run anyway</strong>. The installers are built by GitHub Actions straight from the public source code, and you can check how in the repository.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>How does working together work?</summary>
+            <div class="answer"><p>Start Evora's collaboration server (or use one your team already runs), invite people to a workspace or share a file by link, and edit together live with cursors, selections, following and comments. If someone goes offline, their changes merge when they reconnect.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>When will macOS and Linux be available?</summary>
+            <div class="answer"><p>Soon. The macOS and Linux apps are already being built alongside the Windows one, and will be offered here once they've been tested on real machines. If you'd like to help test them early, the builds are on <a href="https://github.com/ShishirShastry/evora/releases">GitHub Releases</a>.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>Can I contribute or build plugins?</summary>
+            <div class="answer"><p>Please do. Bug reports, ideas and code are welcome on <a href="https://github.com/ShishirShastry/evora">GitHub</a>, and the <a href="https://github.com/ShishirShastry/evora/blob/main/plugins/PLUGINS.md">plugin guide</a> shows how to build sandboxed plugins and widgets, with four examples to start from.</p></div>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="30" height="30"><span>Evora</span></a>
+          <p>Design, prototype and build together. Free, open and yours.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#compare">Compare</a></li>
+            <li><a href="#teams">For teams</a></li>
+            <li><a href="#download">Download</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Learn</h4>
+          <ul>
+            <li><a href="https://github.com/ShishirShastry/evora/blob/main/docs/user-guide.md">User guide</a></li>
+            <li><a href="https://github.com/ShishirShastry/evora/blob/main/docs/self-hosting.md">Self-hosting guide</a></li>
+            <li><a href="https://github.com/ShishirShastry/evora/blob/main/plugins/PLUGINS.md">Plugin guide</a></li>
+            <li><a href="https://github.com/ShishirShastry/evora/blob/main/docs/api.md">API reference</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/ShishirShastry/evora">GitHub</a></li>
+            <li><a href="https://github.com/ShishirShastry/evora/releases">Releases</a></li>
+            <li><a href="https://github.com/ShishirShastry/evora/blob/main/CHANGELOG.md">Changelog</a></li>
+            <li><a href="https://github.com/ShishirShastry/evora/blob/main/SECURITY.md">Security</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="legal">
+        <p>&copy; 2026 Evora contributors. Evora is released under the <a href="https://github.com/ShishirShastry/evora/blob/main/LICENSE">MIT License</a>. The Inter typeface is under the <a href="assets/fonts/Inter-OFL-1.1.txt">SIL Open Font License</a>.</p>
+        <p>Figma, Sketch and Penpot are trademarks of their respective owners. Evora is an independent project and is not affiliated with, endorsed by or sponsored by any of them.</p>
+        <p>This website uses no cookies and no analytics.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/site.js" defer></script>
+</body>
+</html>
