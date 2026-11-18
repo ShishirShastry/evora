@@ -434,12 +434,33 @@ export interface MailerOptions {
   transport?: Transport;
   /** The waits before each further try (default 10 s, 1 min, 5 min: four tries in all). */
   retryDelaysMs?: number[];
-  /** Messages waiting at most; more are dropped and said to be (default 1000). */
+  /** Messages waiting at most; more are dropped and said to be (default 200). */
   maxQueued?: number;
+  /**
+   * Caps on what is sent, so that a relay billed by the message can never run up
+   * a bill: messages accepted in any 24 hours (default 100) and in any hour
+   * (default 30), and to any one address in 24 hours (default 5). Beyond them a
+   * message is dropped and the log says which limit was reached; nothing else
+   * changes (invitations and mentions are still made and shown in the app).
+   */
+  limits?: Partial<MailLimits>;
+  /** The clock, for tests. */
+  now?: () => number;
   send?: SendOptions;
   /** Where to say what failed (default the console's error stream). */
   log?: (line: string) => void;
 }
+
+export interface MailLimits {
+  perDay: number;
+  perHour: number;
+  perAddressPerDay: number;
+}
+
+export const DEFAULT_MAIL_LIMITS: MailLimits = { perDay: 100, perHour: 30, perAddressPerDay: 5 };
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 interface Job {
   message: MailMessage;
@@ -449,6 +470,11 @@ interface Job {
 /** An address as the log shows it: its domain only. */
 function forLog(address: string): string {
   return `someone at ${address.split('@')[1] ?? 'an unknown domain'}`;
+}
+
+/** An error for the log, with any address in it (a relay's reply may quote one) cut down to its domain. */
+function errorForLog(error: unknown): string {
+  return String((error as Error)?.message ?? error).replace(/<?[^\s<>@]+@([A-Za-z0-9.-]*[A-Za-z0-9])>?/g, (_all, domain: string) => `someone at ${domain}`);
 }
 
 /**
@@ -462,6 +488,11 @@ export class Mailer {
   private readonly transport: Transport;
   private readonly delays: number[];
   private readonly maxQueued: number;
+  private readonly limits: MailLimits;
+  private readonly now: () => number;
+  /** When each message accepted in the last 24 hours was accepted, in all and by address. */
+  private accepted: number[] = [];
+  private acceptedTo = new Map<string, number[]>();
   private readonly log: (line: string) => void;
   private queue: Job[] = [];
   private timers = new Set<NodeJS.Timeout>();
@@ -477,7 +508,9 @@ export class Mailer {
     this.smtp = options.smtp;
     this.transport = options.transport ?? ((envelope, data) => sendMail(options.smtp, envelope, data, options.send));
     this.delays = options.retryDelaysMs ?? [10_000, 60_000, 300_000];
-    this.maxQueued = options.maxQueued ?? 1000;
+    this.maxQueued = options.maxQueued ?? 200;
+    this.limits = { ...DEFAULT_MAIL_LIMITS, ...options.limits };
+    this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.error(line));
   }
 
@@ -493,9 +526,31 @@ export class Mailer {
       this.log(`Email to ${forLog(message.to)} not sent: ${this.maxQueued} messages are already waiting`);
       return false;
     }
+    const limited = this.overLimit(message.to);
+    if (limited) {
+      this.failed++;
+      this.log(`Email to ${forLog(message.to)} not sent: ${limited}`);
+      return false;
+    }
     this.queue.push({ message, attempt: 1 });
     queueMicrotask(() => void this.pump());
     return true;
+  }
+
+  /** Which cap a message to this address would go over, or null; when none, counts the message. */
+  private overLimit(to: string): string | null {
+    const now = this.now();
+    this.accepted = this.accepted.filter((at) => now - at < DAY_MS);
+    const key = to.toLowerCase();
+    const toThis = (this.acceptedTo.get(key) ?? []).filter((at) => now - at < DAY_MS);
+    if (this.acceptedTo.size > 10_000) for (const [address, times] of this.acceptedTo) if (!times.some((at) => now - at < DAY_MS)) this.acceptedTo.delete(address);
+    if (this.accepted.length >= this.limits.perDay) return `the limit of ${this.limits.perDay} emails a day was reached (EVORA_MAIL_DAILY_LIMIT)`;
+    if (this.accepted.filter((at) => now - at < HOUR_MS).length >= this.limits.perHour) return `the limit of ${this.limits.perHour} emails an hour was reached (EVORA_MAIL_HOURLY_LIMIT)`;
+    if (toThis.length >= this.limits.perAddressPerDay) return `the limit of ${this.limits.perAddressPerDay} emails a day to one address was reached`;
+    this.accepted.push(now);
+    toThis.push(now);
+    this.acceptedTo.set(key, toThis);
+    return null;
   }
 
   /** Resolves once nothing is waiting, being sent, or waiting to be tried again. */
@@ -545,7 +600,7 @@ export class Mailer {
       data = buildMessage(this.from, job.message);
     } catch (error) {
       this.failed++;
-      this.log(`Email to ${forLog(job.message.to)} not sent: ${(error as Error).message}`);
+      this.log(`Email to ${forLog(job.message.to)} not sent: ${errorForLog(error)}`);
       return;
     }
     try {
@@ -557,10 +612,10 @@ export class Mailer {
       const delay = this.delays[job.attempt - 1];
       if (permanent || delay === undefined || this.closed) {
         this.failed++;
-        this.log(`Email to ${forLog(job.message.to)} not sent (try ${job.attempt} of ${tries}, given up): ${(error as Error).message}`);
+        this.log(`Email to ${forLog(job.message.to)} not sent (try ${job.attempt} of ${tries}, given up): ${errorForLog(error)}`);
         return;
       }
-      this.log(`Email to ${forLog(job.message.to)} not sent yet (try ${job.attempt} of ${tries}, trying again in ${Math.round(delay / 1000)} s): ${(error as Error).message}`);
+      this.log(`Email to ${forLog(job.message.to)} not sent yet (try ${job.attempt} of ${tries}, trying again in ${Math.round(delay / 1000)} s): ${errorForLog(error)}`);
       const timer = setTimeout(() => {
         this.timers.delete(timer);
         if (this.closed) return;
@@ -572,3 +627,6 @@ export class Mailer {
     }
   }
 }
+
+/** For tests. */
+export { errorForLog };

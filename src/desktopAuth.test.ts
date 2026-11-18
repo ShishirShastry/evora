@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_PENDING_SIGN_INS,
   SIGN_IN_TTL_MS,
   acceptReturn,
+  addPending,
   authUrlInArgv,
   codeChallenge,
   googleDesktopStartUrl,
   newNonce,
   newVerifier,
   parseAuthUrl,
+  pendingFor,
   redeemTicket,
   refusalMessage,
   refusalShown,
@@ -130,9 +133,39 @@ describe('the desktop app’s Google sign-in', () => {
     expect(acceptReturn(pending, back, 1_000_001, null)).toEqual({ ok: false, reason: 'server' });
   });
 
+  it('keeps each sign-in started until it comes back, so an earlier one still finishes in its own window', () => {
+    const at = (nonce: string, windowId: number, startedAt: number): PendingSignIn => ({ nonce, verifier: VERIFIER, server: SERVER, startedAt, windowId });
+    const first = at(NONCE, 1, 1_000_000);
+    const second = at(`${NONCE.slice(0, -1)}X`, 2, 1_000_100);
+    let { kept, dropped } = addPending([], first, 1_000_000);
+    ({ kept, dropped } = addPending(kept, second, 1_000_100));
+    expect(kept).toEqual([first, second]);
+    expect(dropped).toEqual([]);
+    // The first browser tab finished: it is the first window's sign-in, accepted, not "Evora did not start this".
+    const back = { nonce: NONCE, ticket: TICKET, error: null };
+    expect(pendingFor(kept, NONCE)).toBe(first);
+    expect(acceptReturn(pendingFor(kept, NONCE), back, 1_000_200, SERVER)).toMatchObject({ ok: true, windowId: 1 });
+    expect(pendingFor(kept, second.nonce)).toBe(second);
+    // A nonce of none of them is refused as another's; with none waiting, it is ignored.
+    expect(acceptReturn(pendingFor(kept, 'a-different-length-nonce-1234'), { ...back, nonce: 'a-different-length-nonce-1234' }, 1_000_200, SERVER)).toEqual({ ok: false, reason: 'nonce' });
+    expect(pendingFor([], NONCE)).toBeNull();
+    // Expired ones are let go when another starts, and only so many wait: the oldest is dropped, and its window told.
+    const late = addPending(kept, at('late-nonce-0123456789abcdef', 3, 1_000_000 + SIGN_IN_TTL_MS + 1), 1_000_000 + SIGN_IN_TTL_MS + 1);
+    expect(late.dropped).toEqual([{ pending: first, reason: 'expired' }]);
+    let many: PendingSignIn[] = [];
+    let last: ReturnType<typeof addPending> = { kept: [], dropped: [] };
+    for (let i = 0; i <= MAX_PENDING_SIGN_INS; i++) {
+      last = addPending(many, at(`nonce-number-${i}-0123456789abcdef`, i, 2_000_000 + i), 2_000_000 + i);
+      many = last.kept;
+    }
+    expect(many).toHaveLength(MAX_PENDING_SIGN_INS);
+    expect(last.dropped).toEqual([{ pending: at('nonce-number-0-0123456789abcdef', 0, 2_000_000), reason: 'replaced' }]);
+  });
+
   it('ignores a return when no sign-in waits, and says why for the others', () => {
     expect(refusalShown('none')).toBe(false);
-    expect(refusalShown('nonce')).toBe(true);
+    // Any page or program can launch evora://auth with some nonce: no alarming dialog for it (the app only comes forward).
+    expect(refusalShown('nonce')).toBe(false);
     expect(refusalShown('expired')).toBe(true);
     expect(refusalShown('server')).toBe(true);
     expect(refusalMessage('expired')).toMatch(/too long/);

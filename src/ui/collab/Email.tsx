@@ -38,6 +38,9 @@ export function VerifyEmailNotice({ api = defaultApi }: { api?: EmailApi }) {
   const [status] = useEmailStatus(api);
   const [state, setState] = useState<{ kind: 'idle' | 'sending' | 'sent' } | { kind: 'error'; message: string }>({ kind: 'idle' });
   if (!status || !needsVerifying(status)) return null;
+  const address = status.pendingEmail ?? status.email;
+  // A server from before this field always sent one.
+  const linkSent = status.linkSent !== false || state.kind === 'sent';
 
   const resend = (): void => {
     setState({ kind: 'sending' });
@@ -53,11 +56,12 @@ export function VerifyEmailNotice({ api = defaultApi }: { api?: EmailApi }) {
       className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-accent bg-accent/10 px-4 py-3 text-[13px] leading-relaxed"
     >
       <p className="m-0 min-w-0 flex-1 basis-[260px]">
-        <strong className="font-semibold">Confirm your email address.</strong> We sent a link to <span className="break-all">{status.email}</span>. Invitations sent to
-        this address reach you once it is confirmed.
+        <strong className="font-semibold">Confirm your email address.</strong> {linkSent ? 'We sent a link to' : 'Send a link to'}{' '}
+        <span className="break-all">{address}</span>
+        {linkSent ? '' : ' to confirm it'}. Invitations sent to this address reach you once it is confirmed.
       </p>
       <button type="button" className="ev-button flex-none" disabled={state.kind === 'sending'} onClick={resend}>
-        {state.kind === 'sending' ? 'Sending…' : 'Resend'}
+        {state.kind === 'sending' ? 'Sending…' : linkSent ? 'Resend' : 'Send a link'}
       </button>
       {/* Always there (hidden while empty) so that a screen reader hears "Sent" when it appears. */}
       <p role="status" className={`m-0 w-full text-dim ${state.kind === 'sent' ? '' : 'sr-only'}`}>

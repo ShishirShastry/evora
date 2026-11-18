@@ -76,6 +76,21 @@ describe('the notice', () => {
     expect(calls).toContain('POST /api/me/email/resend');
   });
 
+  it('offers to send a link when none was sent, and names a new address waiting for its link', async () => {
+    const { api } = server({ linkSent: false });
+    render(<VerifyEmailNotice api={api} />);
+    const notice = await screen.findByRole('region', { name: 'Confirm your email address' });
+    expect(notice.textContent).toContain('Send a link to alex@example.com');
+    expect(notice.textContent).not.toContain('We sent');
+    fireEvent.click(screen.getByRole('button', { name: 'Send a link' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resend' })).toBeTruthy());
+    cleanup();
+
+    const moving = server({ verified: true, pendingEmail: 'alex.new@example.com', linkSent: true });
+    render(<VerifyEmailNotice api={moving.api} />);
+    expect((await screen.findByRole('region', { name: 'Confirm your email address' })).textContent).toContain('We sent a link to alex.new@example.com');
+  });
+
   it('is not shown when the address is confirmed, or the server sends no email', async () => {
     for (const status of [{ verified: true }, { mail: false }]) {
       const { api, calls } = server(status);

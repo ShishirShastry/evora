@@ -28,13 +28,16 @@ import { CHANNELS, desktopCsp, normalizeServerUrl, type CloseAction, type Deskto
 import { APP_ORIGIN, APP_URL, hasBuiltApp, registerAppScheme, serveApp } from './appProtocol.js';
 import {
   AUTH_SCHEME,
+  REPLACED_MESSAGE,
   acceptReturn,
+  addPending,
   authUrlInArgv,
   codeChallenge,
   googleDesktopStartUrl,
   newNonce,
   newVerifier,
   parseAuthUrl,
+  pendingFor,
   redeemTicket,
   refusalMessage,
   refusalShown,
@@ -540,8 +543,13 @@ function openExternal(url: string): void {
 
 // ------------------------------------------------------------------ "Continue with Google" (electron/auth.ts)
 
-/** The sign-in started in the system's browser and not yet back: one at a time, a new start replaces it. */
-let pendingSignIn: PendingSignIn | null = null;
+/** The sign-ins started in the system's browser and not yet back, each for the window that started it (addPending). */
+let pendingSignIns: PendingSignIn[] = [];
+
+/** Forgets one waiting sign-in: it came back, or is over. */
+function forgetSignIn(pending: PendingSignIn): void {
+  pendingSignIns = pendingSignIns.filter((each) => each !== pending);
+}
 /** evora:// addresses given before there was a window (macOS's open-url can come before ready). */
 const authUrlsAtStart: string[] = [];
 /** Whether the first window was made: until then evora:// addresses wait (authUrlsAtStart). */
@@ -575,11 +583,18 @@ async function startGoogleSignIn(window: BrowserWindow | null, request: { mode?:
   if (!url) return { ok: false, message: 'The collaboration server’s address cannot be used to sign in.' };
   // Opened only at the configured server's own http(s) address (googleDesktopStartUrl builds nothing else).
   const pending: PendingSignIn = { nonce, verifier, server, startedAt: Date.now(), windowId: window?.id ?? -1 };
-  pendingSignIn = pending;
+  const { kept, dropped } = addPending(pendingSignIns, pending, pending.startedAt);
+  pendingSignIns = kept;
+  // Sign-ins let go (too late by now, or the oldest of too many): their windows stop waiting. The window starting
+  // this one is waiting for it, so it is not told.
+  for (const { pending: gone, reason } of dropped) {
+    const record = gone.windowId === pending.windowId ? undefined : records.get(gone.windowId);
+    if (record) send(record, CHANNELS.googleReturn, { ok: false, message: reason === 'expired' ? refusalMessage('expired') : REPLACED_MESSAGE } satisfies GoogleSignInResult);
+  }
   try {
     await shell.openExternal(url);
   } catch {
-    if (pendingSignIn === pending) pendingSignIn = null;
+    forgetSignIn(pending);
     return { ok: false, message: 'Your browser could not be opened.' };
   }
   return { ok: true, message: null };
@@ -609,26 +624,27 @@ function handleAuthUrl(value: string): void {
     return;
   }
   const back = parseAuthUrl(value);
-  const pending = pendingSignIn;
+  const pending = back ? pendingFor(pendingSignIns, back.nonce) : null;
   const check = back ? acceptReturn(pending, back, Date.now(), loadSettings().serverUrl) : ({ ok: false, reason: 'none' } as const);
   if (!check.ok) {
-    // No sign-in waits (or the address is not one): ignored, the app only comes to the front.
-    if (check.reason === 'none') {
-      const record = mainWindow();
+    // No sign-in waits (or the address is not one), or none with this nonce (anything can launch evora://auth):
+    // ignored, the app only comes to the front, and the sign-ins under way keep waiting.
+    if (check.reason === 'none' || check.reason === 'nonce') {
+      const record = (pending && records.get(pending.windowId)) || mainWindow();
       if (record) bringForward(record.window);
       return;
     }
     const record = (pending && records.get(pending.windowId)) || mainWindow();
     if (record) bringForward(record.window);
     // Too late, or for another server: that sign-in is over, and its window stops waiting.
-    if ((check.reason === 'expired' || check.reason === 'server') && pending) {
-      pendingSignIn = null;
+    if (pending) {
+      forgetSignIn(pending);
       if (record) send(record, CHANNELS.googleReturn, { ok: false, message: refusalMessage(check.reason) } satisfies GoogleSignInResult);
     }
     showRefusal(check.reason);
     return;
   }
-  pendingSignIn = null;
+  if (pending) forgetSignIn(pending);
   const record = records.get(check.windowId) ?? mainWindow() ?? createWindow();
   bringForward(record.window);
   if (check.ticket === null) {

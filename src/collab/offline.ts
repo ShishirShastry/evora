@@ -24,6 +24,12 @@ export interface OfflineSnapshot {
   registers: Register[];
   /** The role last granted on the document; null when not known. */
   role: Role | null;
+  /**
+   * Whose copy this is: a fingerprint of the session that saved it (see `ownerKey` in live.ts), so that,
+   * on a computer several people use, a copy is shown offline, and its changes sent, only for that person.
+   * Copies saved before this was kept have none and are not used offline.
+   */
+  owner?: string | null;
   savedAt: string;
 }
 
@@ -138,7 +144,7 @@ export class OfflineStore {
     const db = await this.open();
     if (!db) return;
     const tx = db.transaction([SNAPSHOTS, PENDING], 'readwrite');
-    const record: OfflineSnapshot = { seq: snapshot.seq, registers: snapshot.registers, role: snapshot.role ?? null, savedAt: snapshot.savedAt ?? new Date().toISOString() };
+    const record: OfflineSnapshot = { seq: snapshot.seq, registers: snapshot.registers, role: snapshot.role ?? null, owner: snapshot.owner ?? null, savedAt: snapshot.savedAt ?? new Date().toISOString() };
     tx.objectStore(SNAPSHOTS).put(record, docId);
     tx.objectStore(PENDING).put([...pending], docId);
     await done(tx);

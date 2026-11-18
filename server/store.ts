@@ -516,10 +516,12 @@ export class Store {
     // Unique, but any number of accounts may have none (NULLs are distinct in SQLite).
     this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)`);
     // 3: email. Google links only an account whose address it has verified, so those accounts start verified.
-    if (!columns.includes('email_verified')) {
-      this.db.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
-      this.db.exec(`UPDATE users SET email_verified = 1 WHERE google_sub IS NOT NULL`);
-    }
+    // In one transaction, and decided by the version rather than by the column: a start stopped half way does it again.
+    const version = (this.db.prepare(`PRAGMA user_version`).get() as { user_version: number }).user_version;
+    this.tx(() => {
+      if (!columns.includes('email_verified')) this.db.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
+      if (version < 3) this.db.exec(`UPDATE users SET email_verified = 1 WHERE google_sub IS NOT NULL`);
+    });
     if (!columns.includes('mention_emails')) this.db.exec(`ALTER TABLE users ADD COLUMN mention_emails INTEGER NOT NULL DEFAULT 1`);
     // Links that confirm an address: only their hash is kept, with the address they were sent to.
     this.db.exec(`CREATE TABLE IF NOT EXISTS email_tokens (
@@ -565,16 +567,30 @@ export class Store {
     if (this.depth > 0) return fn();
     this.db.exec('BEGIN IMMEDIATE');
     this.depth++;
+    let result: T;
     try {
-      const result = fn();
+      result = fn();
       this.db.exec('COMMIT');
-      return result;
     } catch (error) {
+      // What was to happen once the transaction is kept (`afterCommit`) does not happen.
+      this.committed = [];
       this.db.exec('ROLLBACK');
       throw error;
     } finally {
       this.depth--;
     }
+    const kept = this.committed;
+    this.committed = [];
+    for (const run of kept) run();
+    return result;
+  }
+
+  private committed: (() => void)[] = [];
+
+  /** Runs `work` once the transaction under way is kept (at once outside one); never when it is undone. */
+  afterCommit(work: () => void): void {
+    if (this.depth > 0) this.committed.push(work);
+    else work();
   }
 
   // -------------------------------------------------------------- people
@@ -1120,14 +1136,17 @@ export class Store {
       text,
       now(),
     );
-    for (const listener of this.notifyListeners) {
-      try {
-        listener({ recipientId, kind, from, text, where });
-      } catch (error) {
-        // A listener's failure (an email that could not be queued) never undoes the notification.
-        console.error('A notification listener failed:', error);
+    // Told once the notification is kept: an email is never sent about a comment whose transaction was undone.
+    this.afterCommit(() => {
+      for (const listener of this.notifyListeners) {
+        try {
+          listener({ recipientId, kind, from, text, where });
+        } catch (error) {
+          // A listener's failure (an email that could not be queued) never undoes the notification.
+          console.error('A notification listener failed:', error);
+        }
       }
-    }
+    });
   }
 
   notificationsOf(recipientId: string, limit = 200): Notification[] {

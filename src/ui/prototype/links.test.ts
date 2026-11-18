@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { audienceOf, createPresentGate, parsePresentHash, planPrototypeLink, presentHash, prototypeLinkUrl, refusalNotice, SHARE_FIRST_REASON } from './links';
+import { addFlow, addLayer, createDocument, getPages } from '../../core';
+import { audienceOf, createPresentGate, parsePresentHash, planPrototypeLink, presentFrom, presentHash, prototypeLinkUrl, refusalNotice, SHARE_FIRST_REASON, unsentWarning } from './links';
 
 /**
  * Prototype links: the address that presents a shared file from a frame,
@@ -37,7 +38,28 @@ describe('who a prototype link opens for', () => {
 
   it('says only the people it is shared with otherwise, and how to change that', () => {
     expect(audienceOf('none')).toMatch(/Only people the file is shared with/);
-    expect(audienceOf(null)).toMatch(/change link access in Share/);
+    expect(audienceOf('none')).toMatch(/change link access in Share/);
+  });
+
+  it('claims neither when link access is not known yet (details still loading, or offline)', () => {
+    for (const unknown of [null, undefined]) {
+      expect(audienceOf(unknown)).not.toBe(audienceOf('none'));
+      expect(audienceOf(unknown)).not.toMatch(/Only people the file is shared with/);
+      expect(audienceOf(unknown)).not.toMatch(/Anyone with the link/);
+    }
+  });
+});
+
+describe('where a prototype link starts from the editor', () => {
+  it('starts at the selected frame (as the Share dialog, the View menu and the Prototype panel all should), else the first flow', () => {
+    let doc = createDocument('Links');
+    const pageId = (getPages(doc)[0] as { id: string }).id;
+    const a = addLayer(doc, 'FRAME', pageId, { x: 0, y: 0, width: 200, height: 300, name: 'Home' });
+    const b = addLayer(a.doc, 'FRAME', pageId, { x: 400, y: 0, width: 200, height: 300, name: 'Checkout' });
+    doc = (addFlow(b.doc, a.id) as { doc: typeof doc }).doc;
+    expect(presentFrom({ doc, pageId, selection: [b.id] })).toBe(b.id);
+    expect(presentFrom({ doc, pageId, selection: [] })).toBe(a.id);
+    expect(presentFrom({ doc, pageId, selection: [a.id, b.id] })).toBe(a.id);
   });
 });
 
@@ -131,5 +153,35 @@ describe('Present on a shared file, waiting for its changes to be sent', () => {
     await settle();
     expect(went).toBe(0);
     expect(gate.start(Promise.resolve(), () => (went += 1))).toBe(false);
+  });
+
+  it('warns instead of going when changes are still unsent after the wait, and goes on the next Present', async () => {
+    // The presentation holds no live connection: changes left unsent would not be sent until the editor is opened again.
+    const gate = createPresentGate();
+    const warned: number[] = [];
+    let went = 0;
+    expect(gate.start(Promise.resolve(3), () => (went += 1), (left) => warned.push(left))).toBe(true);
+    await settle();
+    expect(went).toBe(0);
+    expect(warned).toEqual([3]);
+    // Pressed again: the person was told, so it goes.
+    gate.start(Promise.resolve(3), () => (went += 1), (left) => warned.push(left));
+    await settle();
+    expect(went).toBe(1);
+    expect(warned).toEqual([3]);
+    // Everything sent: it goes, and a later unsent change is warned about afresh.
+    gate.start(Promise.resolve(0), () => (went += 1), (left) => warned.push(left));
+    await settle();
+    expect(went).toBe(2);
+    gate.start(Promise.resolve(1), () => (went += 1), (left) => warned.push(left));
+    await settle();
+    expect(went).toBe(2);
+    expect(warned).toEqual([3, 1]);
+  });
+
+  it('says how many changes have not reached the server', () => {
+    expect(unsentWarning(1)).toMatch(/1 change has not reached the server/);
+    expect(unsentWarning(3)).toMatch(/3 changes have not reached the server/);
+    expect(unsentWarning(3)).toMatch(/Present again/);
   });
 });

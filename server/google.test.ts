@@ -525,14 +525,32 @@ describe('Continue with Google from the desktop app', () => {
     expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(401);
   });
 
-  it('keeps web tickets working without a verifier (one given is ignored)', async () => {
+  it('keeps web tickets working without a verifier, and refuses (and burns) one brought with a verifier', async () => {
     const who = profile('Webby');
     const result = await signInWithGoogle(who);
     expect(result.user.email).toBe(who.email);
-    google.next = profile('WebbyToo');
+    // A web ticket is never the desktop app's: one brought with a verifier is someone else's sign-in slipped into
+    // evora://auth (login CSRF), so it is refused, and burned.
+    const other = profile('WebbyToo');
+    google.next = other;
     const started = await start({ origin: server.url, mode: 'login' });
     const ticket = (await callback(await consent(started), started.cookie)).params.get('ticket') as string;
-    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(200);
+    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket, verifier: VERIFIER } })).status).toBe(401);
+    expect((await call(server, 'POST', '/api/auth/google/redeem', { body: { ticket } })).status).toBe(401);
+    expect(server.store.all(`SELECT * FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = ?`, other.email)).toHaveLength(0);
+  });
+
+  it('limits how many desktop sign-ins one address may start, so the flows under way cannot be pushed out', async () => {
+    const limited = await testServer({ google: { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, endpoints: google.endpoints }, limits: { signups: 2 } });
+    try {
+      const url = (query: Record<string, string>) => `${limited.url}/api/auth/google/start?${new URLSearchParams({ origin: limited.url, mode: 'login', ...query })}`;
+      for (let i = 0; i < 2; i++) expect((await fetch(url(DESKTOP), { redirect: 'manual' })).status).toBe(302);
+      expect((await fetch(url(DESKTOP), { redirect: 'manual' })).status).toBe(429);
+      // Web sign-ins keep nothing in memory, and are not limited by it.
+      expect((await fetch(url({}), { redirect: 'manual' })).status).toBe(302);
+    } finally {
+      await limited.stop();
+    }
   });
 
   it('refuses a desktop start without a good nonce or challenge', async () => {
@@ -608,6 +626,8 @@ describe('Continue with Google from the desktop app', () => {
     }
     for (const other of ['ab'.repeat(31) + 'ac', 'ab'.repeat(31) + 'aa', `${'ab'.repeat(31)}ac.${CHALLENGE}`]) expect(other >= from && other < to, other).toBe(false);
     expect(ticketRedeemable(ticketKey(hash, null), undefined)).toBe(true);
+    expect(ticketRedeemable(ticketKey(hash, null), VERIFIER)).toBe(false);
+    expect(ticketRedeemable(ticketKey(hash, null), '')).toBe(false);
     expect(ticketRedeemable(ticketKey(hash, CHALLENGE), undefined)).toBe(false);
     expect(ticketRedeemable(ticketKey(hash, CHALLENGE), VERIFIER)).toBe(true);
   });
@@ -624,6 +644,10 @@ describe('Continue with Google from the desktop app', () => {
     expect(page).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(page).toContain('evora://auth?error=a&amp;nonce=b');
     expect(page).toContain('>Open Evora</a>');
+    // PKCE cannot stop a program that started a sign-in of its own (RFC 8252, 8.6): the page says when not to go on.
+    const done = desktopReturnPage('evora://auth?ticket=a&nonce=b', null);
+    expect(done).toContain('If you did not just click <strong>Continue with Google</strong> in Evora, close this tab instead.');
+    expect(page).not.toContain('If you did not just click');
   });
 });
 

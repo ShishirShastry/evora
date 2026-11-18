@@ -875,5 +875,34 @@ describe('signing in with Google', () => {
       expect((await socket.closed).code).toBe(4401);
       expect((await call(googleServer, 'GET', '/api/me', { token: redeemed.body.token })).status).toBe(200);
     });
+
+    /** Continues with Google as `who` and returns the redeemed ticket's response. */
+    async function continueWithGoogle(who: typeof profile) {
+      profile = who;
+      const start = await fetch(`${googleServer.url}/api/auth/google/start?origin=${encodeURIComponent(googleServer.url)}&mode=login`, { redirect: 'manual' });
+      const consent = new URL(start.headers.get('location') as string);
+      const cookie = (start.headers.get('set-cookie') as string).split(';')[0] as string;
+      const back = await fetch(`${googleServer.url}/api/auth/google/callback?state=${consent.searchParams.get('state')}&code=abc`, { redirect: 'manual', headers: { Cookie: cookie } });
+      const ticket = new URLSearchParams((back.headers.get('location') as string).split('?')[1]).get('ticket');
+      return call(googleServer, 'POST', '/api/auth/google/redeem', { body: { ticket } });
+    }
+
+    // KNOWN HOLE (review of 8f3df3a, finding 1): PATCH /api/me/email lets a Google-only account (no password to ask)
+    // move onto someone else's address, and the owner's Continue with Google is then refused because that account
+    // already has a google_sub. `it.fails` records the hole until server/email.ts or server/api.ts fixes it; turn it into
+    // `it` with that fix.
+    it('does not let an account linked to Google take someone else’s address from its owner', async () => {
+      const stamp = Date.now();
+      const victimEmail = `alex.${stamp}@example.com`;
+      // Mallory continues with Google as herself: an account with no password.
+      const mallory = await continueWithGoogle({ sub: `g-mallory-${stamp}`, email: `mallory.${stamp}@example.com`, email_verified: true, name: 'Mallory' });
+      expect(mallory.status).toBe(200);
+      // She moves onto Alex's address; no password is asked, since she has none.
+      const moved = await call(googleServer, 'PATCH', '/api/me/email', { token: mallory.body.token, body: { email: victimEmail } });
+      // Alex, who owns the address, must still be able to get into Evora with it.
+      const alex = await continueWithGoogle({ sub: `g-alex-${stamp}`, email: victimEmail, email_verified: true, name: 'Alex' });
+      expect(moved.status === 200 ? alex.status : 200).toBe(200);
+      if (moved.status === 200) expect((await call(googleServer, 'GET', '/api/me', { token: mallory.body.token })).status).toBe(401);
+    });
   });
 });

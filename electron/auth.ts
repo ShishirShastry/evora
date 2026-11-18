@@ -21,8 +21,15 @@
  *    with the verifier (`redeemTicket`), and hands the session to the window
  *    that started the sign-in, which keeps it where it is (no navigation).
  *
- * The server redeems a desktop ticket only with its verifier, so another
- * program that registered evora:// too and caught the address cannot use it.
+ * Several sign-ins may wait at once (`addPending`, `pendingFor`), each for the
+ * window that started it.
+ *
+ * The server redeems a desktop ticket only with its verifier (and a web ticket
+ * only without one), so another program that registered evora:// too and
+ * caught the address of a sign-in this app started cannot use it. PKCE does not
+ * stop such a program from starting a sign-in of its own in the person's
+ * browser and catching that one's address (RFC 8252, 8.6): the server's last
+ * page says to go on only after clicking Continue with Google in Evora.
  * The verifier never leaves the main process: it is in no address, no IPC
  * message and no log. Only the one-time ticket is ever in an address, and none
  * of this is logged.
@@ -172,10 +179,53 @@ export function acceptReturn(pending: PendingSignIn | null, back: AuthReturn, no
     : { ...base, ticket: null, error: back.error ?? 'Signing in with Google did not finish' };
 }
 
-/** Whether a refused return is worth telling the person about: not when no sign-in was waiting (it is ignored). */
-export function refusalShown(reason: RefusalReason): boolean {
-  return reason !== 'none';
+/** How many sign-ins may wait at once (several windows, or a second click while the browser was slow). */
+export const MAX_PENDING_SIGN_INS = 5;
+
+/** A sign-in let go when another started: too late by then, or the oldest of too many. */
+export interface DroppedSignIn {
+  pending: PendingSignIn;
+  reason: 'expired' | 'replaced';
 }
+
+/**
+ * The sign-ins waiting once `next` has started: each is kept until it comes back, so an earlier one (from another
+ * window, or an earlier click) still finishes in the window that started it. Expired ones are let go, and beyond
+ * MAX_PENDING_SIGN_INS the oldest; those are in `dropped`, so that their windows can stop waiting.
+ */
+export function addPending(pendings: readonly PendingSignIn[], next: PendingSignIn, now: number): { kept: PendingSignIn[]; dropped: DroppedSignIn[] } {
+  const dropped: DroppedSignIn[] = [];
+  const kept: PendingSignIn[] = [];
+  for (const pending of pendings) {
+    if (now - pending.startedAt > SIGN_IN_TTL_MS || now < pending.startedAt) dropped.push({ pending, reason: 'expired' });
+    else kept.push(pending);
+  }
+  kept.push(next);
+  while (kept.length > MAX_PENDING_SIGN_INS) dropped.push({ pending: kept.shift() as PendingSignIn, reason: 'replaced' });
+  return { kept, dropped };
+}
+
+/**
+ * The waiting sign-in a return with this nonce is for; when none has it, the latest (which `acceptReturn` then
+ * refuses as another's), or null when none waits.
+ */
+export function pendingFor(pendings: readonly PendingSignIn[], nonce: string): PendingSignIn | null {
+  let found: PendingSignIn | null = null;
+  // Every one is compared, so the time taken does not say which matched.
+  for (const pending of pendings) if (sameText(pending.nonce, nonce)) found = pending;
+  return found ?? pendings[pendings.length - 1] ?? null;
+}
+
+/**
+ * Whether a refused return is worth a dialog: not when no sign-in was waiting (it is ignored), nor for another nonce,
+ * since any page or program can launch evora://auth with one (the app only comes forward; the sign-in keeps waiting).
+ */
+export function refusalShown(reason: RefusalReason): boolean {
+  return reason !== 'none' && reason !== 'nonce';
+}
+
+/** What to tell a window whose sign-in was let go because others started after it. */
+export const REPLACED_MESSAGE = 'Another sign-in with Google was started, so this one was stopped. Try “Continue with Google” again.';
 
 /** What to tell the person about a return that was not accepted. */
 export function refusalMessage(reason: RefusalReason): string {

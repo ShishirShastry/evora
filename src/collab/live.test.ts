@@ -16,7 +16,7 @@ import {
 } from '../core';
 import { MemoryStorage } from '../persistence/storage';
 import { createEditorStore, type EditorStore } from '../state/editorStore';
-import { cloudAssetLoader, LiveError, loadSharedDocument, openLiveDocument, type LiveDocument, type LiveStatus } from './live';
+import { cloudAssetLoader, LiveError, loadSharedDocument, openLiveDocument, ownerKey, type LiveDocument, type LiveStatus } from './live';
 import { OfflineStore } from './offline';
 import {
   canEdit,
@@ -701,6 +701,32 @@ describe('opening a shared document', () => {
     await expect(refused).rejects.toMatchObject({ status: 403 });
     server.reachable = false;
     await expect(loadSharedDocument(DOC_ID, { token: 'alice', guestToken: null }, { fetch: server.fetch, offline: null })).rejects.toMatchObject({ status: 0 });
+  });
+
+  it('shows what this device keeps only to the person who kept it, on a computer several people use', async () => {
+    const { doc } = base();
+    const server = new FakeServer(doc);
+    server.roles.set('alice', 'editor');
+    server.roles.set('sam', 'editor');
+    const offline = new OfflineStore(new IDBFactory(), 'evora-collab-owner-test');
+    // Alice opens it while online: this device keeps her copy.
+    await loadSharedDocument(DOC_ID, { token: 'alice', guestToken: null }, { fetch: server.fetch, offline });
+    await settle();
+    expect((await offline.load(DOC_ID))?.snapshot?.owner).toBe(ownerKey({ token: 'alice', guestToken: null }));
+    server.reachable = false;
+    // Offline, Alice still gets her copy; Sam, or a guest, on the same computer does not.
+    await expect(loadSharedDocument(DOC_ID, { token: 'alice', guestToken: null }, { fetch: server.fetch, offline })).resolves.toMatchObject({ fromCache: true });
+    await expect(loadSharedDocument(DOC_ID, { token: 'sam', guestToken: null }, { fetch: server.fetch, offline })).rejects.toMatchObject({ status: 0 });
+    await expect(loadSharedDocument(DOC_ID, { token: null, guestToken: 'guest-1' }, { fetch: server.fetch, offline })).rejects.toMatchObject({ status: 0 });
+    await expect(loadSharedDocument(DOC_ID, { token: null, guestToken: null }, { fetch: server.fetch, offline })).rejects.toMatchObject({ status: 0 });
+  });
+
+  it('tells sessions apart by a fingerprint of their token', () => {
+    expect(ownerKey({ token: 'a', guestToken: null })).toMatch(/^[0-9a-f]{16}$/);
+    expect(ownerKey({ token: 'a', guestToken: null })).toBe(ownerKey({ token: 'a', guestToken: null }));
+    expect(ownerKey({ token: 'a', guestToken: null })).not.toBe(ownerKey({ token: 'b', guestToken: null }));
+    expect(ownerKey({ token: null, guestToken: 'g' })).not.toBe(ownerKey({ token: null, guestToken: 'h' }));
+    expect(ownerKey({ token: null, guestToken: null })).toBeNull();
   });
 
   it('opens from this device when the server cannot be reached, with the changes made offline, and sends them later', async () => {

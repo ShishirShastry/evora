@@ -111,6 +111,8 @@ with a message saying which setting was wrong (exit code 1).
 | `--shutdown-seconds` | `EVORA_SHUTDOWN_SECONDS` | `10` | On SIGTERM or SIGINT, how long requests under way may take to finish before they are dropped (0 to 600). |
 | (variable only) | `EVORA_SMTP_URL` | (email off) | The mail relay that sends Evora's email, with its account: `smtps://user:password@smtp.example.com:465` or `smtp://user:password@smtp.example.com:587` (see [Sending email](#sending-email)). Only ever read from the environment, because it holds a password. |
 | (variable only) | `EVORA_MAIL_FROM` | (email off) | The sender of that email: `noreply@example.com` or `Evora <noreply@example.com>`. Needed with `EVORA_SMTP_URL`, and both need `EVORA_PUBLIC_URL` for the links. |
+| (variable only) | `EVORA_MAIL_DAILY_LIMIT` | `100` | At most this many emails in any 24 hours, of every kind together; beyond it an email is not sent (the log says so) and nothing else changes. Keeps a relay billed by the message at its free tier. |
+| (variable only) | `EVORA_MAIL_HOURLY_LIMIT` | `30` | At most this many emails in any hour. |
 | `--fresh` | (flag only) | off | Empty the data folder first: for tests. Refused unless the folder is empty or holds an `evora.db`, so it never deletes some other folder named by mistake. |
 
 Examples:
@@ -184,23 +186,38 @@ next to `docker-compose.yml` that is not committed.
 
 ## Sending email
 
+> **Limits, so email never costs you money.** Whatever the relay, Evora sends
+> at most 100 emails a day and 30 an hour in all (`EVORA_MAIL_DAILY_LIMIT`,
+> `EVORA_MAIL_HOURLY_LIMIT`), and at most 5 a day to any one address. Beyond a
+> limit an email is simply not sent: invitations and mentions are still made
+> and shown in the app, invite links still work, and the server's log says
+> which limit was reached. Pick a relay with a free tier at least that large.
+
 Optional. Without it Evora sends no email at all and behaves as it always has.
 With it, Evora sends three kinds of short, plain messages (text and HTML, in
 UTF-8), each with a link to the app at `EVORA_PUBLIC_URL`:
 
 - **Confirm your email address**: to every new account made with a password,
-  and to an account whose address changes. The link works once, for 24 hours,
+  to an account made while email was off (once, the first time the app asks for
+  its email status after email is turned on), and to a new address an account
+  asks for. The link works once, for 24 hours,
   and only for the address it was sent to; only a hash of it is kept, and asking
-  for a new one (the "Resend" button in the app, at most 5 times in 15 minutes)
-  makes the older links stop working. An account made or linked through
-  Continue with Google counts as confirmed, because Google has verified the
-  address.
+  for a new one (the "Resend" button in the app) makes the older links stop
+  working. One account may ask for a link or a new address at most 5 times in
+  15 minutes, and one address is sent at most 5 links a day, whoever asks. An
+  account made or linked through Continue with Google counts as confirmed,
+  because Google has verified the address.
 - **Invitations**: when someone invites an address to a workspace or a file
-  (at most 50 such emails per account in 15 minutes; beyond that the
-  invitation is still made, without an email).
+  (at most 50 such emails per account in 15 minutes, and 10 a day to one
+  address whoever invites it; beyond that the invitation is still made,
+  without an email).
 - **Mentions**: when someone mentions a person in a comment, to their confirmed
-  address. Each person can turn these off in the app (account menu ▸ Email
-  settings…); the notification inside the app still comes.
+  address (at most 10 emails to one person about one file in 15 minutes). Each
+  person can turn these off in the app (account menu ▸ Email settings…); the
+  notification inside the app still comes, and an email is sent only once the
+  comment is saved.
+- With email on, an address mail cannot be sent to (no dot in its domain, or
+  characters such as `,` or `<`) is refused at sign-up and in invitations.
 
 **What changes for invitations.** With email off, an invitation by email goes to
 whichever account has that address, or is made with it first: nothing proves the
@@ -208,6 +225,8 @@ address belongs to that person. With email on, an invitation is taken up only
 by an account whose address is confirmed; an account that has not confirmed it
 yet gets the invitation the moment it does. Someone who makes an account with
 another person's address can therefore no longer receive their invitations.
+If email is turned off again, the invitations still waiting for an existing
+account are given to it when the server starts.
 
 To turn it on, give the server a mail relay (your provider's SMTP service, or a
 relay such as Postfix on the same machine) and restart it:
@@ -241,8 +260,11 @@ The server prints `Email: on, through smtps://evora%40example.com@smtp.example.c
   (the log says how many). Each step of talking to the relay may take at most
   30 seconds.
 - An account's address can be changed with `PATCH /api/me/email` (with the
-  account's password); the new address is confirmed again. There is no screen
-  for it in the app yet.
+  account's password, or for an account made through Google a sign-in in the
+  last 10 minutes), only while email is on. A link is sent to the new address,
+  and the account keeps its old address until the link is followed, so an
+  address nobody has confirmed is never taken from its owner. There is no
+  screen for it in the app yet.
 
 ## Backups and restoring
 

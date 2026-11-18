@@ -1,7 +1,7 @@
 import { PluginsMount } from '../plugins/PluginsMount';
 import { VersionsMount } from '../versions/VersionsMount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, prototypeFrames, startFrame, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, type FileMeta, type Point } from '../../core';
 import { currentAuth } from '../../collab/account';
 import { api, ApiError, errorMessage } from '../../collab/api';
 import { filesApi } from '../../collab/files';
@@ -43,7 +43,7 @@ import { CanvasView } from './CanvasView';
 import { EditorContext, type EditorContextValue } from './EditorContext';
 import { shortcutGroups } from './menus';
 import { useDesktopEditor } from '../desktop/useDesktopEditor';
-import { copyPrototypeLink, createPresentGate, planPrototypeLink, presentHash, SHARE_FIRST_REASON } from '../prototype/links';
+import { copyPrototypeLink, createPresentGate, planPrototypeLink, presentFrom, presentHash, SHARE_FIRST_REASON, unsentWarning } from '../prototype/links';
 import { linkOrigin } from '../../collab/endpoint';
 import { FileHeader, ToolDock, ViewControls } from './TopBar';
 
@@ -142,30 +142,26 @@ type SharedLoadState =
   | { status: 'error'; message: string; denied: boolean; trashed: boolean }
   | { status: 'ready'; store: EditorStore; seq: number };
 
-/** Where a presentation starts from the editor: the selected frame, or else the page's first flow or first frame. */
-function presentFrom(state: ReturnType<EditorStore['getState']>): string | null {
-  const selected = state.selection.length === 1 ? state.selection[0] : undefined;
-  const frames = prototypeFrames(state.doc, state.pageId);
-  return selected !== undefined && frames.some((frame) => frame.id === selected) ? selected : startFrame(state.doc, state.pageId);
-}
-
-/** Resolves once a shared file's changes made here have reached the server, or after `limit` ms, whichever is first. */
-function untilSent(session: CollabSession, limit = 2000): Promise<void> {
+/**
+ * Resolves once a shared file's changes made here have reached the server, or after `limit` ms, whichever is first,
+ * with how many are still unsent.
+ */
+function untilSent(session: CollabSession, limit = 2000): Promise<number> {
   return new Promise((resolve) => {
     if (session.store.getState().pending === 0) {
-      resolve();
+      resolve(0);
       return;
     }
     let stop = (): void => undefined;
     const timer = window.setTimeout(() => {
       stop();
-      resolve();
+      resolve(session.store.getState().pending);
     }, limit);
     stop = session.store.subscribe((state) => {
       if (state.pending !== 0) return;
       window.clearTimeout(timer);
       stop();
-      resolve();
+      resolve(0);
     });
   });
 }
@@ -466,9 +462,14 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
         if (sharedId !== null) {
           // A shared file is presented from the server: what was changed here is sent first (for a moment at most),
           // and whatever has not gone is still shown, as the presentation also reads what this device keeps unsent.
-          presentGate.current?.start(untilSent(session), () => {
-            window.location.hash = presentHash(sharedId, start);
-          });
+          // The presentation holds no connection, so changes still unsent then are warned about first (Present again goes anyway).
+          presentGate.current?.start(
+            untilSent(session),
+            () => {
+              window.location.hash = presentHash(sharedId, start);
+            },
+            (unsent) => setNotice({ title: 'Not all changes are sent yet.', lines: [unsentWarning(unsent)] }),
+          );
           return;
         }
         // The viewer reads the file from storage, so it is written first.
@@ -479,7 +480,8 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
       },
       copyPrototypeLink: (startId) => {
         // A file on this device has no link others could open: it is shared first.
-        const plan = planPrototypeLink({ sharedId, linkAccess: session.store.getState().linkAccess, startId: startId ?? presentFrom(store.getState()), origin: linkOrigin() });
+        // Link access is only known once the file's details have loaded (the session's own value starts at 'none'): unknown until then.
+        const plan = planPrototypeLink({ sharedId, linkAccess: session.store.getState().info?.linkAccess ?? null, startId: startId ?? presentFrom(store.getState()), origin: linkOrigin() });
         const clipboard = typeof navigator.clipboard?.writeText === 'function' ? navigator.clipboard : null;
         void copyPrototypeLink(plan, {
           writeText: clipboard ? (text) => clipboard.writeText(text) : undefined,

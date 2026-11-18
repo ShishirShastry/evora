@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_MAIL_LIMITS,
   Mailer,
+  errorForLog,
   MailSettingsError,
   SmtpError,
   buildMessage,
@@ -68,7 +70,7 @@ describe('the relay address', () => {
   it('is part of the server settings: both variables or neither, with a public URL for the links', () => {
     expect(readConfig([], {}).mail).toBeNull();
     const on = readConfig([], { EVORA_SMTP_URL: 'smtps://u:hunter2@smtp.example.com', EVORA_MAIL_FROM: 'Evora <noreply@example.com>', EVORA_PUBLIC_URL: 'https://evora.example.com' });
-    expect(on.mail).toEqual({ smtp: { security: 'tls', host: 'smtp.example.com', port: 465, user: 'u', pass: 'hunter2' }, from: { name: 'Evora', address: 'noreply@example.com' } });
+    expect(on.mail).toEqual({ smtp: { security: 'tls', host: 'smtp.example.com', port: 465, user: 'u', pass: 'hunter2' }, from: { name: 'Evora', address: 'noreply@example.com' }, perDay: 100, perHour: 30 });
     const refused = [
       { EVORA_SMTP_URL: 'smtps://u:hunter2@smtp.example.com', EVORA_PUBLIC_URL: 'https://evora.example.com' },
       { EVORA_MAIL_FROM: 'noreply@example.com', EVORA_PUBLIC_URL: 'https://evora.example.com' },
@@ -295,5 +297,66 @@ describe('the queue', () => {
     release();
     await mailer.idle();
     expect(mailer.send(message)).toBe(false);
+  });
+});
+
+describe('limits on what is sent, so that a relay billed by the message never runs up a bill', () => {
+  const to = (name: string) => ({ to: `${name}@example.com`, subject: 'Hi', text: 'Hello', html: '<p>Hello</p>' });
+
+  it('are 100 a day, 30 an hour and 5 a day to one address unless set otherwise', () => {
+    expect(DEFAULT_MAIL_LIMITS).toEqual({ perDay: 100, perHour: 30, perAddressPerDay: 5 });
+  });
+
+  it('stop at the hourly limit, and start again an hour later', async () => {
+    let now = 1_000_000;
+    const log: string[] = [];
+    const mailer = new Mailer({ smtp: local(1), from: SENDER, transport: async () => undefined, log: (line) => log.push(line), now: () => now, limits: { perHour: 3, perDay: 100 } });
+    expect([1, 2, 3, 4].map((n) => mailer.send(to(`p${n}`)))).toEqual([true, true, true, false]);
+    expect(log.at(-1)).toMatch(/limit of 3 emails an hour/);
+    expect(log.join('\n')).not.toContain('p4@');
+    now += 60 * 60 * 1000;
+    expect(mailer.send(to('p5'))).toBe(true);
+    await mailer.idle();
+    expect(mailer.sent).toBe(4);
+    mailer.close();
+  });
+
+  it('stop at the daily limit across hours, and start again a day later', async () => {
+    let now = 1_000_000;
+    const mailer = new Mailer({ smtp: local(1), from: SENDER, transport: async () => undefined, log: () => undefined, now: () => now, limits: { perHour: 2, perDay: 3 } });
+    expect(mailer.send(to('a'))).toBe(true);
+    expect(mailer.send(to('b'))).toBe(true);
+    now += 60 * 60 * 1000;
+    expect(mailer.send(to('c'))).toBe(true);
+    expect(mailer.send(to('d'))).toBe(false);
+    now += 23 * 60 * 60 * 1000;
+    expect(mailer.send(to('e'))).toBe(true);
+    await mailer.idle();
+    mailer.close();
+  });
+
+  it('send at most 5 a day to one address, whatever the case of its letters', async () => {
+    let now = 1_000_000;
+    const mailer = new Mailer({ smtp: local(1), from: SENDER, transport: async () => undefined, log: () => undefined, now: () => now });
+    const sent = [1, 2, 3, 4, 5, 6].map((n) => mailer.send({ ...to(n % 2 ? 'alex' : 'ALEX'), subject: `Hi ${n}` }));
+    expect(sent).toEqual([true, true, true, true, true, false]);
+    expect(mailer.send(to('sam'))).toBe(true);
+    now += 24 * 60 * 60 * 1000;
+    expect(mailer.send(to('alex'))).toBe(true);
+    await mailer.idle();
+    mailer.close();
+  });
+
+  it('can be set from the environment, and refuse nonsense', () => {
+    const env = { EVORA_SMTP_URL: 'smtp://localhost:2525', EVORA_MAIL_FROM: 'Evora <noreply@example.com>' };
+    expect(readMailConfig(env, 'https://evora.example.com')).toMatchObject({ perDay: 100, perHour: 30 });
+    expect(readMailConfig({ ...env, EVORA_MAIL_DAILY_LIMIT: '20', EVORA_MAIL_HOURLY_LIMIT: '5' }, 'https://evora.example.com')).toMatchObject({ perDay: 20, perHour: 5 });
+    expect(() => readMailConfig({ ...env, EVORA_MAIL_DAILY_LIMIT: '0' }, 'https://evora.example.com')).toThrow(ConfigError);
+    expect(() => readMailConfig({ ...env, EVORA_MAIL_HOURLY_LIMIT: 'lots' }, 'https://evora.example.com')).toThrow(ConfigError);
+  });
+
+  it('keep addresses out of the log even when the relay quotes them', () => {
+    expect(errorForLog(new Error('550 5.1.1 <alex@example.com>: Recipient address rejected'))).toBe('550 5.1.1 someone at example.com: Recipient address rejected');
+    expect(errorForLog(new Error('mailbox sam.lee@mail.example.org unavailable'))).toBe('mailbox someone at mail.example.org unavailable');
   });
 });

@@ -261,6 +261,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
   const guests = new RateLimiter(limits.guests, limits.windowMs);
   /** Google sign-ins started by the desktop app, which end at evora://auth (server/google.ts). */
   const desktopFlows = new DesktopFlows();
+  /** Desktop sign-ins one address may start in a window (as many as accounts), so that no one can push the flows under way out of desktopFlows. */
+  const desktopStarts = new RateLimiter(limits.signups, limits.windowMs);
   const counted = new RateLimiter(limits.counted, limits.windowMs);
   const commentLimit = new RateLimiter(limits.comments, limits.windowMs);
   const inviteLimit = new RateLimiter(limits.invites, limits.windowMs);
@@ -466,6 +468,8 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
     route('POST', '/api/auth/signup', async (ctx) => {
       const body = await ctx.json();
       const address = email(body);
+      // With email on, an address mail cannot go to could never be confirmed (server/email.ts).
+      if (!emails.usable(address)) throw new HttpError(400, 'Email cannot be sent to that address');
       const name = text(body, 'name', 100);
       const secret = password(body);
       if (!signups.allowed(ctx.ip)) throw new HttpError(429, 'Too many accounts made from here: try again later');
@@ -531,6 +535,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       const desktop = desktopStart(query);
       if (desktop === 'invalid')
         throw new HttpError(400, 'desktop=1 needs a nonce of 22 to 128 letters, digits, - or _, and an S256 code_challenge (43 letters, digits, - or _)');
+      if (desktop) limited(desktopStarts, ctx.ip, 'Too many sign-ins started from here: try again later');
       const invite = query.get('invite');
       const state = newToken();
       const { verifier, challenge } = pkce();
@@ -683,7 +688,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
     route('POST', '/api/auth/google/redeem', async (ctx) => {
       const body = await ctx.json();
       const hash = hashToken(text(body, 'ticket', 200));
-      // The desktop app's PKCE verifier; a web ticket needs none.
+      // The desktop app's PKCE verifier; a web ticket is redeemed only without one (server/google.ts).
       const verifier = body.verifier;
       const outcome = store.tx(() => {
         const [from, to] = ticketKeyRange(hash);
@@ -772,6 +777,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       const { workspace, role: mine, user } = workspaceOf(ctx, params.id as string, 'editor');
       const body = await ctx.json();
       const address = email(body);
+      if (!emails.usable(address)) throw new HttpError(400, 'Email cannot be sent to that address');
       const wanted = role(body);
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
       limited(inviteLimit, user.id, 'Too many invitations: try again later');
@@ -787,7 +793,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
         return addPending('workspace_invites', 'workspace_id', workspace.id, address, wanted, user.id);
       });
       if (invitee) hub.recheck(workspaceDocIds(workspace.id));
-      if (told && address !== user.email) emails.invited(address, user, { kind: 'workspace', id: workspace.id, name: workspace.name }, wanted, !!invitee);
+      if (told && address !== user.email) emails.invited(address, user, { kind: 'workspace', id: workspace.id, name: workspace.name }, wanted, !!invitee, !!found);
       return store.workspaceMembers(workspace.id);
     }),
 
@@ -933,6 +939,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
       if (!canEdit(mine)) throw new HttpError(403, 'Viewers cannot share the document');
       const body = await ctx.json();
       const address = email(body);
+      if (!emails.usable(address)) throw new HttpError(400, 'Email cannot be sent to that address');
       const wanted = role(body);
       if (wanted === 'owner' && mine !== 'owner') throw new HttpError(403, 'Only an owner can make owners');
       limited(inviteLimit, user.id, 'Too many invitations: try again later');
@@ -948,7 +955,7 @@ export function createApi(store: Store, hub: Hub, options: ApiOptions): ApiHandl
         return addPending('document_invites', 'doc_id', doc.id, address, wanted, user.id);
       });
       if (invitee) hub.recheck([doc.id]);
-      if (told && address !== user.email) emails.invited(address, user, { kind: 'file', id: doc.id, name: doc.name }, wanted, !!invitee);
+      if (told && address !== user.email) emails.invited(address, user, { kind: 'file', id: doc.id, name: doc.name }, wanted, !!invitee, !!found);
       return store.docMembers(doc.id);
     }),
 

@@ -49,7 +49,7 @@ const server = await startServer({
   maxJsonBytes: config.maxJsonBytes,
   trustProxy: config.trustProxy,
   shutdownMs: config.shutdownMs,
-  mailer: config.mail ? new Mailer({ smtp: config.mail.smtp, from: config.mail.from }) : null,
+  mailer: config.mail ? new Mailer({ smtp: config.mail.smtp, from: config.mail.from, limits: { perDay: config.mail.perDay, perHour: config.mail.perHour } }) : null,
 });
 console.log(`Evora collaboration server on http://localhost:${server.port}${config.host === '127.0.0.1' ? '' : ` (listening on ${config.host})`}`);
 console.log(`Data folder: ${config.dataDir}`);

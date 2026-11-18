@@ -1,4 +1,5 @@
 import type { LinkAccess } from '../../collab/protocol';
+import { prototypeFrames, startFrame, type Document, type NodeId } from '../../core';
 
 /**
  * Prototype links: addresses that open a file straight into presentation
@@ -37,9 +38,26 @@ export function parsePresentHash(hash: string): { docId: string; startId?: strin
   }
 }
 
-/** Who a shared file's prototype link opens for, in a sentence. */
+/**
+ * Where a presentation, or a prototype link, made from the editor starts:
+ * the selected frame, or else the page's first flow or first frame. The same
+ * for Present, and for every Copy prototype link (View menu, Prototype panel,
+ * Share dialog).
+ */
+export function presentFrom(state: { doc: Document; pageId: NodeId; selection: readonly NodeId[] }): NodeId | null {
+  const selected = state.selection.length === 1 ? state.selection[0] : undefined;
+  const frames = prototypeFrames(state.doc, state.pageId);
+  return selected !== undefined && frames.some((frame) => frame.id === selected) ? selected : startFrame(state.doc, state.pageId);
+}
+
+/**
+ * Who a shared file's prototype link opens for, in a sentence. Null or
+ * undefined is "not known yet" (the file's details have not loaded, or the
+ * server cannot be reached), which claims neither way.
+ */
 export function audienceOf(linkAccess: LinkAccess | null | undefined): string {
   if (linkAccess === 'view' || linkAccess === 'edit') return 'Anyone with the link can open it, without an account.';
+  if (linkAccess === null || linkAccess === undefined) return "It opens for anyone the file's access allows: see Share for who that is.";
   return 'Only people the file is shared with can open it. To let anyone with the link view it, change link access in Share.';
 }
 
@@ -92,17 +110,35 @@ export async function copyPrototypeLink(plan: PrototypeLinkPlan, deps: CopyProto
  * at a time (pressing Present again while waiting does nothing), and no
  * going after `cancel` (the editor was closed meanwhile, so nobody is pulled
  * back into a file they left).
+ *
+ * `wait` may resolve with how many changes are still unsent. The
+ * presentation holds no live connection, so changes left unsent then would
+ * reach the server only when the file is next opened in the editor here:
+ * given `warn`, the first such Present warns instead of going, and the next
+ * one goes anyway (the person has been told).
  */
-export function createPresentGate(): { start: (wait: Promise<void>, go: () => void) => boolean; cancel: () => void } {
+export function createPresentGate(): {
+  start: (wait: Promise<number | void>, go: () => void, warn?: (unsent: number) => void) => boolean;
+  cancel: () => void;
+} {
   let waiting = false;
   let cancelled = false;
+  let warned = false;
   return {
-    start(wait, go) {
+    start(wait, go, warn) {
       if (waiting || cancelled) return false;
       waiting = true;
-      void wait.then(() => {
+      void wait.then((unsent) => {
         waiting = false;
-        if (!cancelled) go();
+        if (cancelled) return;
+        const left = typeof unsent === 'number' ? unsent : 0;
+        if (left > 0 && warn && !warned) {
+          warned = true;
+          warn(left);
+          return;
+        }
+        warned = false;
+        go();
       });
       return true;
     },
@@ -110,6 +146,12 @@ export function createPresentGate(): { start: (wait: Promise<void>, go: () => vo
       cancelled = true;
     },
   };
+}
+
+/** What Present says when a shared file's changes have not all reached the server after waiting for them. */
+export function unsentWarning(unsent: number): string {
+  const what = unsent === 1 ? '1 change has' : `${unsent} changes have`;
+  return `${what} not reached the server yet. The presentation would show them, but they would be sent only when you open this file in the editor again. Wait for the connection, or press Present again to present anyway.`;
 }
 
 /** What a presentation the server refused says, and what the person can do about it. */

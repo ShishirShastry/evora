@@ -589,8 +589,8 @@ routes exist either way; `mail` in the answer says which.
 
 | Route | Access | Body | Answer |
 |---|---|---|---|
-| `GET /api/me/email` | Account | — | `{mail: boolean, email, verified: boolean, mentionEmails: boolean}` |
-| `PATCH /api/me/email` | Account | `{mentionEmails?: boolean, email?, password?}` | the same as `GET` |
+| `GET /api/me/email` | Account | — | `{mail: boolean, email, verified: boolean, mentionEmails: boolean, pendingEmail: string | null, linkSent: boolean}` (`pendingEmail`: a new address asked for and not yet confirmed; the account keeps its address until it is) |
+| `PATCH /api/me/email` | Account | `{mentionEmails?: boolean, email?, password?}` | the same as `GET`; a new `email` is `409` with email off, needs the password (or, for an account without one, a Google sign-in in the last 10 minutes, else `403`), and is `429` beyond the limits |
 | `POST /api/me/email/resend` | Account | — | `{sent: true}` |
 | `POST /api/auth/verify-email` | Public | `{token}` | `{email, verified: true}` |
 
@@ -1192,6 +1192,10 @@ These are known and listed in the project's handoff notes:
   With email on, only a confirmed address takes up an invitation; but an
   account made with someone else's address still holds that address (it cannot
   be signed up for again) until its owner links it with Continue with Google.
+  An account keeps its confirmed address until a new one is confirmed, and an
+  account without a password must have signed in with Google in the last 10
+  minutes to ask for a new one, so an account linked to Google cannot take
+  someone else's address from its owner.
 - There is no limit on the number of connections per address.
 - `/api/health` and `/api/version` do not carry the security headers, and the
   health check's `503` includes the database's error text.

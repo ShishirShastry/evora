@@ -18,6 +18,8 @@
  * | --shutdown-seconds      | EVORA_SHUTDOWN_SECONDS      | 10               |
  * | (variable only)         | EVORA_SMTP_URL              | (email off)      |
  * | (variable only)         | EVORA_MAIL_FROM             | (email off)      |
+ * | (variable only)         | EVORA_MAIL_DAILY_LIMIT      | 100              |
+ * | (variable only)         | EVORA_MAIL_HOURLY_LIMIT     | 30               |
  * | --fresh                 | (flag only)                 | off              |
  *
  * docs/self-hosting.md has the same table with what each one means.
@@ -29,7 +31,7 @@ import { parseArgs } from 'node:util';
 import { DEFAULT_SERVER_PORT } from '../src/collab/protocol.ts';
 import { asOrigin, googleFromEnv, type GoogleConfig } from './google.ts';
 import { parseTrustProxy, type TrustProxy } from './proxy.ts';
-import { MailSettingsError, parseSender, parseSmtpUrl, type Sender, type SmtpSettings } from './mail.ts';
+import { DEFAULT_MAIL_LIMITS, MailSettingsError, parseSender, parseSmtpUrl, type Sender, type SmtpSettings } from './mail.ts';
 
 export interface ServerConfig {
   port: number;
@@ -52,6 +54,17 @@ export interface ServerConfig {
 export interface MailConfig {
   smtp: SmtpSettings;
   from: Sender;
+  /** Emails a day and an hour at most, whatever they are (EVORA_MAIL_DAILY_LIMIT, EVORA_MAIL_HOURLY_LIMIT; default 100 and 30). */
+  perDay: number;
+  perHour: number;
+}
+
+function mailLimit(env: Record<string, string | undefined>, name: string, fallback: number): number {
+  const raw = (env[name] ?? '').trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 100_000) throw new ConfigError(`email: ${name} must be a whole number from 1 to 100000`);
+  return value;
 }
 
 /**
@@ -68,7 +81,7 @@ export function readMailConfig(env: Record<string, string | undefined>, publicUr
   if (!from) throw new ConfigError('email: EVORA_SMTP_URL was given without EVORA_MAIL_FROM (the address mail is sent from, e.g. Evora <noreply@example.com>)');
   if (!publicUrl) throw new ConfigError('email: EVORA_PUBLIC_URL is needed for the links in the messages (e.g. https://evora.example.com)');
   try {
-    return { smtp: parseSmtpUrl(url), from: parseSender(from) };
+    return { smtp: parseSmtpUrl(url), from: parseSender(from), perDay: mailLimit(env, 'EVORA_MAIL_DAILY_LIMIT', DEFAULT_MAIL_LIMITS.perDay), perHour: mailLimit(env, 'EVORA_MAIL_HOURLY_LIMIT', DEFAULT_MAIL_LIMITS.perHour) };
   } catch (error) {
     if (error instanceof MailSettingsError) throw new ConfigError(`email: ${error.message}`);
     throw error;

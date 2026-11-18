@@ -209,16 +209,29 @@ export function cookieValue(header: string | undefined, name: string): string | 
  * 3. The app checks that the nonce is the one it started with, then redeems
  *    the ticket at /api/auth/google/redeem with the verifier. A desktop ticket
  *    is redeemed only with the verifier its challenge was made from; one
- *    brought without it, or with another, is refused and burned. So another
- *    program that registered evora:// too and caught the address cannot use
- *    the ticket: it does not have the verifier, which is never in an address.
+ *    brought without it, or with another, is refused and burned. A web ticket
+ *    is redeemed only without a verifier, so a web ticket slipped into
+ *    evora://auth cannot sign the app in to someone else's account. So another
+ *    program that registered evora:// too and caught the address of a sign-in
+ *    the app started cannot use the ticket: it does not have the verifier,
+ *    which is never in an address.
+ *
+ * What PKCE does not do (RFC 8252, 8.6 and 8.11): anyone may start a desktop
+ * sign-in with a verifier of their own. A program on the person's computer
+ * that registered evora:// could open such a start in their browser and, if
+ * the person goes through Google and clicks Open Evora, catch that address and
+ * redeem its ticket. That is inherent to a custom scheme for an app with no
+ * secret; the page at the end says to go on only after clicking Continue with
+ * Google in Evora just then.
  *
  * The nonce lets the app refuse a return it did not ask for. The flow is kept
- * in memory only: a server restarted in the middle of a sign-in has forgotten
- * that it was the desktop's, and that sign-in finishes in the web app at the
- * origin instead (a known, safe failure: the origin is one the server accepts
- * anyway). A ticket, once made, is in the database with its challenge, so a
- * restart never makes a desktop ticket redeemable without the verifier.
+ * in memory only, and each address may start only so many (desktopStarts in
+ * server/api.ts): a server restarted in the middle of a sign-in, or one whose
+ * DesktopFlows is full, has forgotten that it was the desktop's, and that
+ * sign-in finishes in the web app at the origin instead (a known failure: the
+ * origin is one the server accepts anyway, but the app keeps waiting). A
+ * ticket, once made, is in the database with its challenge, so a restart never
+ * makes a desktop ticket redeemable without the verifier.
  */
 
 /** The address the desktop app is registered for, where a desktop sign-in ends. */
@@ -288,10 +301,14 @@ export function challengeOfKey(key: string): string | null {
   return dot < 0 ? null : key.slice(dot + 1);
 }
 
-/** Whether a kept ticket may be redeemed with this verifier: a web ticket always, a desktop one only with its own. */
+/**
+ * Whether a kept ticket may be redeemed with this verifier: a desktop ticket only with its own, and a web ticket only
+ * without one. The binding goes both ways: the desktop app always sends its verifier, so a web ticket brought with
+ * one is someone else's sign-in slipped into evora://auth (to sign the app in to their account), and is refused.
+ */
 export function ticketRedeemable(key: string, verifier: unknown): boolean {
   const challenge = challengeOfKey(key);
-  return challenge === null || verifierMatches(verifier, challenge);
+  return challenge === null ? verifier === undefined : verifierMatches(verifier, challenge);
 }
 
 /**
@@ -363,7 +380,8 @@ export function desktopReturnPage(returnUrl: string, error: string | null): stri
   const heading = error ? 'Signing in with Google did not finish' : 'Click Open Evora to finish';
   const body = error
     ? `<p>${escapeHtml(error)}</p><p>Click Open Evora to go back to Evora, then try again.</p>`
-    : `<p>Google has confirmed who you are. Click <strong>Open Evora</strong> to finish signing in; if your browser asks whether to open Evora, allow it.</p>`;
+    : `<p>Google has confirmed who you are. Click <strong>Open Evora</strong> to finish signing in; if your browser asks whether to open Evora, allow it.</p>` +
+      `<p>Evora on this computer asked to sign in. If you did not just click <strong>Continue with Google</strong> in Evora, close this tab instead.</p>`;
   return `<!doctype html>
 <html lang="en">
 <head>

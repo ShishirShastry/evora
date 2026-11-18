@@ -47,6 +47,25 @@ export interface LiveAuth {
   guestToken: string | null;
 }
 
+/**
+ * A fingerprint of who is signed in (an account's or a guest's session token), stored with what this device keeps
+ * of a shared document so that another person on the same computer is never shown it offline, and never sends its
+ * waiting changes as theirs. Not secret-keeping: the token itself is kept on this device anyway; it only tells sessions apart.
+ */
+export function ownerKey(auth: LiveAuth): string | null {
+  const token = auth.token ?? auth.guestToken;
+  if (!token) return null;
+  // FNV-1a, twice with different starting values: 64 bits, plenty to tell sessions apart.
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ 0x5bd1e995;
+  for (let i = 0; i < token.length; i++) {
+    const c = token.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x01000193) ^ (b >>> 13);
+  }
+  return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+
 export type LiveStatus = 'connecting' | 'online' | 'offline' | 'denied';
 
 /** A failure to open a shared document, with the server's HTTP status (0 when it could not be reached). */
@@ -133,7 +152,9 @@ export async function loadSharedDocument(docId: string, auth: LiveAuth, deps: Li
     if (error instanceof LiveError) throw error;
   }
 
-  const kept = offline ? await offline.load(docId).catch(() => null) : null;
+  const stored = offline ? await offline.load(docId).catch(() => null) : null;
+  // Only this person's own copy: someone else's, on a shared computer, is neither shown nor sent on.
+  const kept = stored?.snapshot && stored.snapshot.owner && stored.snapshot.owner === ownerKey(auth) ? stored : null;
   const map = new RegisterMap();
   let seq: number;
   if (remote && Array.isArray(remote.registers)) {
@@ -150,7 +171,7 @@ export async function loadSharedDocument(docId: string, auth: LiveAuth, deps: Li
   const built = buildDocument(map, { id: docId, name: 'Untitled' });
   const role = kept?.snapshot?.role ?? null;
   handOver(docId, { seq, map, irregular: built.irregular, role, doc: built.doc });
-  if (remote && offline) void offline.save(docId, { seq, registers: map.confirmedRegisters(), role }, map.pendingRegisters()).catch(() => undefined);
+  if (remote && offline) void offline.save(docId, { seq, registers: map.confirmedRegisters(), role, owner: ownerKey(auth) }, map.pendingRegisters()).catch(() => undefined);
   return { doc: built.doc, seq, fromCache: remote === null };
 }
 
@@ -443,7 +464,7 @@ export function openLiveDocument(options: LiveOptions): LiveDocument {
       snapshotting = true;
       const included = new Set(ackedSinceSnapshot);
       void offline
-        .save(docId, { seq: lastSeq, registers: map.confirmedRegisters(), role: roleKnown ? role : null }, map.pendingRegisters())
+        .save(docId, { seq: lastSeq, registers: map.confirmedRegisters(), role: roleKnown ? role : null, owner: ownerKey(auth) }, map.pendingRegisters())
         .then(() => {
           ackedSinceSnapshot = ackedSinceSnapshot.filter((register) => !included.has(register));
         })
@@ -907,7 +928,7 @@ export function openLiveDocument(options: LiveOptions): LiveDocument {
       // A connection opened again for this editor carries on from here (changes still waiting included).
       if (status !== 'denied') handOver(docId, { seq: lastSeq, map, irregular, role: roleKnown ? role : null, doc: synced });
       // What this device keeps of the document is brought up to date, so it opens as it was left, also offline.
-      if (offline) void offline.save(docId, { seq: lastSeq, registers: map.confirmedRegisters(), role: roleKnown ? role : null }, map.pendingRegisters()).catch(() => undefined);
+      if (offline) void offline.save(docId, { seq: lastSeq, registers: map.confirmedRegisters(), role: roleKnown ? role : null, owner: ownerKey(auth) }, map.pendingRegisters()).catch(() => undefined);
     },
   };
 }

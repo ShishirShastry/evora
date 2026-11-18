@@ -3,6 +3,7 @@ import type { Peer } from '../../collab/protocol';
 import type { DocumentStorage } from '../../persistence/storage';
 import type { EditorState } from '../../state/editorStore';
 import { useEditor, useEditorContext } from '../editor/EditorContext';
+import { presentFrom } from '../prototype/links';
 import { mergedBranchReason, useVersionsUi } from '../versions/state';
 import { Dialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
@@ -156,6 +157,7 @@ export function CollabDialogs({ storage }: { storage: DocumentStorage }) {
         signedIn={account !== null}
         onInfo={(next) => session.setInfo(next)}
         onClose={() => session.closeShare()}
+        prototypeStartId={presentFrom(store.getState())}
       />
     );
   }

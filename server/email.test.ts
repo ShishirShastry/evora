@@ -5,7 +5,7 @@ import { rmSync } from 'node:fs';
 import { DEFAULT_LIMITS } from './api.ts';
 import { Mailer, parseSender } from './mail.ts';
 import { Store } from './store.ts';
-import { composeMessage, escapeHtml } from './email.ts';
+import { EmailService, INVITE_EMAILS_PER_ADDRESS, MENTION_EMAILS_PER_DOC, VERIFY_EMAILS_PER_ADDRESS, composeMessage, escapeHtml } from './email.ts';
 import { call, newDoc, signUp, tempDir, testServer, type TestServer } from './testing.ts';
 import { fakeSmtp, header, plainText, type FakeSmtp, type ReceivedMail } from './smtp-testing.ts';
 
@@ -19,6 +19,8 @@ async function mailServer(limits: Partial<typeof DEFAULT_LIMITS> = {}): Promise<
     from: parseSender('Evora <noreply@example.com>'),
     retryDelaysMs: [],
     log: () => undefined,
+    // The server's own per-account and per-address limits are what these tests check; the relay-wide caps are tested in mail.test.ts.
+    limits: { perDay: 100_000, perHour: 100_000, perAddressPerDay: 100_000 },
   });
   const server = await testServer({ mailer, publicUrl: PUBLIC_URL, limits });
   return { server, relay, mailer };
@@ -61,7 +63,7 @@ describe('with email off (as before)', () => {
   it('says email is off, and the address is not confirmed', async () => {
     const alex = await signUp(server, 'Alex');
     const status = await call(server, 'GET', '/api/me/email', { token: alex.token });
-    expect(status.body).toEqual({ mail: false, email: alex.user.email, verified: false, mentionEmails: true });
+    expect(status.body).toEqual({ mail: false, email: alex.user.email, verified: false, mentionEmails: true, pendingEmail: null, linkSent: false });
     expect((await call(server, 'POST', '/api/me/email/resend', { token: alex.token })).status).toBe(409);
   });
 
@@ -177,7 +179,8 @@ describe('changing the address and the mention setting', () => {
     const taken = await signUp(server, 'Taken', address('taken'));
     expect((await call(server, 'PATCH', '/api/me/email', { token: alex.token, body: { email: taken.user.email, password: 'correct horse battery' } })).status).toBe(409);
     const changed = await call(server, 'PATCH', '/api/me/email', { token: alex.token, body: { email: next.toUpperCase(), password: 'correct horse battery' } });
-    expect(changed.body).toEqual({ mail: true, email: next, verified: false, mentionEmails: true });
+    // The account keeps its confirmed address until the new one is confirmed.
+    expect(changed.body).toEqual({ mail: true, email: alex.user.email, verified: true, mentionEmails: true, pendingEmail: next, linkSent: true });
     const token = await verifyToken(mailer, relay, next);
     expect((await call(server, 'POST', '/api/auth/verify-email', { body: { token } })).status).toBe(200);
     expect((await call(server, 'GET', '/api/me', { token: alex.token })).body.user.email).toBe(next);
@@ -228,7 +231,7 @@ describe('invitations with email on', () => {
     const text = plainText(invitation!.data);
     expect(text).toContain(`${PUBLIC_URL}/#/doc/${doc.id}`);
     expect(text).toContain('as an editor');
-    expect(text).toMatch(/confirm the address/);
+    expect(text).toMatch(/confirm this address/);
     expect(invitation!.data).toContain('Launch &lt;plan&gt;');
 
     // Confirming the address (here: whoever reads that mailbox) takes the invitation up.
@@ -362,5 +365,269 @@ describe('the messages', () => {
     expect(message.html).not.toContain('<b>');
     expect(escapeHtml(`'`)).toBe('&#39;');
     expect(composeMessage('a@example.com', 'x'.repeat(300), [], { label: 'l', url: 'u' }, 'f').subject.length).toBe(150);
+  });
+});
+
+describe('limits on the emails an address change sends', () => {
+  let server: TestServer;
+  let relay: FakeSmtp;
+  let mailer: Mailer;
+  beforeAll(async () => {
+    ({ server, relay, mailer } = await mailServer({ emailResends: 2 }));
+  });
+  afterAll(async () => {
+    await server.stop();
+    await relay.close();
+  });
+
+  it('counts each change against the account, so that changing back and forth cannot send a flood', async () => {
+    const spammer = await signUp(server, 'Visit https://evil.example.net now', address('spammer'));
+    const victim = address('victim');
+    const other = address('other');
+    const statuses: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const to = i % 2 === 0 ? victim : other;
+      statuses.push((await call(server, 'PATCH', '/api/me/email', { token: spammer.token, body: { email: to, password: 'correct horse battery' } })).status);
+    }
+    expect(statuses).toContain(429);
+    expect((await mailTo(mailer, relay, victim)).length).toBeLessThanOrEqual(2);
+  });
+
+  it('sends only a few links to one address, whichever accounts ask', async () => {
+    const victim = address('target');
+    for (let i = 0; i < VERIFY_EMAILS_PER_ADDRESS + 4; i++) {
+      const person = await signUp(server, `Person ${i}`, address('person'));
+      await call(server, 'PATCH', '/api/me/email', { token: person.token, body: { email: victim, password: 'correct horse battery' } });
+    }
+    expect((await mailTo(mailer, relay, victim)).length).toBe(VERIFY_EMAILS_PER_ADDRESS);
+  });
+});
+
+describe('an address that is not confirmed is not held', () => {
+  let server: TestServer;
+  let relay: FakeSmtp;
+  let mailer: Mailer;
+  beforeAll(async () => {
+    ({ server, relay, mailer } = await mailServer());
+  });
+  afterAll(async () => {
+    await server.stop();
+    await relay.close();
+  });
+
+  /** An account made through Google: no password, its address verified by Google. */
+  async function googleOnly(name: string) {
+    const person = await signUp(server, name, address(name.toLowerCase()));
+    server.store.run(`UPDATE users SET password = '', google_sub = ?, email_verified = 1 WHERE id = ?`, `sub-${person.user.id}`, person.user.id);
+    return person;
+  }
+
+  it('keeps the old address until the new one is confirmed, so the new one stays free for its owner', async () => {
+    const squatter = await googleOnly('Squatter');
+    const victim = address('alex');
+    const changed = await call(server, 'PATCH', '/api/me/email', { token: squatter.token, body: { email: victim } });
+    expect(changed.status).toBe(200);
+    expect(changed.body).toMatchObject({ email: squatter.user.email, verified: true, pendingEmail: victim });
+    const token = await verifyToken(mailer, relay, victim);
+    // The real owner can still make an account with it.
+    expect((await call(server, 'POST', '/api/auth/signup', { body: { email: victim, name: 'Alex', password: 'correct horse battery' } })).status).toBe(201);
+    // And the link sent for the change no longer works: the address has an account now.
+    expect((await call(server, 'POST', '/api/auth/verify-email', { body: { token } })).status).toBe(400);
+    expect((await call(server, 'GET', '/api/me', { token: squatter.token })).body.user.email).toBe(squatter.user.email);
+  });
+
+  it('moves to the new address once its link is followed', async () => {
+    const mover = await signUp(server, 'Mover', address('mover'));
+    const next = address('mover-new');
+    const changed = await call(server, 'PATCH', '/api/me/email', { token: mover.token, body: { email: next, password: 'correct horse battery' } });
+    expect(changed.body).toMatchObject({ email: mover.user.email, pendingEmail: next });
+    const token = await verifyToken(mailer, relay, next);
+    expect(await call(server, 'POST', '/api/auth/verify-email', { body: { token } })).toMatchObject({ status: 200, body: { email: next } });
+    expect((await call(server, 'GET', '/api/me/email', { token: mover.token })).body).toMatchObject({ email: next, verified: true, pendingEmail: null });
+  });
+
+  it('asks an account without a password to sign in again before changing its address', async () => {
+    const person = await googleOnly('Gil');
+    server.store.run(`UPDATE sessions SET created_at = ? WHERE user_id = ?`, new Date(Date.now() - 60 * 60 * 1000).toISOString(), person.user.id);
+    expect((await call(server, 'PATCH', '/api/me/email', { token: person.token, body: { email: address('gil-new') } })).status).toBe(403);
+  });
+});
+
+describe('accounts from before email was on', () => {
+  let server: TestServer;
+  let relay: FakeSmtp;
+  let mailer: Mailer;
+  beforeAll(async () => {
+    ({ server, relay, mailer } = await mailServer());
+  });
+  afterAll(async () => {
+    await server.stop();
+    await relay.close();
+  });
+
+  it('are sent a link once, and an invitation tells them to confirm, not to make an account', async () => {
+    const owner = await signUp(server, 'Owner', address('owner'));
+    await call(server, 'POST', '/api/auth/verify-email', { body: { token: await verifyToken(mailer, relay, owner.user.email) } });
+    const alex = await signUp(server, 'Alex', address('alex'));
+    await mailer.idle();
+    // As if the account was made while email was off: no link was ever sent.
+    server.store.run(`DELETE FROM email_tokens WHERE user_id = ?`, alex.user.id);
+    relay.messages.splice(0, relay.messages.length);
+    const status = await call(server, 'GET', '/api/me/email', { token: alex.token });
+    expect(status.body).toMatchObject({ verified: false, linkSent: true });
+    expect(await verifyToken(mailer, relay, alex.user.email)).toBeTruthy();
+    await call(server, 'GET', '/api/me/email', { token: alex.token });
+    expect((await mailTo(mailer, relay, alex.user.email)).length).toBe(1);
+
+    const doc = await newDoc(server, owner.token, 'Plans');
+    await call(server, 'POST', `/api/documents/${doc.id}/members`, { token: owner.token, body: { email: alex.user.email, role: 'editor' } });
+    const invitation = (await mailTo(mailer, relay, alex.user.email)).find((message) => subject(message).includes('invited you'));
+    const text = plainText(invitation!.data);
+    expect(text).toMatch(/confirm/);
+    expect(text).not.toMatch(/create a free Evora account/);
+  });
+});
+
+describe('invitations waiting when email is turned off', () => {
+  it('are taken up by the account with the address when the server starts with email off', async () => {
+    const { server, relay, mailer } = await mailServer();
+    try {
+      const owner = await signUp(server, 'Owner', address('owner'));
+      await call(server, 'POST', '/api/auth/verify-email', { body: { token: await verifyToken(mailer, relay, owner.user.email) } });
+      const alex = await signUp(server, 'Alex', address('alex'));
+      const doc = await newDoc(server, owner.token, 'Plans');
+      await call(server, 'POST', `/api/documents/${doc.id}/members`, { token: owner.token, body: { email: alex.user.email, role: 'editor' } });
+      expect(server.store.all(`SELECT * FROM document_invites WHERE email = ?`, alex.user.email)).toHaveLength(1);
+      // The server starts again, with email off.
+      const off = new EmailService({ store: server.store, mailer: null, publicUrl: null, limits: DEFAULT_LIMITS });
+      off.close();
+      expect(server.store.all(`SELECT * FROM document_invites WHERE email = ?`, alex.user.email)).toHaveLength(0);
+      expect((await call(server, 'GET', `/api/documents/${doc.id}`, { token: alex.token })).status).toBe(200);
+    } finally {
+      await server.stop();
+      await relay.close();
+    }
+  });
+});
+
+describe('changing the address with email off', () => {
+  it('is refused: an address cannot be confirmed without email', async () => {
+    const server = await testServer();
+    try {
+      const alex = await signUp(server, 'Alex');
+      const changed = await call(server, 'PATCH', '/api/me/email', { token: alex.token, body: { email: address('sam'), password: 'correct horse battery' } });
+      expect(changed.status).toBe(409);
+      expect((await call(server, 'GET', '/api/me', { token: alex.token })).body.user.email).toBe(alex.user.email);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+describe('emails to one person', () => {
+  let server: TestServer;
+  let relay: FakeSmtp;
+  let mailer: Mailer;
+  beforeAll(async () => {
+    ({ server, relay, mailer } = await mailServer());
+  });
+  afterAll(async () => {
+    await server.stop();
+    await relay.close();
+  });
+
+  async function confirmed(name: string) {
+    const person = await signUp(server, name, address(name.toLowerCase()));
+    await call(server, 'POST', '/api/auth/verify-email', { body: { token: await verifyToken(mailer, relay, person.user.email) } });
+    return person;
+  }
+
+  it('are limited per address for invitations, however often one is removed and made again', async () => {
+    const owner = await confirmed('Inviter');
+    const victim = address('victim');
+    const doc = await newDoc(server, owner.token, 'Your Evora access expires: https://evil.example.net/login');
+    for (let i = 0; i < INVITE_EMAILS_PER_ADDRESS + 5; i++) {
+      await call(server, 'POST', `/api/documents/${doc.id}/members`, { token: owner.token, body: { email: victim, role: 'viewer' } });
+      expect((await call(server, 'DELETE', `/api/documents/${doc.id}/members/${encodeURIComponent(victim)}`, { token: owner.token })).status).toBe(200);
+    }
+    expect((await mailTo(mailer, relay, victim)).length).toBe(INVITE_EMAILS_PER_ADDRESS);
+  });
+
+  it('are limited per person and file for mentions', async () => {
+    const owner = await confirmed('Writer');
+    const bo = await confirmed('Reader');
+    const doc = await newDoc(server, owner.token, 'Poster');
+    await call(server, 'POST', `/api/documents/${doc.id}/members`, { token: owner.token, body: { email: bo.user.email, role: 'editor' } });
+    for (let i = 0; i < MENTION_EMAILS_PER_DOC + 5; i++) {
+      await call(server, 'POST', `/api/documents/${doc.id}/threads`, { token: owner.token, body: { pageId: 'page1', x: 1, y: 1, body: `@[Reader](${bo.user.id}) ${i}` } });
+    }
+    const mentions = (await mailTo(mailer, relay, bo.user.email)).filter((message) => subject(message).includes('mentioned you'));
+    expect(mentions.length).toBe(MENTION_EMAILS_PER_DOC);
+  });
+});
+
+describe('addresses email cannot be sent to', () => {
+  let server: TestServer;
+  let relay: FakeSmtp;
+  beforeAll(async () => {
+    ({ server, relay } = await mailServer());
+  });
+  afterAll(async () => {
+    await server.stop();
+    await relay.close();
+  });
+
+  it('are refused with email on, at sign-up, in invitations and as a new address', async () => {
+    const signup = await call(server, 'POST', '/api/auth/signup', { body: { email: 'odd@intranet', name: 'Odd', password: 'correct horse battery' } });
+    expect(signup.status).toBe(400);
+    const owner = await signUp(server, 'Owner', address('owner'));
+    const doc = await newDoc(server, owner.token, 'Plans');
+    expect((await call(server, 'POST', `/api/documents/${doc.id}/members`, { token: owner.token, body: { email: 'a,b@example.com', role: 'viewer' } })).status).toBe(400);
+    expect((await call(server, 'PATCH', '/api/me/email', { token: owner.token, body: { email: 'odd@intranet', password: 'correct horse battery' } })).status).toBe(400);
+  });
+});
+
+describe('a migration stopped half way', () => {
+  it('still confirms the accounts linked to Google', () => {
+    const dir = tempDir();
+    const old = new DatabaseSync(join(dir, 'evora.db'));
+    // The column was added, but the server stopped before the accounts linked to Google were marked.
+    old.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, color TEXT NOT NULL, password TEXT NOT NULL, created_at TEXT NOT NULL, google_sub TEXT, email_verified INTEGER NOT NULL DEFAULT 0);
+      INSERT INTO users VALUES ('u2', 'gil@example.com', 'Gil', '#0d99ff', '', '2026-11-02T00:00:00.000Z', 'google-sub-1', 0);
+      PRAGMA user_version = 2;`);
+    old.close();
+    const store = new Store(dir);
+    try {
+      expect(store.userById('u2')?.email_verified).toBe(1);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('notifications made in a transaction', () => {
+  it('reach the listeners only once it is kept', async () => {
+    const server = await testServer();
+    try {
+      const alex = await signUp(server, 'Alex');
+      const heard: string[] = [];
+      const stop = server.store.onNotify((note) => heard.push(note.text));
+      expect(() =>
+        server.store.tx(() => {
+          server.store.notify(alex.user.id, 'mention', { id: alex.user.id, guest: false }, 'rolled back', {});
+          throw new Error('fails');
+        }),
+      ).toThrow('fails');
+      server.store.tx(() => {
+        server.store.notify(alex.user.id, 'mention', { id: alex.user.id, guest: false }, 'kept', {});
+        expect(heard).toEqual([]);
+      });
+      server.store.notify(alex.user.id, 'mention', { id: alex.user.id, guest: false }, 'outside', {});
+      stop();
+      expect(heard).toEqual(['kept', 'outside']);
+    } finally {
+      await server.stop();
+    }
   });
 });

@@ -33,6 +33,12 @@ services:
       EVORA_GOOGLE_CLIENT_ID: ${EVORA_GOOGLE_CLIENT_ID:-}
       EVORA_GOOGLE_CLIENT_SECRET: ${EVORA_GOOGLE_CLIENT_SECRET:-}
       EVORA_MAX_UPLOAD_MB: ${EVORA_MAX_UPLOAD_MB:-50}
+      # Email (off unless both are set). The relay address can hold its password:
+      # keep it in deploy/.env, never in this file. See docs/self-hosting.md, "Sending email".
+      EVORA_SMTP_URL: ${EVORA_SMTP_URL:-}
+      EVORA_MAIL_FROM: ${EVORA_MAIL_FROM:-}
+      EVORA_MAIL_DAILY_LIMIT: ${EVORA_MAIL_DAILY_LIMIT:-100}
+      EVORA_MAIL_HOURLY_LIMIT: ${EVORA_MAIL_HOURLY_LIMIT:-30}
       # Off unless something is in front. With the Caddy service below, the proxy
       # is on Compose's private network: "private" trusts exactly that.
       EVORA_TRUST_PROXY: ${EVORA_TRUST_PROXY:-0}

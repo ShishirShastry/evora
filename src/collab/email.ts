@@ -16,6 +16,10 @@ export interface EmailStatus {
   verified: boolean;
   /** Whether a mention in a comment is also sent by email. */
   mentionEmails: boolean;
+  /** A new address the account asked for, which becomes its address once its link is followed (absent from older servers). */
+  pendingEmail?: string | null;
+  /** Whether a link was sent (to `pendingEmail`, or else to `email`); absent from older servers, which always sent one. */
+  linkSent?: boolean;
 }
 
 export function createEmailApi(options: ApiOptions = {}) {
@@ -34,7 +38,7 @@ export type EmailApi = ReturnType<typeof createEmailApi>;
 
 export const emailApi: EmailApi = createEmailApi();
 
-/** Whether to ask the person to confirm their address: only when the server sends email and it is not confirmed yet. */
+/** Whether to ask the person to confirm their address: only when the server sends email and it (or a new one asked for) is not confirmed yet. */
 export function needsVerifying(status: EmailStatus | null): boolean {
-  return !!status && status.mail && !status.verified;
+  return !!status && status.mail && (!status.verified || !!status.pendingEmail);
 }
