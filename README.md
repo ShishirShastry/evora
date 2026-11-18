@@ -72,7 +72,7 @@ A native app that works fully offline, opens and saves files on disk, recovers y
 
 Every version is on the **[Releases page](https://github.com/ShishirShastry/evora/releases/latest)**.
 
-> **The first release, 0.1.0, is on its way.** These links start working once it is published; until then you can build the installer yourself with `npm run dist:desktop` (see below). Early builds are not code-signed, so Windows shows an "unknown publisher" notice (**More info → Run anyway**) and macOS asks you to allow the app in **Privacy & Security** (or right-click the app and choose **Open**). On Linux, make the AppImage executable first (`chmod +x Evora-*.AppImage`). [More about the desktop app](electron/README.md).
+> **These builds are not code-signed yet**, so Windows shows an "unknown publisher" notice (**More info → Run anyway**) and macOS asks you to allow the app in **Privacy & Security** (or right-click the app and choose **Open**). On Linux, make the AppImage executable first (`chmod +x Evora-*.AppImage`). [More about the desktop app](electron/README.md).
 
 ### 🌐 In your browser
 
@@ -120,9 +120,9 @@ It runs at http://localhost:8787. For Docker, systemd, HTTPS behind nginx or Cad
 
 ## Where Evora is today
 
-Evora is young and moving fast. The editor, design systems, prototyping, handoff, collaboration, version history, plugins and community library are built, and more than eleven hundred automated tests and dozens of real-browser tests check them. The desktop app, self-hosting and release pipeline are new and tested on Windows, ready for the **first public release**. Every known gap is listed openly in [HANDOFF.md](HANDOFF.md).
+Evora is young and moving fast. The editor, design systems, prototyping, handoff, collaboration, version history, plugins and community library are built, and more than eleven hundred automated tests and dozens of real-browser tests check them. The desktop app and self-hosting arrived with the **first public release, 0.1.0**. Every known gap is listed openly in [HANDOFF.md](HANDOFF.md).
 
-**Coming next:** the first release with installers for every platform, a VS Code extension and public REST API, and integrations with GitHub, Storybook and Jira. Also on the list: text on a path, variable-width strokes, video in prototypes, and audio and cursor chat.
+**Coming next:** signed installers, a VS Code extension and public REST API, and integrations with GitHub, Storybook and Jira. Also on the list: text on a path, variable-width strokes, video in prototypes, and audio and cursor chat.
 
 ## Build with us
 

@@ -5,27 +5,62 @@ All notable changes to Evora are written down here. The format follows
 [Semantic Versioning](https://semver.org/): the version in `package.json` is the
 app's version, and each release is the git tag `vX.Y.Z`.
 
-No version has been released yet. Phases 1 to 9 were built and tested before
-there was a release pipeline, so they have no version of their own; the first
-release (planned as 0.1.0) will contain all of them together with Phase 10.
-When a version is released, the "Unreleased" heading becomes `## [X.Y.Z] - date`
-(see [RELEASING.md](RELEASING.md)).
+Phases 1 to 9 were built and tested before there was a release pipeline, so
+they have no version of their own; the first release, 0.1.0, contains all of
+them together with Phase 10.
 
 ## [Unreleased]
 
-### Phase 10 - Desktop and production release (in progress)
+## [0.1.0] - 2026-11-18
 
-- A release pipeline on GitHub Actions: checks on every push and pull request
-  (type-check, unit tests, build and the browser tests in Microsoft Edge on
-  Windows, the collaboration server's tests on Linux), and on a version tag,
-  desktop installers for Windows, macOS (Apple silicon and Intel) and Linux and
-  a self-hosting bundle, put on a draft GitHub Release with the files automatic
-  updates read.
-- Installers are not code-signed yet. Signing is wired to turn on when the
-  certificates are added as repository secrets.
-- Still to be listed here as they land: the desktop application, local-first
-  workflows, self-hosted deployment, documentation, security and performance
-  testing.
+The first release of Evora: a free, open-source design tool for interfaces,
+products and ideas, with an infinite canvas, real-time teamwork and
+interactive prototypes, now as a desktop app for Windows, macOS and Linux and
+as a server you can host yourself.
+
+**Downloads** (below, under Assets):
+
+- **Windows** 10 and 11, 64-bit: `Evora-Setup-0.1.0.exe` (installer) or
+  `Evora-0.1.0-portable.exe` (no install).
+- **macOS**: `Evora-0.1.0-arm64.dmg` for Apple silicon, `Evora-0.1.0-x64.dmg`
+  for Intel (or the `.zip` of each).
+- **Linux**, 64-bit: the `.AppImage` (any distribution; make it executable
+  first) or the `.deb` (Debian and Ubuntu).
+- **Self-hosting**: `evora-server-0.1.0.tar.gz` (needs Node.js 24), or the
+  container image `ghcr.io/shishirshastry/evora:0.1.0`. See the
+  [self-hosting guide](https://github.com/ShishirShastry/evora/blob/main/docs/self-hosting.md).
+
+**These builds are not code-signed.** Windows shows "Windows protected your
+PC": choose *More info*, then *Run anyway*. macOS will not open the app at
+first: right-click it and choose *Open*, or allow it under System Settings ->
+Privacy & Security; if macOS says the app is damaged, run
+`xattr -dr com.apple.quarantine /Applications/Evora.app` in Terminal. Automatic
+updates work on Windows and with the Linux AppImage; on macOS, download new
+versions by hand until the app is signed. The macOS and Linux builds have not
+yet been tried on real machines; please report anything that goes wrong.
+
+### Phase 10 - Desktop and production release
+
+- **Desktop app** (Electron) for Windows, macOS and Linux: works fully offline,
+  opens and saves `.evora`, `.fig` and SVG files on disk, recent files, a
+  native menu, recovery of unsaved work after a crash, a save that asks where
+  to save when the file's folder is gone, automatic updates from GitHub
+  Releases, and hosting a team server from the app.
+- **Self-hosting**: one process serves the app and the collaboration server;
+  Docker and Docker Compose, systemd, nginx and Caddy examples, configuration
+  by environment, `/api/health` and `/api/version`, graceful shutdown, a
+  trusted-proxy setting and online backups (`npm run backup`).
+- **Security review** with 17 fixes and a test that checks every one of the
+  server's 98 routes; see [SECURITY.md](https://github.com/ShishirShastry/evora/blob/main/SECURITY.md).
+- **Release pipeline** on GitHub Actions: checks on every push, and on a
+  version tag installers for every platform, the self-hosting bundle and the
+  container image.
+- **Documentation**: a user guide with every keyboard shortcut, the API
+  reference, the self-hosting guide and the desktop app's notes.
+- "Save to version history" moved to Ctrl+Alt+Shift+S (Ctrl+Alt+S is
+  Subtract).
+- Known limitations are listed in
+  [HANDOFF.md](https://github.com/ShishirShastry/evora/blob/main/HANDOFF.md).
 
 ## Before the first release
 
