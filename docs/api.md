@@ -11,9 +11,10 @@ feature gates anywhere in the API.
 If you write TypeScript, the app's own typed clients are in the repository and
 follow this document: `src/collab/api.ts` (accounts, workspaces, documents,
 comments), `src/collab/files.ts` (projects, favourites, recents, search,
-trash), `src/collab/versions.ts` (versions and branches) and
-`src/collab/community.ts` (Community and plugin directory). The wire contract
-both sides share is `src/collab/protocol.ts`.
+trash), `src/collab/versions.ts` (versions and branches),
+`src/collab/community.ts` (Community and plugin directory) and
+`src/collab/libraries.ts` (team libraries, the routes under
+[Libraries](#libraries)). The wire contract both sides share is `src/collab/protocol.ts`.
 
 - [The basics](#the-basics)
 - [Authentication](#authentication)
@@ -35,6 +36,7 @@ both sides share is `src/collab/protocol.ts`.
   - [Projects, files, favourites, recents, search and trash](#projects-files-favourites-recents-search-and-trash)
   - [Community](#community)
   - [Plugin directory](#plugin-directory)
+  - [Libraries](#libraries)
 - [The live connection (WebSocket)](#the-live-connection-websocket)
 - [Known limits](#known-limits)
 
@@ -414,6 +416,22 @@ interface BranchInfo {
 interface Change { key: string; base: unknown; value: unknown }
 interface Conflict { key: string; base: unknown; main: unknown; branch: unknown }
 type Resolution = 'main' | 'branch';
+```
+
+### Team libraries
+
+```ts
+interface LibrarySummary {
+  id: string;                    // the library's document ID
+  name: string;
+  workspaceId: string | null;    // null when you are not in its workspace (it was shared with you as a document)
+  workspaceName: string | null;
+  version: number;               // counts up with every publishing
+  publishedAt: string;
+  components: number;            // nodes of kind COMPONENT in the publication (each variant counts)
+  styles: number;
+  variables: number;
+}
 ```
 
 ### Community and plugins
@@ -796,8 +814,10 @@ backup.
 - **Restoring** first saves a named version `"Before restoring …"` (returned as
   `before`), then changes the document back to the version with ordinary
   changes, which reach everyone who has it open. `changed` is the number of
-  registers changed. The document's name is left as it is. `409` on a merged
-  branch.
+  registers changed. The document's name is left as it is, and so is what it
+  publishes as a library (`d:publication`): a library's version only counts
+  up, and a restore never brings back an older publication or unpublishes it.
+  `409` on a merged branch.
 - **Deleted documents**: files deleted for good whose versions are still kept.
   Recovering makes a new document from the latest version (`409` when the file
   was not deleted, `404` when there is no backup). Deleting purges those
@@ -814,7 +834,8 @@ backup.
 - **Update from main** and **merge** first show what would happen with `GET`:
   the changes since the branch's base, and the **conflicts** (a register
   changed on both sides to different values). `canMerge` says whether you may
-  merge.
+  merge. Neither carries the document's name or its publication
+  (`d:publication`): each side keeps its own.
 - To apply, send `resolutions`: an object mapping each conflicting register key
   to `"main"` or `"branch"`. `409 "N conflicts need a choice"` while any is
   left unresolved. `applied` is the number of registers changed.
@@ -957,6 +978,64 @@ app uses to install them; how to write a plugin is in `plugins/PLUGINS.md`.
 - **Installing** answers the bundle (the latest unless `version` is given, up
   to 20 characters) and counts you once, however often you install. It counts
   towards the per-address limit for counted requests (`429`).
+
+### Libraries
+
+A shared document is published as a team library by setting its
+`d:publication` register (see [registers](#registers-and-their-keys)) over the
+live connection, which only editors may do; unpublishing sets it to `null`.
+There is no publish route. These two routes read what is published.
+
+| Route | Access | Body / query | Answer |
+|---|---|---|---|
+| `GET /api/libraries` | Account or guest | `?workspace=<id>` (optional) | `{libraries: LibrarySummary[], truncated?: true}` |
+| `GET /api/documents/:id/library` | Can open | — | `{id, name, publication}` |
+
+- **The list** holds every document with a publication (its register is not
+  `null`) that you can open as a member of the document or of its workspace,
+  whatever your role: not files in the trash, not documents of deleted
+  workspaces, and not branches (a branch carries a copy of its main file's
+  publication). It is sorted by workspace name, then name, ignoring case;
+  libraries shared with you as a document, outside your workspaces, come last
+  with `workspaceId` and `workspaceName` `null`.
+- **At most 500**: the first 500 of that order (every library you can view is
+  sorted before the list is cut). A list that was cut says `truncated: true`
+  (the field is left out otherwise); it is also set past a safety cap of
+  20,000 documents read for one list. The app then asks for the libraries a
+  file uses that are missing with `GET /api/documents/:id/library`, one by
+  one.
+- **Reading the list never reads a publication**: the server finds published
+  documents through an index of their `d:publication` registers that holds
+  only their sequence numbers, and works out each row's counts once per change
+  of the register (kept in memory).
+- **Documents reached only through their link are not listed**, for accounts or
+  guests: a link is shared by handing it over, and a guest pass is free, so
+  listing them would show every link-shared library to anyone. A guest's list
+  is therefore always empty. Whoever has a library's ID (a file that uses it
+  keeps it) reads it with `GET /api/documents/:id/library`, link access
+  included.
+- `?workspace=<id>` lists one workspace: `404` when you are not in it, `401`
+  for a guest.
+- **One library**: `publication` is the register's value as the app wrote it
+  (`{version, publishedAt, roots, nodes, styles, variables,
+  variableCollections, assets}`, `Publication` in
+  `src/core/document/schema.ts`). `404 "This file is not published as a
+  library"` when it is not published; otherwise the statuses of
+  `GET /api/documents/:id` (`401`, `403`, `404`, and `410` for a file in the
+  trash to whoever could open it before).
+- **Images** a publication uses are downloaded from the library document with
+  `GET /api/documents/:id/assets/:hash` (see [Images](#images)), with the same
+  access. The app fetches only those its components and styles use (IMAGE
+  paints in their fills and strokes, and in paint styles), not every image in
+  `assets`, which may list images the library's file no longer shows. A
+  missing image (`404`, its upload perhaps still under way) is asked for again
+  over about eight seconds.
+- **Versions and dates**: `version` counts up with every publishing, but
+  starts again from 1 when a library is unpublished and published again. The
+  app also dates every version after the one before it, so a file that uses a
+  library compares `publishedAt` (when it has one) to find a newer version,
+  and the version otherwise. Restoring a version of the library's file and
+  merging a branch into it leave `d:publication` as it is.
 
 ---
 
@@ -1206,5 +1285,5 @@ These are known and listed in the project's handoff notes:
 - The server has no TLS of its own: put it behind a reverse proxy for the
   internet. It runs as one process, and registers are never compacted.
 
-This reference covers every route the API registers (98, plus the 4 email routes, the same table the
+This reference covers every route the API registers (98, plus the 4 email routes and the 2 library routes: 104, the same table the
 security tests walk), plus `GET /api/version` and the WebSocket at `/ws`.

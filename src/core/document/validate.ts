@@ -439,7 +439,9 @@ function flows(value: unknown): Flow[] {
 /** The library a page holds: it needs the library's ID. */
 function libraryRef(value: unknown): LibraryRef | null {
   if (!isObject(value) || typeof value.id !== 'string' || !value.id) return null;
-  return { id: value.id, name: typeof value.name === 'string' && value.name ? value.name : 'Library', version: Math.round(finite(value.version, 1, 1, 1e9)) };
+  const ref: LibraryRef = { id: value.id, name: typeof value.name === 'string' && value.name ? value.name : 'Library', version: Math.round(finite(value.version, 1, 1, 1e9)) };
+  if (typeof value.publishedAt === 'string' && value.publishedAt) ref.publishedAt = value.publishedAt.slice(0, 64);
+  return ref;
 }
 
 const remoteOf = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);

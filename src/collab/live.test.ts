@@ -636,6 +636,31 @@ describe('editing a shared document live', () => {
     expect(await carolImages.loadAsset(hash)).not.toBeNull();
   });
 
+  it('sends an image the document already lists once its bytes are on this device', async () => {
+    const { doc, frame } = base();
+    const server = new FakeServer(doc);
+    server.roles.set('alice', 'editor');
+    const images = new MemoryStorage();
+    const alice = await join(server, 'alice', { storage: images });
+    await settle();
+
+    // Listed (a team library's image that could not be downloaded): there is nothing to send yet.
+    const hash = 'd'.repeat(64);
+    alice.store.getState().addAssets({ [hash]: { mimeType: 'image/png', width: 2, height: 2, name: 'icon.png' } });
+    alice.store.getState().apply('Place image', (d) => addLayer(d, 'RECTANGLE', frame, { fills: [imagePaint(hash)] }).doc);
+    await settle(1000);
+    expect(server.assets.has(hash)).toBe(false);
+
+    // Downloaded later: sent when asked, though the document already listed it. An image it does not list is not.
+    const bytes = new Uint8Array([137, 80, 78, 71, 9]).buffer;
+    await images.saveAsset(hash, { mimeType: 'image/png', bytes });
+    await images.saveAsset('e'.repeat(64), { mimeType: 'image/png', bytes });
+    alice.live.uploadAssets([hash, 'e'.repeat(64)]);
+    await settle(1000);
+    expect(new Uint8Array(server.assets.get(hash)!.bytes)).toEqual(new Uint8Array(bytes));
+    expect(server.assets.has('e'.repeat(64))).toBe(false);
+  });
+
   it('asks for the whole document when no registers were handed over', async () => {
     const { doc, rect } = base();
     const server = new FakeServer(doc);

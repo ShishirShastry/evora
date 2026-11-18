@@ -374,6 +374,9 @@ export const MIGRATIONS: Readonly<Record<number, (file: Raw) => Raw>> = {
     }
     return { ...file, schemaVersion: 26, document: { ...body, nodes: upgraded } };
   },
+  // Version 27 added when a library's version was published to the reference on the page that holds it
+  // (`library.publishedAt`, optional). Older pages do not know it, and it stays absent: nothing to change.
+  26: (file) => ({ ...file, schemaVersion: 27 }),
 };
 
 /**

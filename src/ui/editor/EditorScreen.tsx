@@ -1,11 +1,12 @@
 import { PluginsMount } from '../plugins/PluginsMount';
 import { VersionsMount } from '../versions/VersionsMount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, listLibraries, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, type FileMeta, type Point } from '../../core';
+import { CLIPBOARD_MIME, LEGACY_CLIPBOARD_MIME, FileFormatError, cssFor, isLayer, safeFileName, nameFromFile, readSvg, SvgImportError, newExportSetting, type FileMeta, type Point } from '../../core';
 import { currentAuth } from '../../collab/account';
 import { api, ApiError, errorMessage } from '../../collab/api';
 import { filesApi } from '../../collab/files';
-import { cloudAssetLoader, loadSharedDocument, openLiveDocument } from '../../collab/live';
+import { createLibraryUpdates } from '../../collab/libraries';
+import { cloudAssetLoader, loadSharedDocument, openLiveDocument, type LiveDocument } from '../../collab/live';
 import { ImageCache } from '../../engine/images/imageCache';
 import type { InteractionController } from '../../engine/input/controller';
 import { bundledFonts, fontsUsedBy, loadFonts, onFontsLoaded } from '../../engine/text/fonts';
@@ -21,11 +22,11 @@ import { imageTypeOf, importImageFiles, placeImages, placeSvgLayers } from '../.
 import { createEditorStore, getSession, type EditorStore } from '../../state/editorStore';
 import { Dialog } from '../components/Dialog';
 import { LibrariesDialog } from './LibrariesDialog';
+import { LibraryUpdatesContext, LibraryUpdatesNotice, useLibraryUpdateChecks } from './LibraryUpdates';
 import { ExportDialog } from '../panels/ExportSection';
 import { downloadBytes, exportEnvironment } from './exporting';
 import { exportFigBytes } from '../../persistence/fig';
 import { exportOne, svgOf } from '../../engine/export/export';
-import { loadLibrary } from '../../persistence/libraries';
 import { Logo } from '../components/Icon';
 import { CollabContext } from '../collab/CollabContext';
 import { goToThread } from '../collab/CommentsPanel';
@@ -298,19 +299,12 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
   const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(
     repairs.length > 0 ? { title: 'This file had problems that were repaired when it was opened.', lines: repairs } : null,
   );
-  // When the file is opened: say so if a library it uses has been published again since.
-  useEffect(() => {
-    let current = true;
-    const used = listLibraries(store.getState().doc);
-    void Promise.all(used.map((library) => loadLibrary(storage, library.id).then((latest) => (latest && latest.publication.version > library.version ? library.name : null)))).then((names) => {
-      const newer = names.filter((name): name is string => name !== null);
-      if (!current || newer.length === 0) return;
-      setNotice((shown) => shown ?? { title: 'A library this file uses has a newer version.', lines: newer.map((name) => `“${name}” was published again. Open Libraries in the File menu to update.`) });
-    });
-    return () => {
-      current = false;
-    };
-  }, [store, storage]);
+  // The live connection of a shared file, while it is open.
+  const liveRef = useRef<LiveDocument | null>(null);
+  // The libraries this file uses: newer versions looked for on opening, then every few minutes (on this device and the team's server).
+  // A team library's images that reach this device after it was added are sent to a shared file's own copy too.
+  const libraryUpdates = useMemo(() => createLibraryUpdates({ editor: store, storage, uploadImages: (hashes) => liveRef.current?.uploadAssets(hashes) }), [store, storage]);
+  useLibraryUpdateChecks(libraryUpdates);
   const exit = useRef(onExit);
   exit.current = onExit;
   // A shared document's images are on the collaboration server: those this device does not have are fetched, and kept by hash.
@@ -333,9 +327,11 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
     if (sharedId === null) return;
     // Given this device's storage, the connection sends the images added here and fetches those others add.
     const live = openLiveDocument({ docId: sharedId, store, auth: currentAuth(), seq: sharedSeq, storage });
+    liveRef.current = live;
     const detach = session.attach(live);
     void session.refresh();
     return () => {
+      if (liveRef.current === live) liveRef.current = null;
       detach();
       live.close();
     };
@@ -715,6 +711,7 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
   return (
     <EditorContext.Provider value={context}>
       <CollabContext.Provider value={session}>
+      <LibraryUpdatesContext.Provider value={libraryUpdates}>
       {/* Figma's arrangement: the panels float beside the canvas, each a card of its own on the window's dark ground. */}
       <div className="flex h-full gap-1.5 bg-bg p-1.5">
         <nav aria-label="Pages and layers" className="ev-panel relative z-10 flex flex-none flex-col overflow-hidden" style={{ width: panels.left }}>
@@ -749,6 +746,7 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
             </button>
           </div>
         )}
+          <LibraryUpdatesNotice updates={libraryUpdates} className="ev-panel" />
           <div className="ev-panel relative flex min-h-0 flex-1 overflow-hidden">
             <CanvasView />
             <ToolDock />
@@ -792,6 +790,7 @@ function Editor({ storage, store, meta, repairs, onExit, shared, openShare }: Ed
         />
       )}
       <CollabDialogs storage={storage} />
+      </LibraryUpdatesContext.Provider>
       </CollabContext.Provider>
     </EditorContext.Provider>
   );

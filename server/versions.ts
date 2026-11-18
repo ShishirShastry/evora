@@ -219,15 +219,22 @@ function absent(key: string): unknown {
   return parsed.kind === 'node' && parsed.prop === '@' ? false : null;
 }
 
-/** Registers that are never carried between documents or versions: the document's own name, image descriptions are only added. */
+/**
+ * Registers that are never carried between documents or versions: the
+ * document's own name, and what it publishes as a library (`d:publication`).
+ * A library's version only ever counts up, and every file that uses it
+ * compares versions to find updates: a restore or a merge that brought an
+ * older publication back (or none, unpublishing it for everyone) would break
+ * that. Publishing stays something an editor does on purpose.
+ */
 function personal(key: string): boolean {
-  return key === 'd:name';
+  return key === 'd:name' || key === 'd:publication';
 }
 
 /**
  * The register values that make `current` equal to `target`: every register
  * that differs, and every one `target` does not have set to "removed" (a node
- * to not existing). The name is left alone, and image descriptions are kept
+ * to not existing). The name and the publication are left alone, and image descriptions are kept
  * (they are only ever added, and a description no layer uses costs nothing).
  */
 export function valuesToReach(current: Values, target: Values): Map<string, unknown> {
@@ -241,7 +248,7 @@ export function valuesToReach(current: Values, target: Values): Map<string, unkn
   return out;
 }
 
-/** The registers of `side` changed since `base` (the name aside). */
+/** The registers of `side` changed since `base` (the name and the publication aside). */
 export function changesSince(base: Values, side: Values): Change[] {
   const out: Change[] = [];
   const keys = new Set([...base.keys(), ...side.keys()]);

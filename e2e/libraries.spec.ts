@@ -91,7 +91,7 @@ test('a component published as a library, used in another file, and updated ther
   await expect(canvas(page)).toBeVisible();
   await rename(page, 'Design');
   await menu(page, 'Libraries…');
-  await expect(section(page, 'Available libraries')).toContainText('1 component, 0 styles, 0 variables. Version 1.');
+  await expect(section(page, 'Libraries on this device')).toContainText('1 component, 0 styles, 0 variables. Version 1.');
   await libraries(page).getByRole('button', { name: 'Add Kit', exact: true }).click();
   await expect(section(page, 'Libraries used in this file')).toContainText('Version 1. Up to date.');
   await closeLibraries(page);
@@ -130,7 +130,7 @@ test('a component published as a library, used in another file, and updated ther
   // The second file is told, still shows the old version, and takes the new one.
   await page.getByRole('button', { name: 'Open Design' }).click();
   await expect(canvas(page)).toBeVisible();
-  await expect(page.getByRole('alert')).toContainText('“Kit” was published again');
+  await expect(section(page, 'Library updates available')).toContainText('Kit: version 1 → 2');
   expect(await pixel(page, ...inside)).toEqual(RED);
   await menu(page, 'Libraries…');
   await expect(section(page, 'Libraries used in this file')).toContainText('Version 2 is available.');

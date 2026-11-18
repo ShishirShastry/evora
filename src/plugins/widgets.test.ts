@@ -187,7 +187,7 @@ describe('schema 26', () => {
     const v25 = JSON.parse(JSON.stringify(current)) as { nodes: Record<string, Record<string, unknown>> };
     for (const nodeId in v25.nodes) delete v25.nodes[nodeId]!.widget;
     const parsed = parseFile({ format: 'evora', schemaVersion: 25, meta, document: v25 });
-    expect(CURRENT_SCHEMA_VERSION).toBe(26);
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(26);
     expect(parsed.repairs).toEqual([]);
     expect(parsed.file.document).toEqual(current);
     const frame = Object.values(parsed.file.document.nodes).find((node) => node.type === 'FRAME') as FrameNode;

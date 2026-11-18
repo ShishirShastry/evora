@@ -411,13 +411,18 @@ Limits: variables bind to solid colours, not to gradient stops or effects. Style
 
 **File ▸ Libraries…** shares components, styles and variables between files.
 
-- **This file**: **Publish**, **Publish changes** or **Unpublish**.
-- **Available**: other published files on this device. **Add to this file** to use one.
-- **Used in this file**: **Update** when a new version is published, or **Remove** (instances become ordinary frames).
+- **This file**: **Publish**, **Publish changes** or **Unpublish**. In a shared file, publishing needs edit access, and the new version is offered to every file that uses the library.
+- **Used in this file**: the libraries this file has, with their version. **Update** takes a newer version when there is one; **Remove** takes the library out (instances become ordinary frames, and layers keep the look its styles and variables gave them).
+- **On this device**: the other published files on this computer, in this browser. **Add to this file** to use one.
+- **Team libraries**: the shared files published in your workspaces (and shared files others gave you access to), grouped by workspace, with what each holds and its version. **Add to this file** to use one. This needs an account: when you are not signed in the section says **Sign in to use your team's libraries**, and when the server cannot be reached it says you are offline, with **Try again**.
 
 A library's components appear in the Components list under its name. Its items cannot be changed in the file that uses them.
 
-Limits: libraries are shared only between files on the same device and in the same browser.
+What a file has from a library is a copy, kept in the file with the images it uses. A file therefore opens and draws without the library, the server or a connection, and a file on your device can use team libraries just as a shared file can.
+
+**Updates.** When a file is opened, when **Libraries…** is opened, and every five minutes while the file stays open and you are online, Evora looks for newer versions of the libraries the file uses. When there are some, a quiet **Library updates available** bar above the canvas (and in the Libraries dialog) lists them, for example `Kit: version 1 → 2`. **Update** (or **Update all**) takes them all as one step, which a single undo takes back. **Not now** hides the bar until a newer version still is published. Someone who may only view a shared file is not offered updates.
+
+Limits: an update takes the whole new version; there is no choosing item by item and no list of what changed inside it. A guest (someone without an account who opened a link) is asked to sign in with an account to see team libraries, and a library a file reaches only through a link is not checked for updates. An image of a team library that cannot be downloaded when it is added shows as missing.
 
 ---
 

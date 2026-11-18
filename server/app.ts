@@ -10,6 +10,7 @@
  * - GET /api/version  -> {version, node, database}
  */
 import * as community from './community.ts';
+import * as libraries from './libraries.ts';
 import * as plugins from './plugins.ts';
 import * as versions from './versions.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -99,7 +100,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // The parts built on the API: their tables, then their routes.
   for (const part of [versions, plugins, community]) part.setup(store);
   const api = createApi(store, hub, {
-    extensions: [versions.extension, plugins.extension, community.extension],
+    extensions: [versions.extension, plugins.extension, community.extension, libraries.extension],
     version,
     maxJsonBytes: options.maxJsonBytes ?? 2 * MB,
     maxUploadBytes: maxMessageBytes,

@@ -96,6 +96,40 @@ export function publishCounts(content: Pick<Publication, 'nodes' | 'styles' | 'v
   return { components, styles: Object.keys(content.styles).length, variables: Object.keys(content.variables).length };
 }
 
+/** The image hashes a paint list names (IMAGE paints), from a value of any shape. */
+function imagesIn(paints: unknown, into: Set<string>): void {
+  if (!Array.isArray(paints)) return;
+  for (const paint of paints) {
+    if (typeof paint === 'object' && paint !== null && (paint as { type?: unknown }).type === 'IMAGE') {
+      const hash = (paint as { imageHash?: unknown }).imageHash;
+      if (typeof hash === 'string' && hash) into.add(hash);
+    }
+  }
+}
+
+/**
+ * The images a publication's components and styles actually use: the IMAGE
+ * paints in its layers' fills and strokes and in its paint styles, of those
+ * it lists in its `assets`. A publication lists every image its file ever had
+ * (photos on other pages, images deleted long ago): only these are fetched
+ * and copied into a file that adds it. Read from a value of any shape, since
+ * another file's publication is taken on no trust.
+ */
+export function publicationImageHashes(publication: Pick<Publication, 'nodes' | 'styles' | 'assets'>): string[] {
+  const used = new Set<string>();
+  for (const id in publication.nodes) {
+    const node = publication.nodes[id] as unknown as { fills?: unknown; strokes?: unknown } | null;
+    if (typeof node !== 'object' || node === null) continue;
+    imagesIn(node.fills, used);
+    imagesIn(node.strokes, used);
+  }
+  for (const id in publication.styles) {
+    const style = publication.styles[id] as unknown as { paints?: unknown } | null;
+    if (typeof style === 'object' && style !== null) imagesIn(style.paints, used);
+  }
+  return [...used].filter((hash) => Object.prototype.hasOwnProperty.call(publication.assets, hash)).sort();
+}
+
 /** Whether the document differs from what it last published (or has something to publish and never did). */
 export function hasUnpublishedChanges(doc: Document): boolean {
   const content = publishContent(doc);
@@ -109,15 +143,19 @@ export function hasUnpublishedChanges(doc: Document): boolean {
 
 /**
  * Publishes the document as a library, or publishes it again as it is now:
- * the next version. `at` is the time, as an ISO string. A document with no
- * component, style or variable has nothing to publish.
+ * the next version. `at` is the time, as an ISO string; a version is never
+ * dated before the one it follows (a computer whose clock is behind), so that
+ * dates, like versions, only go up (see `isNewerVersion`). A document with
+ * no component, style or variable has nothing to publish.
  */
 export function publishLibrary(doc: Document, at: string): Document {
   const content = publishContent(doc);
   const counts = publishCounts(content);
   if (counts.components + counts.styles + counts.variables === 0) return doc;
   if (doc.publication && !hasUnpublishedChanges(doc)) return doc;
-  return { ...doc, publication: { version: (doc.publication?.version ?? 0) + 1, publishedAt: at, ...content } };
+  const previous = doc.publication ? Date.parse(doc.publication.publishedAt) : NaN;
+  const publishedAt = Number.isFinite(previous) && !(Date.parse(at) > previous) ? new Date(previous + 1).toISOString() : at;
+  return { ...doc, publication: { version: (doc.publication?.version ?? 0) + 1, publishedAt, ...content } };
 }
 
 /** Stops offering the document as a library. Documents that have it keep what they have. */
@@ -164,7 +202,9 @@ export function importLibrary(doc: Document, source: { id: string; name: string;
 
   const existing = doc.nodes[pageId];
   const order = isPage(existing) ? existing.order : (insertionKeys(doc, null, getChildIds(doc, null).length, 1).keys[0] as string);
-  const page: PageNode = { ...createPage(source.name, order), id: pageId, library: { id: source.id, name: source.name, version: published.version } };
+  const library: LibraryRef = { id: source.id, name: source.name, version: published.version };
+  if (published.publishedAt) library.publishedAt = published.publishedAt;
+  const page: PageNode = { ...createPage(source.name, order), id: pageId, library };
   const rawNodes: Record<string, unknown> = { [pageId]: page };
   const roots = new Set(published.roots);
   for (const id in published.nodes) {
@@ -207,8 +247,9 @@ export function importLibrary(doc: Document, source: { id: string; name: string;
   }
   const assets = { ...next.assets };
   let added = false;
-  for (const hash in clean.assets) {
-    if (hash in assets) continue;
+  // Only the images what is imported uses: not every image the library's file ever had.
+  for (const hash of publicationImageHashes(published)) {
+    if (hash in assets || !(hash in clean.assets)) continue;
     assets[hash] = clean.assets[hash] as Document['assets'][string];
     added = true;
   }
@@ -245,4 +286,72 @@ export function removeLibrary(doc: Document, libraryId: string): Document {
     patches[id] = { variableModes };
   }
   return patchNodes(next, patches);
+}
+
+/** A library's latest published version, wherever it was found (this device, or the team's server). */
+export interface LibraryVersion {
+  id: string;
+  name: string;
+  version: number;
+  /** When it was published (ISO), when known. */
+  publishedAt?: string;
+}
+
+const timeOf = (at: string | undefined): number => (at ? Date.parse(at) : NaN);
+
+/**
+ * Whether `found` is a newer publishing of a library than `have`. Versions
+ * count up with every publishing, but a library that was unpublished and
+ * published again counts from 1 again, so versions on either side of that
+ * cannot be compared. Publishing dates can: each version is dated after the
+ * one before (`publishLibrary`). So when both dates are known, the later
+ * one is newer; otherwise (a file that took the library before dates were
+ * kept with it) the higher version is.
+ */
+export function isNewerVersion(found: Pick<LibraryVersion, 'version' | 'publishedAt'>, have: Pick<LibraryVersion, 'version' | 'publishedAt'>): boolean {
+  const foundAt = timeOf(found.publishedAt);
+  const haveAt = timeOf(have.publishedAt);
+  if (Number.isFinite(foundAt) && Number.isFinite(haveAt)) return foundAt > haveAt;
+  return found.version > have.version;
+}
+
+/** A library this document uses that has been published again: from the version the document has to the latest. */
+export interface LibraryUpdate {
+  id: string;
+  name: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * Which of the libraries a document uses have a newer version than the one
+ * it has (`isNewerVersion`), by name. `latest` may name a library more than
+ * once (found on this device and on the server): the newest counts, with its
+ * entry. It may also name libraries the document does not use; those are left out.
+ */
+export function findLibraryUpdates<T extends LibraryVersion>(used: readonly LibraryRef[], latest: readonly T[]): (LibraryUpdate & { latest: T })[] {
+  const best = new Map<string, T>();
+  for (const entry of latest) {
+    const known = best.get(entry.id);
+    if (!known || isNewerVersion(entry, known)) best.set(entry.id, entry);
+  }
+  const out: (LibraryUpdate & { latest: T })[] = [];
+  for (const library of used) {
+    const found = best.get(library.id);
+    if (found && isNewerVersion(found, library)) out.push({ id: library.id, name: found.name || library.name, from: library.version, to: found.version, latest: found });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * The updates still to offer: an update that was declined is not offered
+ * again until another version is published (a higher one, or, after the
+ * library was unpublished and published again, a lower one).
+ * `declined` holds, by library ID, the version that was declined.
+ */
+export function updatesToOffer<T extends LibraryUpdate>(updates: readonly T[], declined: Readonly<Record<string, number>>): T[] {
+  return updates.filter((update) => {
+    const version = declined[update.id];
+    return typeof version !== 'number' || update.to !== version;
+  });
 }

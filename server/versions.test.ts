@@ -75,9 +75,11 @@ describe('the pure rules', () => {
       ['n:b:x', 1],
       ['t:styles:s1', { id: 's1' }],
       ['a:hash', { width: 1 }],
+      ['d:publication', { version: 3 }],
     ]);
     const target = new Map<string, unknown>([
       ['d:name', 'Then'],
+      ['d:publication', { version: 2 }],
       ['n:a:@', true],
       ['n:a:x', 1],
     ]);
@@ -199,6 +201,22 @@ describe('versions', () => {
     expect(before.body.registers.find((r: Register) => r.k === 'n:rect:x').v).toBe(99);
     const names = (await call(server, 'GET', `/api/documents/${doc.id}/versions`, { token: owner.token })).body.map((v: { name: string }) => v.name);
     expect(names).toEqual(['Before restoring Good', 'Good']);
+  });
+
+  it('leave what the document publishes as a library alone: its version never goes back and it is never unpublished by a restore', async () => {
+    const { owner, editor, doc } = await team('Library');
+    const kit = (version: number) => ({ version, publishedAt: `2026-11-18T10:00:0${version}.000Z`, roots: [], nodes: {}, styles: { s1: { id: 's1', name: `Colour ${version}` } }, variables: {}, variableCollections: {}, assets: {} });
+    const unpublished = await call(server, 'POST', `/api/documents/${doc.id}/versions`, { token: owner.token, body: { name: 'Before publishing' } });
+    await edit(doc.id, editor.token, { 'd:publication': kit(2) });
+    const atTwo = await call(server, 'POST', `/api/documents/${doc.id}/versions`, { token: owner.token, body: { name: 'At version 2' } });
+    await edit(doc.id, editor.token, { 'd:publication': kit(3), 'n:rect:x': 42 });
+
+    const version = async (): Promise<unknown> => (await call(server, 'GET', `/api/documents/${doc.id}/library`, { token: owner.token })).body.publication?.version;
+    expect((await call(server, 'POST', `/api/documents/${doc.id}/versions/${atTwo.body.id}/restore`, { token: owner.token })).status).toBe(200);
+    expect(await version()).toBe(3);
+    expect((await valuesOf(doc.id, owner.token))['n:rect:x']).toBe(10);
+    expect((await call(server, 'POST', `/api/documents/${doc.id}/versions/${unpublished.body.id}/restore`, { token: owner.token })).status).toBe(200);
+    expect(await version()).toBe(3);
   });
 
   it('outlive their deleted document, which can be recovered from them or purged', async () => {
@@ -328,6 +346,17 @@ describe('branches', () => {
     expect(rolled.status).toBe(200);
     const after = await valuesOf(doc.id, owner.token);
     expect(after).toMatchObject({ 'n:rect:x': 1, 'n:rect:y': 20, 'n:star:@': false });
+  });
+
+  it('do not bring a publication over when merged: main keeps its own library version', async () => {
+    const { owner, editor, doc, branch } = await branchOf('Published');
+    const kit = (version: number) => ({ version, publishedAt: '2026-11-18T10:00:00.000Z', roots: [], nodes: {}, styles: { s1: { id: 's1', name: 'Colour' } }, variables: {}, variableCollections: {}, assets: {} });
+    await edit(doc.id, owner.token, { 'd:publication': kit(5) }, 'ownerclient');
+    await edit(branch.id, editor.token, { 'd:publication': kit(1), 'n:rect:y': 300 });
+    const review = await call(server, 'GET', `/api/documents/${branch.id}/merge`, { token: editor.token });
+    expect(review.body.changes.map((c: { key: string }) => c.key)).toEqual(['n:rect:y']);
+    expect((await call(server, 'POST', `/api/documents/${branch.id}/merge`, { token: editor.token, body: {} })).status).toBe(200);
+    expect((await valuesOf(doc.id, owner.token))['d:publication']).toMatchObject({ version: 5 });
   });
 
   it('refuse every change once merged: live changes, renames, restores, images and updates from main', async () => {

@@ -350,6 +350,8 @@ CREATE TABLE IF NOT EXISTS registers (
   PRIMARY KEY (doc_id, key)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS registers_seq ON registers(doc_id, seq);
+-- Which documents publish a library, and when that changed, without reading the publication itself (server/libraries.ts).
+CREATE INDEX IF NOT EXISTS registers_publication ON registers(doc_id, seq) WHERE key = 'd:publication';
 
 CREATE TABLE IF NOT EXISTS assets (
   doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

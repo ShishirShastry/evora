@@ -301,6 +301,14 @@ export interface LiveDocument {
   onPending(callback: (count: number) => void): () => void;
   /** The server's sequence number the document is up to. */
   seq(): number;
+  /**
+   * Sends these images, now on this device, to the server's copy of the
+   * document (editors only; only images the document lists). An image is sent
+   * when it is added to the document, but only if this device has its bytes
+   * then: one that arrives later (a team library's image that could not be
+   * downloaded when the library was added) is sent with this.
+   */
+  uploadAssets(hashes: readonly string[]): void;
   close(): void;
 }
 
@@ -630,7 +638,9 @@ export function openLiveDocument(options: LiveOptions): LiveDocument {
     if (uploading || !storage || !online() || !canEdit(role)) return;
     uploading = true;
     try {
-      for (const hash of [...uploads]) {
+      // Until none is left: images queued while others are being sent are sent too.
+      while (uploads.size > 0) {
+        const hash = uploads.values().next().value as string;
         const asset = await storage.loadAsset(hash).catch(() => null);
         if (!asset) {
           uploads.delete(hash);
@@ -914,6 +924,10 @@ export function openLiveDocument(options: LiveOptions): LiveDocument {
     pendingCount: () => map.pendingCount,
     onPending: (callback) => pendingListeners.add(callback),
     seq: () => lastSeq,
+    uploadAssets(hashes) {
+      const listed = store.getState().doc.assets;
+      for (const hash of hashes) if (Object.prototype.hasOwnProperty.call(listed, hash)) queueUpload(hash);
+    },
     close() {
       if (closed) return;
       closed = true;

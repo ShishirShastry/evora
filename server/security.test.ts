@@ -27,6 +27,7 @@ import { allowedOrigin } from './google.ts';
 import * as versions from './versions.ts';
 import * as plugins from './plugins.ts';
 import * as community from './community.ts';
+import * as libraries from './libraries.ts';
 import { call, clock, newDoc, personalWorkspace, signUp, tempDir, testServer, TestSocket, type TestServer } from './testing.ts';
 import { makeBundle } from '../src/plugins/manifest.ts';
 
@@ -42,7 +43,7 @@ function routeTable(): string[] {
   try {
     for (const part of [versions, plugins, community]) part.setup(store);
     const api = createApi(store, hub, {
-      extensions: [versions.extension, plugins.extension, community.extension],
+      extensions: [versions.extension, plugins.extension, community.extension, libraries.extension],
       version: 'test',
       maxJsonBytes: MB,
       maxUploadBytes: MB,
@@ -175,6 +176,9 @@ const ACCESS: Record<string, Persona[] | 'public'> = {
   'PATCH /api/me/email': [A, G],
   'POST /api/me/email/resend': [A, G],
   'POST /api/auth/verify-email': 'public',
+  // libraries.ts (a guest's list is empty: a library reached only through its link is not listed)
+  'GET /api/libraries': [A],
+  'GET /api/documents/:id/library': [A, O, G],
 };
 
 interface World {
@@ -217,6 +221,8 @@ async function build(): Promise<World> {
       { k: 'n:page1:@', v: true, c: clock(1000, 'seed') },
       { k: 'n:page1:type', v: 'PAGE', c: clock(1000, 'seed', 1) },
       { k: `a:${image}`, v: { mimeType: 'image/png', width: 1, height: 1 }, c: clock(1000, 'seed', 2) },
+      // Published as a library, so that the library routes have something to refuse.
+      { k: 'd:publication', v: { version: 1, publishedAt: '2026-11-18T00:00:00.000Z', roots: [], nodes: {}, styles: {}, variables: {}, variableCollections: {}, assets: {} }, c: clock(1000, 'seed', 3) },
     ])
   ).id;
   await ok(call(server, 'PUT', `/api/documents/${doc}/assets/${image}`, { token: owner.token, body: imageBytes, headers: { 'Content-Type': 'image/png' } }));
@@ -391,6 +397,20 @@ describe('authorization on every route', () => {
     }
     expect(failures).toEqual([]);
   }, 60_000);
+
+  it('lets a viewer read the library routes, and lists the library to nobody else', async () => {
+    const list = await call(server, 'GET', '/api/libraries', { token: world.viewer.token });
+    expect(list.status).toBe(200);
+    expect(list.body.libraries.map((l: { id: string }) => l.id)).toEqual([world.doc]);
+    const one = await call(server, 'GET', `/api/documents/${world.doc}/library`, { token: world.viewer.token });
+    expect(one.status).toBe(200);
+    expect(one.body).toMatchObject({ id: world.doc, name: 'Secret plans', publication: { version: 1 } });
+    for (const persona of ['outsider', 'guest'] as const) {
+      const theirs = await call(server, 'GET', '/api/libraries', credentials(persona, world));
+      expect(theirs.status).toBe(200);
+      expect(theirs.body.libraries.map((l: { id: string }) => l.id)).not.toContain(world.doc);
+    }
+  });
 
   it('left everything as it was: nothing a refused request asked for happened', async () => {
     const owner = world.owner.token;

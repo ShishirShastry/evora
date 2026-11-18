@@ -1,5 +1,5 @@
 /**
- * Evora document schema, version 26 (adds widgets: a frame can be a widget, whose layers a widget plugin draws from its state; version 25 added space between the paragraphs of text, and prototype triggers for the pointer leaving a layer and being let go over it; version 24: a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
+ * Evora document schema, version 27 (adds, on a page that holds a library, when the version it holds was published; version 26 added widgets: a frame can be a widget, whose layers a widget plugin draws from its state; version 25 added space between the paragraphs of text, and prototype triggers for the pointer leaving a layer and being let go over it; version 24: a stroke weight for each side and links in prototypes; version 23: export settings and handoff; version 22: prototyping; version 21: libraries; version 20: styles and variables; version 19: adds component sets, variants and component properties; version 18
  * added components and instances; version 17: columns of an Auto Layout frame can wrap as rows can; version 16
  * added stretching children across an Auto Layout frame; version 15 added Auto Layout itself: frames that lay out their children, and how each layer is sized and placed in one; version 14 added mirrored text and image fills, and guides on frames;
  * version 13 added justified text, lists and styles on parts of a text layer;
@@ -11,7 +11,7 @@
  * The prose description of this file is DOCUMENT_SCHEMA.md; keep the two in step.
  */
 
-export const CURRENT_SCHEMA_VERSION = 26;
+export const CURRENT_SCHEMA_VERSION = 27;
 export const FILE_FORMAT = 'evora';
 export const FILE_EXTENSION = '.evora';
 /**
@@ -707,6 +707,12 @@ export interface LibraryRef {
   id: string;
   name: string;
   version: number;
+  /**
+   * When that version was published (ISO), when known. A library that is
+   * unpublished and published again counts its versions from 1 again: a later
+   * publishing date then tells that a lower version is still the newer one.
+   */
+  publishedAt?: string;
 }
 
 /**

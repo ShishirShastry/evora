@@ -145,7 +145,8 @@ describe('libraries', () => {
     await saveDocument(storage, now(k.store), AT);
     const other = createEditorStore(createDocument('Design'));
     await saveDocument(storage, now(other), AT);
-    expect(await listPublishedLibraries(storage, now(other).id)).toEqual([{ id: k.id, name: 'Kit', version: 2, publishedAt: AT, components: 1, styles: 1, variables: 1 }]);
+    // Published again at the same time: dated just after version 1, so that dates only go up.
+    expect(await listPublishedLibraries(storage, now(other).id)).toEqual([{ id: k.id, name: 'Kit', version: 2, publishedAt: '2026-11-16T12:00:00.001Z', components: 1, styles: 1, variables: 1 }]);
     expect(await listPublishedLibraries(storage, k.id)).toEqual([]);
     act(k.store, unpublishLibrary);
     await saveDocument(storage, now(k.store), AT);
@@ -163,7 +164,7 @@ describe('libraries', () => {
     const pageId = pageOf(store);
     act(store, (doc) => importLibrary(doc, library));
 
-    expect(listLibraries(now(store))).toEqual([{ id: k.id, name: 'Kit', version: 1 }]);
+    expect(listLibraries(now(store))).toEqual([{ id: k.id, name: 'Kit', version: 1, publishedAt: AT }]);
     // The library's page is not one of the document's pages.
     expect(getPages(now(store))).toHaveLength(1);
     expect(getLibraryPages(now(store))).toHaveLength(1);
@@ -236,7 +237,7 @@ describe('libraries', () => {
 
     const before = now(store);
     act(store, (doc) => importLibrary(doc, kitLibrary));
-    expect(listLibraries(now(store))).toEqual([{ id: k.id, name: 'Kit', version: 2 }]);
+    expect(listLibraries(now(store))).toMatchObject([{ id: k.id, name: 'Kit', version: 2 }]);
     expect(layer(store, instance)).toMatchObject({ width: 160 });
     expect(fill(store, instance)).toEqual(GREEN);
     expect(fill(store, box)).toEqual(GREEN);
@@ -329,5 +330,27 @@ describe('libraries', () => {
     const raw = JSON.parse(JSON.stringify(now(k.store))) as { nodes: Record<string, Record<string, unknown>> };
     for (const id in raw.nodes) if (raw.nodes[id]!.type === 'PAGE') raw.nodes[id]!.library = { id: 'x', name: 'X', version: 1 };
     expect(getPages(repairDocument(raw).doc)).toHaveLength(1);
+  });
+
+  it('opens a version 26 file, whose library pages do not know when their version was published', () => {
+    const k = kit();
+    act(k.store, (doc) => publishLibrary(doc, AT));
+    const library = now(k.store);
+    const used = importLibrary(createDocument('Uses it'), { id: library.id, name: library.name, publication: library.publication! });
+    const page = getLibraryPages(used)[0]!;
+    expect(page.library).toMatchObject({ id: library.id, version: 1, publishedAt: AT });
+    // As version 26 wrote it: the reference without the date.
+    const v26 = JSON.parse(JSON.stringify(used)) as { nodes: Record<string, Record<string, unknown>> };
+    delete (v26.nodes[page.id]!.library as Record<string, unknown>).publishedAt;
+    const parsed = parseFile({ format: 'evora', schemaVersion: 26, meta: { createdAt: AT, updatedAt: AT }, document: v26 });
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(27);
+    expect(parsed.file.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(parsed.repairs).toEqual([]);
+    expect(parsed.file.document.nodes[page.id]).toMatchObject({ library: { id: library.id, name: library.name, version: 1 } });
+    expect((parsed.file.document.nodes[page.id] as unknown as { library: Record<string, unknown> }).library).not.toHaveProperty('publishedAt');
+    // And the date is kept through saving and opening once it is known.
+    const reopened = repairDocument(JSON.parse(JSON.stringify(used)));
+    expect(reopened.repairs).toEqual([]);
+    expect(reopened.doc).toEqual(used);
   });
 });
