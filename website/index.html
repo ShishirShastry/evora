@@ -26,7 +26,12 @@
   <link rel="preload" href="assets/fonts/inter-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/site.css">
-  <script>document.documentElement.classList.add('js');</script>
+  <script>(function (root) {
+    root.classList.add('js');
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    root.classList.add('motion');
+    setTimeout(function () { if (!root.classList.contains('motion-ready')) root.classList.remove('motion'); }, 3000);
+  })(document.documentElement);</script>
 
   <script type="application/ld+json">
   {
@@ -513,7 +518,7 @@
             </section>
           </div>
 
-          <p class="download-alt">Version <span data-version>0.2.0</span> &middot; Free, MIT licence &middot; <a href="https://github.com/ShishirShastry/evora/releases">All releases</a> &middot; <a href="https://github.com/ShishirShastry/evora/blob/main/CHANGELOG.md">What&rsquo;s new</a></p>
+          <p class="download-alt"><span>Version <span data-version>0.2.0</span></span><span class="dot" aria-hidden="true"></span><span>Free, MIT licence</span><span class="dot" aria-hidden="true"></span><a href="https://github.com/ShishirShastry/evora/releases">All releases</a><span class="dot" aria-hidden="true"></span><a href="https://github.com/ShishirShastry/evora/blob/main/CHANGELOG.md">What&rsquo;s new</a></p>
 
           <div class="notice" role="note">
             <svg aria-hidden="true"><use href="#i-warn"/></svg>
@@ -575,7 +580,7 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="30" height="30"><span>Evora</span></a>
+          <a class="brand" href="./"><img src="assets/img/logo.svg" alt="" width="64" height="64"><span>Evora</span></a>
           <p>Design, prototype and build together. Free, open and yours.</p>
         </div>
         <div>
@@ -607,13 +612,15 @@
         </div>
       </div>
       <div class="legal">
-        <p>&copy; 2026 Evora contributors. Evora is released under the <a href="https://github.com/ShishirShastry/evora/blob/main/LICENSE">MIT License</a>. The Inter typeface is under the <a href="assets/fonts/Inter-OFL-1.1.txt">SIL Open Font License</a>.</p>
+        <p>&copy; 2026 Evora contributors. Evora is released under the <a href="https://github.com/ShishirShastry/evora/blob/main/LICENSE">MIT License</a>. The Inter typeface is under the <a href="assets/fonts/Inter-OFL-1.1.txt">SIL Open Font License</a>, and the animations use <a href="https://gsap.com/">GSAP</a> under GreenSock&rsquo;s <a href="https://gsap.com/standard-license">standard licence</a>.</p>
         <p>Figma, Sketch, Penpot and Lunacy are trademarks of their respective owners. Evora is an independent project and is not affiliated with, endorsed by or sponsored by any of them.</p>
         <p>This website uses no cookies and no analytics.</p>
       </div>
     </div>
   </footer>
 
+  <script src="assets/vendor/gsap.min.js" defer></script>
+  <script src="assets/vendor/ScrollTrigger.min.js" defer></script>
   <script src="assets/site.js" defer></script>
 </body>
 </html>

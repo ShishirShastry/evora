@@ -13,6 +13,7 @@ them together with Phase 10.
 
 ### Changed
 
+- **Website design.** Larger section labels and headings, a roomier download card, a bigger footer logo, and a GSAP opening sequence with the screenshot tilting flat as you scroll. Visitors who prefer less motion get the page without it.
 - **macOS and Linux downloads.** The website and README now offer the macOS (Apple silicon and Intel) and Linux (AppImage and .deb) apps beside the Windows one, and the website's download button picks the visitor's system.
 - **macOS builds open with "Open Anyway".** Without a signing certificate the Mac app is now signed ad hoc, so its signature covers the whole app. Before, macOS called a downloaded copy "damaged" and it could only be opened from Terminal.
 - **Release workflow.** It can now add one platform's builds to a release that exists already (Actions -> Release -> Run workflow with a tag); see RELEASING.md. 0.2.0's macOS files were added this way.

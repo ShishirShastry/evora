@@ -56,6 +56,48 @@
     items.forEach(function (item) { item.classList.add('is-visible'); });
   }
 
+  // ---- GSAP: the hero arrives as one sequence, its screenshot tilts flat as
+  //      the page scrolls, section rules draw in and the download cards rise.
+  //      Without GSAP, or for visitors who prefer less motion, the CSS
+  //      animations and the plain reveals above do the job. ----
+  var root = document.documentElement;
+  var gsap = window.gsap;
+  if (gsap && root.classList.contains('motion')) {
+    root.classList.add('motion-ready');
+    var ScrollTrigger = window.ScrollTrigger;
+    if (ScrollTrigger) gsap.registerPlugin(ScrollTrigger);
+
+    gsap.timeline({
+      defaults: { ease: 'power3.out' },
+      onComplete: function () { if (ScrollTrigger) ScrollTrigger.refresh(); }
+    })
+      .fromTo('.hero-copy > *', { autoAlpha: 0, y: 30, filter: 'blur(8px)' },
+        { autoAlpha: 1, y: 0, filter: 'blur(0px)', duration: 0.9, stagger: 0.08, clearProps: 'transform,filter' })
+      .fromTo('.hero-shot', { autoAlpha: 0, y: 90 },
+        { autoAlpha: 1, y: 0, duration: 1.4, ease: 'expo.out', clearProps: 'transform' }, '-=0.6')
+      .fromTo('.chips .chip', { autoAlpha: 0, y: 14 },
+        { autoAlpha: 1, y: 0, duration: 0.6, stagger: 0.06, clearProps: 'transform' }, '-=1');
+
+    if (ScrollTrigger) {
+      gsap.matchMedia().add({
+        motion: '(prefers-reduced-motion: no-preference)',
+        wide: '(min-width: 721px)'
+      }, function (context) {
+        if (!context.conditions.motion) return;
+        gsap.fromTo('.hero-shot .window',
+          { rotationX: context.conditions.wide ? 18 : 9, scale: 0.94, transformPerspective: 1600, transformOrigin: '50% 0%' },
+          { rotationX: 0, scale: 1, ease: 'none',
+            scrollTrigger: { trigger: '.hero-shot', start: 'top bottom', end: 'center 55%', scrub: 0.6 } });
+        gsap.utils.toArray('.section-head .eyebrow, .feature-copy .eyebrow').forEach(function (label) {
+          gsap.fromTo(label, { '--draw': 0 }, { '--draw': 1, duration: 1, delay: 0.2, ease: 'power3.out',
+            scrollTrigger: { trigger: label, start: 'top 90%', once: true } });
+        });
+        gsap.fromTo('.platform', { autoAlpha: 0, y: 36 }, { autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.1, ease: 'power3.out',
+          scrollTrigger: { trigger: '.platforms', start: 'top 88%', once: true } });
+      });
+    }
+  }
+
   function whenVisible(node, callback) {
     if (!node) return;
     if (!('IntersectionObserver' in window)) { callback(); return; }
