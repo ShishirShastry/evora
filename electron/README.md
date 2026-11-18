@@ -75,9 +75,9 @@ Nothing is signed yet: there are no certificates. Signing is wired to turn on fr
 
 - Windows and macOS: `CSC_LINK` (the certificate, a path, URL or base64 of a .p12/.pfx) and `CSC_KEY_PASSWORD`, which electron-builder reads itself.
 - macOS notarization: `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` (with a signing certificate). The hardened runtime and `build/entitlements.mac.plist` are already set.
-- Without them, on macOS set `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder does not pick some identity from the keychain.
+- Without them, on macOS set `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder does not pick some identity from the keychain, and add `-c.mac.identity=- -c.mac.hardenedRuntime=false` so the app is signed ad hoc (the release workflow does both). Without an ad-hoc signature macOS calls a downloaded copy "damaged".
 
-What unsigned builds mean: Windows SmartScreen warns about an unknown publisher ("More info ▸ Run anyway"). macOS Gatekeeper refuses to open an unsigned, un-notarized app downloaded from the internet until it is allowed in System Settings ▸ Privacy & Security (or with right-click ▸ Open).
+What unsigned builds mean: Windows SmartScreen warns about an unknown publisher ("More info ▸ Run anyway"). macOS Gatekeeper refuses to open an ad-hoc signed, un-notarized app downloaded from the internet until it is allowed once in System Settings ▸ Privacy & Security ▸ Open Anyway.
 
 ## Automatic updates
 

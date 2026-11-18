@@ -9,6 +9,11 @@
 # without a tag: nothing is published then, and the files are kept as workflow
 # artifacts for 14 days instead.
 #
+# Run it by hand with a tag (for example v0.2.0) to add builds to a release
+# that exists already, published or not: the chosen platforms are built from
+# that tag and their files are uploaded into the release, replacing files of the
+# same name. Use it when one platform's build failed or never ran.
+#
 # Code signing turns itself on when its secrets exist (see RELEASING.md); with
 # none, every installer is unsigned.
 name: Release
@@ -17,12 +22,24 @@ on:
   push:
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Add builds to the existing release for this tag (for example v0.2.0). Leave empty to build this branch without publishing.'
+        required: false
+        default: ''
+        type: string
+      platforms:
+        description: 'Which desktop installers to build'
+        required: false
+        default: all
+        type: choice
+        options: [all, windows, macos, linux]
 
 # Nothing by default; each job asks for exactly what it needs.
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -38,30 +55,65 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
+      existing: ${{ steps.version.outputs.existing }}
+      ref: ${{ steps.version.outputs.ref }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
           persist-credentials: false
 
       - name: Read the version and compare it with the tag
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+          if [ -n "$INPUT_TAG" ]; then
+            # Adding builds to a release that exists already.
+            if [ "$INPUT_TAG" != "v$version" ]; then
+              echo "::error::The tag $INPUT_TAG has package.json version $version; they must match."
+              exit 1
+            fi
+            if ! gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              echo "::error::There is no release for $INPUT_TAG. Push the tag to make one; this option only adds to an existing release."
+              exit 1
+            fi
+            echo "Adding builds of $version to the existing release $INPUT_TAG."
+            { echo "ref=refs/tags/$INPUT_TAG"; echo "existing=true"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             if [ "$GITHUB_REF_NAME" != "v$version" ]; then
               echo "::error::The tag is $GITHUB_REF_NAME but package.json says $version. Tag v$version, or change package.json first."
               exit 1
             fi
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+            { echo "ref=$GITHUB_REF"; echo "existing=false"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
           else
             echo "Run by hand on $GITHUB_REF_NAME: building $version without publishing."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+            { echo "ref=$GITHUB_SHA"; echo "existing=false"; echo "publish=false"; } >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Choose the platforms to build
+        id: matrix
+        env:
+          PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: |
+          # One job for both Mac architectures, so a single latest-mac.yml
+          # lists the arm64 and the x64 files (two jobs would overwrite it).
+          all='[
+            {"key": "windows", "name": "Windows", "os": "windows-latest", "args": ""},
+            {"key": "macos", "name": "macOS", "os": "macos-latest", "args": "--x64 --arm64"},
+            {"key": "linux", "name": "Linux", "os": "ubuntu-latest", "args": ""}
+          ]'
+          matrix=$(jq -c --arg p "$PLATFORMS" '{include: [.[] | select($p == "all" or .key == $p)]}' <<< "$all")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix"
+
       - name: Take the release notes from CHANGELOG.md
-        if: steps.version.outputs.publish == 'true'
+        if: steps.version.outputs.publish == 'true' && steps.version.outputs.existing != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -77,7 +129,7 @@ jobs:
           cat "$RUNNER_TEMP/notes.md"
 
       - name: Open the draft release
-        if: steps.version.outputs.publish == 'true'
+        if: steps.version.outputs.publish == 'true' && steps.version.outputs.existing != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -100,23 +152,12 @@ jobs:
       contents: write # electron-builder uploads into the draft release
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            os: windows-latest
-            args: ''
-          # One job for both Mac architectures, so a single latest-mac.yml
-          # lists the arm64 and the x64 files (two jobs would overwrite it).
-          - name: macOS
-            os: macos-latest
-            args: '--x64 --arm64'
-          - name: Linux
-            os: ubuntu-latest
-            args: ''
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - name: Set up Node 24
@@ -168,6 +209,15 @@ jobs:
             if [ "$RUNNER_OS" = "macOS" ]; then
               # Without this electron-builder looks for any identity in the keychain.
               echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+              # Sign the whole app ad hoc instead. Left as it is, only the
+              # executable carries Electron's own signature, which no longer
+              # matches the bundle, and macOS calls a downloaded copy "damaged"
+              # with no way to open it. Ad-hoc signed, macOS offers "Open
+              # Anyway" in Privacy & Security. The hardened runtime is for
+              # notarization only and would stop an ad-hoc app loading its
+              # frameworks, so it is off for these builds.
+              echo "EXTRA_BUILDER_ARGS=-c.mac.identity=- -c.mac.hardenedRuntime=false" >> "$GITHUB_ENV"
+              echo "macOS: ad-hoc signing."
             fi
           fi
           if [ "$RUNNER_OS" = "macOS" ]; then
@@ -182,17 +232,39 @@ jobs:
           fi
 
       - name: Build and publish the installers
-        if: needs.prepare.outputs.publish == 'true'
+        if: needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.existing != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EP_DRAFT: 'true' # upload into the draft; never publish from here
-        run: npm run dist:desktop -- --publish always ${{ matrix.args }}
+        run: |
+          # shellcheck disable=SC2086 # EXTRA_BUILDER_ARGS holds several arguments
+          npm run dist:desktop -- --publish always ${{ matrix.args }} $EXTRA_BUILDER_ARGS
 
       - name: Build the installers without publishing
-        if: needs.prepare.outputs.publish != 'true'
+        if: needs.prepare.outputs.publish != 'true' || needs.prepare.outputs.existing == 'true'
         shell: bash
-        run: npm run dist:desktop -- --publish never ${{ matrix.args }}
+        run: |
+          # shellcheck disable=SC2086 # EXTRA_BUILDER_ARGS holds several arguments
+          npm run dist:desktop -- --publish never ${{ matrix.args }} $EXTRA_BUILDER_ARGS
+
+      # electron-builder will not upload into a release that is already
+      # published, so builds added to an existing release go up with gh.
+      - name: Add the installers to the existing release
+        if: needs.prepare.outputs.existing == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: |
+          shopt -s nullglob
+          files=(release/*.exe release/*.blockmap release/*.dmg release/*.zip release/*.AppImage release/*.deb release/*.rpm release/latest*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::The build made no installers."
+            exit 1
+          fi
+          printf 'Uploading %s\n' "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Keep the installers as workflow artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -214,6 +286,8 @@ jobs:
   self-host:
     name: Self-hosting bundle and container image
     needs: prepare
+    # Not when adding desktop builds to an existing release.
+    if: needs.prepare.outputs.existing != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -226,6 +300,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - name: Set up Node 24

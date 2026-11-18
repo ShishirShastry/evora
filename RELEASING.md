@@ -73,6 +73,28 @@ To try the builds **without releasing**, run Actions -> Release -> "Run
 workflow" on a branch. Nothing is published then; the installers and the
 bundle are kept as workflow artifacts for 14 days.
 
+## Adding a missing platform to a release
+
+If one platform's build failed, was cancelled or never got a runner after the
+release was published, build it again from the release's own tag and add its
+files to the release:
+
+1. Actions -> Release -> "Run workflow" (on `main`).
+2. **Tag:** the release's tag, for example `v0.2.0`.
+3. **Platforms:** the one that is missing (`windows`, `macos` or `linux`), or `all`.
+
+The chosen platforms are built from that tag (not from `main`) and their files,
+update files included, are uploaded into the release with `gh release upload
+--clobber`, replacing files of the same name. The self-hosting bundle and the
+container image are left alone. From a terminal:
+
+```sh
+gh workflow run release.yml --repo ShishirShastry/evora -f tag=v0.2.0 -f platforms=macos
+```
+
+This is how the macOS files were added to 0.2.0, whose macOS job was
+cancelled before it got a runner.
+
 ## How automatic updates find a release
 
 The desktop app uses `electron-updater` with the GitHub provider. When it
@@ -109,12 +131,14 @@ There are no code-signing certificates yet, so every installer is **unsigned**.
   "Run anyway". Some antivirus programs are more suspicious of unsigned
   installers. Automatic updates still work.
 - **macOS.** Gatekeeper does not open an app that is not signed and notarized
-  by Apple. Downloaded from a browser, Evora will be reported as "damaged" or
-  "cannot be checked for malicious software" and will not open. People can
-  still run it by removing the quarantine flag in Terminal
-  (`xattr -dr com.apple.quarantine /Applications/Evora.app`) or, on some
-  versions of macOS, with System Settings -> Privacy & Security ->
-  "Open Anyway"; neither should be asked of most people. **Automatic updates
+  by Apple. Without a certificate the workflow signs the app **ad hoc**
+  (`-c.mac.identity=-`, with the hardened runtime off), so that the bundle's
+  signature is complete and valid. The first time it is opened, macOS says it
+  cannot verify Evora; people choose Done, then System Settings -> Privacy &
+  Security -> "Open Anyway", once. (Builds up to 0.1.0 were not signed ad hoc:
+  only Electron's executable carried a signature, which no longer matched the
+  bundle, so macOS called a downloaded copy "damaged" and the only way in was
+  `xattr -dr com.apple.quarantine /Applications/Evora.app` in Terminal.) **Automatic updates
   do not work on macOS without signing** (macOS refuses to swap in an update
   that is not signed by the same developer), so Mac users have to download each
   new version by hand until the app is signed.
