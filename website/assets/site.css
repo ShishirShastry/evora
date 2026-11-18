@@ -364,7 +364,10 @@ code, kbd { font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consol
   background: var(--bg-2);
   overflow-x: auto; -webkit-overflow-scrolling: touch;
 }
-.compare { width: 100%; border-collapse: collapse; min-width: 760px; font-size: 15.5px; }
+.compare { width: 100%; border-collapse: collapse; min-width: 900px; font-size: 15px; }
+/* On narrow screens the feature names stay in view while the products scroll sideways. */
+.compare tbody th, .compare thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg-2); }
+.compare tbody th { width: 24%; min-width: 180px; }
 .compare caption { text-align: left; }
 .compare th, .compare td { padding: 16px 20px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--line); }
 .compare tbody tr:last-child th, .compare tbody tr:last-child td { border-bottom: 0; }
@@ -372,7 +375,7 @@ code, kbd { font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consol
 .compare thead th.us { color: var(--text); }
 .compare thead th.us span { display: inline-flex; align-items: center; gap: 8px; }
 .compare thead th.us img { width: 22px; height: 22px; }
-.compare tbody th { font-weight: 550; color: #e7e5f2; width: 30%; }
+.compare tbody th { font-weight: 550; color: #e7e5f2; }
 .compare td.us { background: rgba(124, 92, 255, 0.08); }
 .compare thead th.us { background: rgba(124, 92, 255, 0.12); border-radius: 0; }
 .compare td { color: var(--muted); }
