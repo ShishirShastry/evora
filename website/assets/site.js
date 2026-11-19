@@ -92,7 +92,7 @@
           gsap.fromTo(label, { '--draw': 0 }, { '--draw': 1, duration: 1, delay: 0.2, ease: 'power3.out',
             scrollTrigger: { trigger: label, start: 'top 90%', once: true } });
         });
-        gsap.fromTo('.platform', { autoAlpha: 0, y: 36 }, { autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.1, ease: 'power3.out',
+        gsap.fromTo('.platform, .agent-dl', { autoAlpha: 0, y: 36 }, { autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.1, ease: 'power3.out',
           scrollTrigger: { trigger: '.platforms', start: 'top 88%', once: true } });
       });
     }
@@ -220,7 +220,8 @@
     'mac-arm64': /^Evora-[\d.]+-arm64\.dmg$/,
     'mac-x64': /^Evora-[\d.]+-x64\.dmg$/,
     'linux-appimage': /^Evora-[\d.]+-x86_64\.AppImage$/,
-    'linux-deb': /^evora_[\d.]+_amd64\.deb$/
+    'linux-deb': /^evora_[\d.]+_amd64\.deb$/,
+    'mcp': /^evora-mcp\.mjs$/
   };
 
   // Most Macs sold since 2020 have Apple silicon. Chrome and Edge can say for
@@ -310,7 +311,7 @@
   // moves them on when a newer release is published. A file that a newer
   // release lacks keeps its link to the version in the page.
   function formatSize(bytes) {
-    return Math.round(bytes / (1024 * 1024)) + ' MB';
+    return bytes < 1024 * 1024 ? Math.round(bytes / 1024) + ' KB' : Math.round(bytes / (1024 * 1024)) + ' MB';
   }
 
   if (!window.fetch) return;
