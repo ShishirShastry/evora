@@ -26,6 +26,10 @@
   <a href="docs/user-guide.md"><b>User guide</b></a>
 </p>
 
+<p align="center">
+  <a href="https://shishirshastry.github.io/evora/"><img src="website/assets/screenshots/editor.jpg" width="960" alt="The Evora editor with a travel planner app on the canvas, the layers and components panels on the left and the design properties on the right" /></a>
+</p>
+
 ---
 
 Evora is where screens, flows and design systems come to life. Sketch an idea, shape it with real layout and components, click through it as a working prototype, and hand it to developers, alone or with your whole team on the same canvas at once.
@@ -62,6 +66,12 @@ It is **free for everyone, for good**: no plans, no seats to count, no "upgrade 
 **🔌 Extend it.** Install plugins that run safely in a sandbox with only the permissions you grant, drop interactive widgets on the canvas, and browse the community library for templates, UI kits and icon sets.
 
 **📂 Bring your work with you.** Open `.fig` and SVG files as fully editable layers, and save your work as an open `.evora` file.
+
+<p align="center">
+  <img src="website/assets/screenshots/prototype.jpg" width="32%" alt="Evora's prototype view, with Smart Animate connections drawn between four app screens" />
+  <img src="website/assets/screenshots/devmode.jpg" width="32%" alt="Evora's Inspect panel showing colours, effects and CSS for a selected card, with screens marked Ready for dev" />
+  <img src="website/assets/screenshots/variables.jpg" width="32%" alt="The same app screen in light and dark themes, switched with a variable mode in Evora" />
+</p>
 
 ## Get Evora
 
@@ -149,7 +159,9 @@ Evora is young and moving fast. The editor, design systems, prototyping, handoff
 
 ## Build with us
 
-Evora is open source and contributions are welcome: bug reports, ideas, plugins, and code.
+Evora is open source and contributions are welcome: bug reports, ideas, plugins, and code. Start with [CONTRIBUTING.md](CONTRIBUTING.md), pick up a [good first issue](https://github.com/ShishirShastry/evora/labels/good%20first%20issue), or say hello in [Discussions](https://github.com/ShishirShastry/evora/discussions).
+
+If Evora is useful to you, **a star on GitHub helps other people find it.**
 
 - **Write a plugin:** [plugin guide](plugins/PLUGINS.md), with four examples in [plugins/examples](plugins/examples).
 - **Report a security issue:** [SECURITY.md](SECURITY.md).

@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Question or idea
+    url: https://github.com/ShishirShastry/evora/discussions
+    about: Ask how to do something, share what you made, or talk through an idea in Discussions.
   - name: Security problem
     url: https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability
     about: Please report security problems privately (the repository's Security tab, "Report a vulnerability"), not as a public issue.
