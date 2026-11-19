@@ -1,0 +1,50 @@
+# Builds the MCP server (evora-mcp.mjs, one file) from main and attaches it to
+# a release, for releases made before the release workflow built it.
+# Actions -> MCP server -> Run workflow, with the release's tag.
+name: MCP server
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach evora-mcp.mjs to (for example v0.2.0)
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  attach:
+    name: Build and attach evora-mcp.mjs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # upload the file to the release
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test and build the MCP server
+        run: |
+          npx vitest run mcp
+          npm run mcp:build
+          node dist-mcp/evora-mcp.mjs --help
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist-mcp/evora-mcp.mjs --repo "$GITHUB_REPOSITORY" --clobber

@@ -23,7 +23,7 @@ export default defineConfig({
     // Core tests run in Node. Tests that need a DOM opt in per file with
     // a "@vitest-environment jsdom" comment on their first line.
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'server/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'server/**/*.test.ts', 'mcp/**/*.test.ts'],
     restoreMocks: true,
     // At most 4 test workers at once (or EVORA_TEST_WORKERS): one per CPU core, the default, ran a
     // 16 GB computer out of memory on 2026-11-18, since each worker with a DOM takes a few hundred MB.

@@ -11,6 +11,10 @@ them together with Phase 10.
 
 ## [Unreleased]
 
+### Added
+
+- **Design with your AI agent.** Evora's MCP server lets Claude Code, Cursor, Claude Desktop, VS Code and other AI agents create and edit `.evora` designs: frames with auto layout, shapes, text, colours, shadows and pages, with an SVG drawing to check the result. It is one file, `evora-mcp.mjs`, attached to each release; see docs/mcp.md.
+
 ### Changed
 
 - **Website design.** Larger section labels and headings, a roomier download card, a bigger footer logo, and a GSAP opening sequence with the screenshot tilting flat as you scroll. Visitors who prefer less motion get the page without it.

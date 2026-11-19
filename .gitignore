@@ -35,3 +35,4 @@ Thumbs.db
 # The desktop app's build output (Phase 10): compiled main process and preload, and the installers.
 dist-electron/
 release/
+dist-mcp/

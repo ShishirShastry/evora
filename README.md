@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  The all-in-one design tool for interfaces, products and ideas:<br />
-  an infinite canvas, real-time teamwork and interactive prototypes, with nothing behind a paywall.
+  A real desktop app for Windows, macOS and Linux that <b>works offline</b>, with <b>free real-time teamwork</b>,<br />
+  <b>opens your Figma <code>.fig</code> files</b>, and <b>lets your AI agent design with you</b>. Nothing behind a paywall.
 </p>
 
 <p align="center">
@@ -23,7 +23,8 @@
 <p align="center">
   <a href="https://shishirshastry.github.io/evora/"><b>Website</b></a> &middot;
   <a href="https://shishirshastry.github.io/evora/#download"><b>Download for Windows, macOS and Linux</b></a> &middot;
-  <a href="docs/user-guide.md"><b>User guide</b></a>
+  <a href="docs/user-guide.md"><b>User guide</b></a> &middot;
+  <a href="docs/mcp.md"><b>Design with your AI agent</b></a>
 </p>
 
 <p align="center">
@@ -106,6 +107,16 @@ Not sure which Mac you have? Apple menu → **About This Mac**: a **Chip** such 
   ```
 
 Every installer is built in public by [GitHub Actions](.github/workflows/release.yml) from this repository's code. [More about the desktop app](electron/README.md).
+
+### 🤖 With your AI agent
+
+Claude Code, Cursor, Claude Desktop, VS Code and other AI agents can create and edit Evora designs through Evora's MCP server. Download `evora-mcp.mjs` from the [latest release](https://github.com/ShishirShastry/evora/releases/latest) (it needs Node.js 20 or later), then, for Claude Code:
+
+```bash
+claude mcp add evora -- node /path/to/evora-mcp.mjs --root ~/Designs
+```
+
+Ask for a screen or a whole flow, then open the file in Evora to refine it. Setup for other agents and the full list of tools: [docs/mcp.md](docs/mcp.md).
 
 ### 🌐 In your browser
 

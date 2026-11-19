@@ -355,6 +355,13 @@ jobs:
           ( cd out && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
           ls -l out
 
+      # The MCP server for AI agents: one file that runs on Node.js 20 or later.
+      - name: Build the MCP server
+        run: |
+          npm run mcp:build
+          node dist-mcp/evora-mcp.mjs --help
+          cp dist-mcp/evora-mcp.mjs out/
+
       - name: Attach the bundle to the draft release
         if: needs.prepare.outputs.publish == 'true'
         env:

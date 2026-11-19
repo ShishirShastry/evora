@@ -17,7 +17,7 @@
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p electron/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p electron/tsconfig.json && tsc --noEmit -p mcp/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
@@ -29,7 +29,8 @@
     "dist:desktop": "npm run desktop:build && electron-builder",
     "e2e:desktop": "playwright test -c e2e/desktop.config.ts",
     "desktop:icons": "electron electron/make-icons.mjs",
-    "backup": "node server/backup.ts"
+    "backup": "node server/backup.ts",
+    "mcp:build": "vite build -c mcp/vite.config.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
