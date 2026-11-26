@@ -8,6 +8,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # The type definitions follow the Node that the app and CI run on (24),
+      # so a newer major of @types/node would describe APIs that aren't there.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       # Minor and patch updates of development tools in one pull request.
       dev-tools:
