@@ -18,7 +18,8 @@
  *   evora://auth (electron/auth.ts).
  *
  * Environment: EVORA_DEV_URL (load a development server), EVORA_USER_DATA (the
- * data folder; the tests give each run its own).
+ * data folder; the tests give each run its own). `--smoke-test` checks that an
+ * installed copy works and quits (electron/smoke.ts).
  */
 import { app, BrowserWindow, dialog, ipcMain, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
@@ -66,11 +67,14 @@ import { hostStatus, killHost, startHost, stopHost, watchHost } from './hostServ
 import { buildMenu, openProjectPage } from './menu.js';
 import type { SpecialItem } from './menuSpec.js';
 import { loadSettings, rememberWindow, saveSettings, savedWindowState } from './settings.js';
+import { SMOKE_TEST, prepareSmokeTest, runSmokeTest } from './smoke.js';
 import { checkForUpdates, installUpdate, watchUpdates } from './updates.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 if (process.env.EVORA_USER_DATA) app.setPath('userData', resolve(process.env.EVORA_USER_DATA));
+// Before the single-instance lock, which belongs to the data folder: a smoke test runs beside an open Evora.
+if (SMOKE_TEST) prepareSmokeTest();
 app.setAppUserModelId('org.evora.app');
 registerAppScheme();
 
@@ -782,6 +786,11 @@ function start(): void {
       },
       () => mainWindow()?.window ?? null,
     );
+
+    if (SMOKE_TEST) {
+      void runSmokeTest(createWindow().window);
+      return;
+    }
 
     await offerRecovery();
     const first = createWindow();
