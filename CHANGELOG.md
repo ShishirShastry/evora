@@ -11,6 +11,14 @@ them together with Phase 10.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-26
+
+Evora 0.2.1 tells Mac users when a new version is out, tries every installer on its own system before release, and moves to Electron 45.5.0 with Chromium's latest security fixes. It is also the first release with the MCP server for AI agents in its notes (the file came to 0.2.0 later).
+
+**Downloads** (below, under Assets): **Windows** 10 and 11, 64-bit: `Evora-Setup-0.2.1.exe` (installer) or `Evora-0.2.1-portable.exe` (no install). **macOS**: `Evora-0.2.1-arm64.dmg` (Apple silicon) or `Evora-0.2.1-x64.dmg` (Intel). **Linux**: `Evora-0.2.1-x86_64.AppImage` or `evora_0.2.1_amd64.deb`. Self-hosting: `evora-server-0.2.1.tar.gz` or `ghcr.io/shishirshastry/evora:0.2.1`. AI agents: `evora-mcp.mjs`. Installed Windows copies and Linux AppImages offer this update by themselves. On a Mac, download it by hand this once: from 0.2.1 on, Evora tells you when a new version is out.
+
+**These builds are not code-signed.** Windows shows "Windows protected your PC": choose *More info*, then *Run anyway*. macOS says it cannot verify Evora the first time: choose *Done*, then System Settings, Privacy & Security, *Open Anyway*.
+
 ### Added
 
 - **Macs hear about new versions.** A Mac copy of Evora can't install updates itself until the Mac builds are signed by Apple. It used to try and fail without a word. Now it tells you when a new version is out and offers the download for your Mac: once per version when it starts, and from Check for updates… at any time.
@@ -19,6 +27,7 @@ them together with Phase 10.
 
 ### Changed
 
+- **Electron 45.5.0** (from 45.3.3), with Chromium's security fixes since 0.2.0.
 - **Website design.** Larger section labels and headings, a roomier download card, a bigger footer logo, and a GSAP opening sequence with the screenshot tilting flat as you scroll. Visitors who prefer less motion get the page without it.
 - **macOS and Linux downloads.** The website and README now offer the macOS (Apple silicon and Intel) and Linux (AppImage and .deb) apps beside the Windows one, and the website's download button picks the visitor's system.
 - **macOS builds open with "Open Anyway".** Without a signing certificate the Mac app is now signed ad hoc, so its signature covers the whole app. Before, macOS called a downloaded copy "damaged" and it could only be opened from Terminal.
