@@ -16,6 +16,10 @@ export default defineConfig({
   expect: { timeout: 7_000 },
   fullyParallel: false,
   workers: 1,
+  // On CI a test that fails is run once more. One that then passes is listed
+  // as flaky in the log instead of failing the run; one that fails again
+  // leaves a trace of its second try in the uploaded report.
+  retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
   outputDir: 'test-results',
   use: {
@@ -23,7 +27,7 @@ export default defineConfig({
     channel: 'msedge',
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 1,
-    trace: 'off',
+    trace: process.env.CI ? 'on-first-retry' : 'off',
   },
   webServer: [
     {

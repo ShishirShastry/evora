@@ -15,6 +15,17 @@ async function set(page: Page, label: string, value: string): Promise<void> {
   await field(page, label).press('Enter');
 }
 
+/**
+ * Waits until the browser has selected `text` and the editor has taken that
+ * selection in. The editor learns of it from "selectionchange" events, which
+ * arrive after the key presses; on a slow machine the panel could otherwise
+ * act on the selection of an earlier key press.
+ */
+async function selected(page: Page, text: string): Promise<void> {
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe(text);
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+}
+
 interface Ink {
   count: number;
   left: number;
@@ -202,6 +213,7 @@ test('part of a text layer in a style of its own: from the panel, with shortcuts
   await page.keyboard.press('Home');
   for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
   for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowRight');
+  await selected(page, 'bold');
   await expect(page.getByText('Text (selected part)')).toBeVisible();
 
   // A weight, a size and a colour from the panel go to that part only, and the text stays open.
@@ -281,6 +293,7 @@ test('part of a text layer in a style of its own: from the panel, with shortcuts
 
   // The colour of a part can be given back to the layer's fill.
   await page.keyboard.press('Control+a');
+  await selected(page, 'Hello boLld world!');
   await page.getByRole('button', { name: "Use the layer's fill for the selected text" }).click();
   await expect(editor).toHaveCount(1);
   expect((await stretches()).every((stretch) => stretch[3] !== 'rgb(255, 0, 0)')).toBe(true);
