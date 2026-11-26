@@ -24,6 +24,12 @@ import { startHost, stopHost } from './hostServer.js';
 export const SMOKE_TEST = process.argv.includes('--smoke-test');
 
 const PAGE_TIMEOUT_MS = 60_000;
+/**
+ * The app gives its team server 20 seconds; here it gets longer, because the
+ * Intel build is tried on Apple silicon runners through Rosetta, where a first
+ * start is much slower than on a real Intel Mac.
+ */
+const SERVER_TIMEOUT_MS = 120_000;
 
 /** The page has drawn into #root and has the bridge from the preload script. */
 const PAGE_READY = `typeof window.evoraDesktop === 'object' && window.evoraDesktop !== null && (document.getElementById('root')?.childElementCount ?? 0) > 0`;
@@ -55,13 +61,15 @@ export async function runSmokeTest(window: BrowserWindow): Promise<void> {
 
   try {
     const port = await freePort();
-    const status = await startHost(port);
+    const startedAt = Date.now();
+    const status = await startHost(port, SERVER_TIMEOUT_MS);
+    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
     if (status.state !== 'running') throw new Error(status.message ?? `the server is ${status.state}`);
     const health = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(5000) });
     if (!health.ok) throw new Error(`/api/health answered ${health.status}`);
     const page = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(5000) });
     if (!page.ok || !(await page.text()).includes('<div id="root">')) throw new Error(`/ answered ${page.status} without the app`);
-    say(`ok: the team server started with the app's own Node on port ${port} and served the app`);
+    say(`ok: the team server started with the app's own Node in ${seconds} s on port ${port} and served the app`);
   } catch (error) {
     failed++;
     say(`FAILED: the team server: ${reason(error)}`);
@@ -91,17 +99,23 @@ function pageReady(window: BrowserWindow): Promise<void> {
     });
     contents.on('preload-error', (_event, path, error) => finish(new Error(`the preload script ${path} failed: ${error.message}`)));
     contents.on('render-process-gone', (_event, details) => finish(new Error(`the page's process stopped (${details.reason})`)));
+    // One question at a time: asked while the page loads, it is answered once the page has loaded.
+    let asking = false;
     const poll = setInterval(() => {
       if (window.isDestroyed()) {
         finish(new Error('the window was closed'));
         return;
       }
+      if (asking) return;
+      asking = true;
       contents.executeJavaScript(PAGE_READY, true).then(
         (ready: unknown) => {
+          asking = false;
           if (ready === true) finish();
         },
         () => {
-          // Asked while the page was still loading: asked again.
+          // The page went away while it was asked (a reload): asked again.
+          asking = false;
         },
       );
     }, 250);

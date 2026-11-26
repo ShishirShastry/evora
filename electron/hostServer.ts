@@ -67,7 +67,8 @@ async function healthy(port: number): Promise<boolean> {
   }
 }
 
-export async function startHost(port: number): Promise<HostStatus> {
+/** `timeoutMs`: how long the server may take to answer; the smoke test allows more (electron/smoke.ts). */
+export async function startHost(port: number, timeoutMs = 20_000): Promise<HostStatus> {
   if (child && status?.state === 'running') return hostStatus();
   const entry = serverEntry();
   if (!existsSync(entry)) return set({ ...hostStatus(), state: 'error', message: `The server's files are missing from this installation (${entry}).` });
@@ -99,15 +100,16 @@ export async function startHost(port: number): Promise<HostStatus> {
     }
   });
 
-  // Ready when it answers GET /api/health; it gives up after 20 seconds.
-  const deadline = Date.now() + 20_000;
+  // Ready when it answers GET /api/health; it gives up after timeoutMs (20 seconds unless told otherwise).
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const done = await Promise.race([exited.then(() => 'exited' as const), new Promise<'wait'>((resolve) => setTimeout(() => resolve('wait'), 250))]);
     if (done === 'exited') return hostStatus();
     if (await healthy(port)) return set({ state: 'running', port, addresses: networkAddresses(port), dataDir, message: null });
   }
   started.kill();
-  return set({ state: 'error', port: null, addresses: [], dataDir, message: 'The server did not start in time.' });
+  const last = errors.trim().split('\n').filter(Boolean).pop();
+  return set({ state: 'error', port: null, addresses: [], dataDir, message: last ? `The server did not start in time: ${last}` : 'The server did not start in time.' });
 }
 
 function describe(errors: string, port: number): string {
