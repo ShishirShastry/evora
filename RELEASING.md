@@ -46,11 +46,20 @@ installed. Everything here runs on GitHub Actions from the files in
    - *desktop* (Windows, macOS, Linux): `npm run dist:desktop -- --publish always`
      builds the installers with electron-builder and uploads them, with the
      update files, into the draft. On macOS one job builds both Apple silicon
-     (arm64) and Intel (x64), so one `latest-mac.yml` lists both.
+     (arm64) and Intel (x64), so one `latest-mac.yml` lists both. Then each
+     job **smoke-tests** what it built on its own system: it installs the
+     Windows installer silently, opens each Mac disk image (the Intel one
+     through Rosetta), installs the `.deb` and runs the AppImage, and starts the
+     app with `--smoke-test` (electron/smoke.ts). The app's window must load
+     the app and reach the desktop bridge, and the team server packed with it
+     must start with the app's own Node and answer. The portable Windows build
+     is not started.
    - *self-host*: builds the web app, packs it with the server into
      `evora-server-X.Y.Z.tar.gz` (with a `.sha256`), checks that it starts and
      answers `/api/health`, attaches it to the draft, and, if `deploy/Dockerfile`
-     exists, pushes the image `ghcr.io/<owner>/<repo>:X.Y.Z` and `:latest`.
+     exists, builds the container image, starts it, checks that it answers
+     `/api/health` and serves the app, and pushes it as
+     `ghcr.io/<owner>/<repo>:X.Y.Z` and `:latest`.
 6. **Check the draft** (Releases -> the draft for vX.Y.Z). It should hold:
    - Windows: `Evora Setup X.Y.Z.exe` (or the name the desktop config gives),
      its `.blockmap`, and `latest.yml`;
@@ -60,7 +69,9 @@ installed. Everything here runs on GitHub Actions from the files in
    - `evora-server-X.Y.Z.tar.gz` and its `.sha256`.
 
    Download at least one installer and try it.
-7. **Publish the draft** (Edit -> Publish release). Only now can people and
+7. **Publish the draft** (Edit -> Publish release), **only if every job of the
+   Release run is green.** The desktop jobs upload into the draft before their
+   smoke tests run, so a draft can hold installers that failed them. Only now can people and
    installed copies see it. To withdraw a bad release, delete it (or mark it
    as a pre-release) and release a higher version; never re-use a tag.
 
@@ -141,7 +152,11 @@ There are no code-signing certificates yet, so every installer is **unsigned**.
   `xattr -dr com.apple.quarantine /Applications/Evora.app` in Terminal.) **Automatic updates
   do not work on macOS without signing** (macOS refuses to swap in an update
   that is not signed by the same developer), so Mac users have to download each
-  new version by hand until the app is signed.
+  new version by hand until the app is signed. From 0.2.1 the app tells them:
+  a Mac copy that is not signed with a Developer ID looks for a new version
+  without downloading it, and offers the new version's disk image for that Mac
+  (once per version when it starts, and every time from Check for updates…).
+  Copies of 0.2.0 and earlier only report an error from the menu.
 - **Linux.** Linux packages are not signed by this pipeline either; AppImages
   run once they are made executable, and their updates work.
 

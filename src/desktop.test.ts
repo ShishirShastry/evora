@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { appFilePath, contentType } from '../electron/staticFiles';
 import { menuSpec, toAccelerator, type CommandItem } from '../electron/menuSpec';
+import { macDownloadUrl, signedWithDeveloperId } from '../electron/updateNotice';
 import { documentLink, inviteLink } from './collab/api';
 import { configuredSocketUrl, linkOrigin, setServerOrigin } from './collab/endpoint';
 import { createDocument, serializeFile, toFile } from './core';
@@ -261,5 +262,34 @@ describe('the files app://evora serves', () => {
     expect(contentType('fonts/inter.woff2')).toBe('font/woff2');
     expect(contentType('index.html')).toBe('text/html; charset=utf-8');
     expect(contentType('README')).toBe('application/octet-stream');
+  });
+});
+
+describe('a new version for a Mac copy that cannot update itself', () => {
+  const RELEASES = 'https://github.com/ShishirShastry/evora/releases';
+  // As latest-mac.yml of 0.2.0 lists them.
+  const files = [{ url: 'Evora-0.3.0-mac-x64.zip' }, { url: 'Evora-0.3.0-mac-arm64.zip' }, { url: 'Evora-0.3.0-x64.dmg' }, { url: 'Evora-0.3.0-arm64.dmg' }];
+
+  it('tells a Developer ID signature from an ad-hoc one, a development certificate or none', () => {
+    const developerId = 'Executable=/Applications/Evora.app/Contents/MacOS/Evora\nIdentifier=org.evora.app\nAuthority=Developer ID Application: Someone (ABCDE12345)\nAuthority=Developer ID Certification Authority\nAuthority=Apple Root CA\nTeamIdentifier=ABCDE12345';
+    const adHoc = 'Executable=/Applications/Evora.app/Contents/MacOS/Evora\nIdentifier=org.evora.app\nCodeDirectory v=20400 size=1234 flags=0x2(adhoc) hashes=30+7\nSignature=adhoc\nTeamIdentifier=not set';
+    const development = 'Identifier=org.evora.app\nAuthority=Apple Development: Someone (XYZ)\nAuthority=Apple Worldwide Developer Relations Certification Authority';
+    expect(signedWithDeveloperId(developerId)).toBe(true);
+    expect(signedWithDeveloperId(adHoc)).toBe(false);
+    expect(signedWithDeveloperId(development)).toBe(false);
+    expect(signedWithDeveloperId('/Applications/Evora.app: code object is not signed at all')).toBe(false);
+    expect(signedWithDeveloperId('')).toBe(false);
+  });
+
+  it('offers the disk image for this Mac, or the release page when none fits', () => {
+    expect(macDownloadUrl(RELEASES, '0.3.0', files, 'arm64')).toBe(`${RELEASES}/download/v0.3.0/Evora-0.3.0-arm64.dmg`);
+    expect(macDownloadUrl(RELEASES, '0.3.0', files, 'x64')).toBe(`${RELEASES}/download/v0.3.0/Evora-0.3.0-x64.dmg`);
+    // One disk image for every Mac.
+    expect(macDownloadUrl(RELEASES, '0.3.0', [{ url: 'Evora-0.3.0-universal.dmg' }], 'arm64')).toBe(`${RELEASES}/download/v0.3.0/Evora-0.3.0-universal.dmg`);
+    // Zips only, two images that are not for this Mac, nothing listed, or an address that is not https.
+    expect(macDownloadUrl(RELEASES, '0.3.0', files.slice(0, 2), 'arm64')).toBe(`${RELEASES}/tag/v0.3.0`);
+    expect(macDownloadUrl(RELEASES, '0.3.0', [{ url: 'a-ppc.dmg' }, { url: 'b-ia32.dmg' }], 'arm64')).toBe(`${RELEASES}/tag/v0.3.0`);
+    expect(macDownloadUrl(RELEASES, '0.3.0', [], 'arm64')).toBe(`${RELEASES}/tag/v0.3.0`);
+    expect(macDownloadUrl(RELEASES, '0.3.0', [{ url: 'http://example.com/Evora-arm64.dmg' }], 'arm64')).toBe(`${RELEASES}/tag/v0.3.0`);
   });
 });

@@ -13,6 +13,8 @@ them together with Phase 10.
 
 ### Added
 
+- **Macs hear about new versions.** A Mac copy of Evora can't install updates itself until the Mac builds are signed by Apple. It used to try and fail without a word. Now it tells you when a new version is out and offers the download for your Mac: once per version when it starts, and from Check for updates… at any time.
+- **Every installer is tried before a release.** The release workflow installs or opens each installer on its own system (Windows, both Mac builds, the Linux .deb and AppImage) and starts the app in a check mode (`--smoke-test`), which loads the app's window and starts the team server packed with it. The container image is started and asked for its health before it is pushed.
 - **Design with your AI agent.** Evora's MCP server lets Claude Code, Cursor, Claude Desktop, VS Code and other AI agents create and edit `.evora` designs: frames with auto layout, shapes, text, colours, shadows and pages, with an SVG drawing to check the result. It is one file, `evora-mcp.mjs`, attached to each release; see docs/mcp.md.
 
 ### Changed

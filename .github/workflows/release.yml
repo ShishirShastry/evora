@@ -248,6 +248,84 @@ jobs:
           # shellcheck disable=SC2086 # EXTRA_BUILDER_ARGS holds several arguments
           npm run dist:desktop -- --publish never ${{ matrix.args }} $EXTRA_BUILDER_ARGS
 
+      # Smoke tests: each installer is installed or opened on its own system and
+      # the app is started with --smoke-test (electron/smoke.ts). Its window
+      # must load the app and reach the desktop bridge, and the team server
+      # packed with it must start and answer. A failure here turns the run red
+      # before anyone publishes the draft (RELEASING.md), and before builds are
+      # added to an existing release. The portable Windows build is not
+      # started: it is the same app as the installed one, unpacked to a
+      # temporary folder.
+      - name: Smoke test - install and start the app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 10
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $setup = "release\Evora-Setup-$env:VERSION.exe"
+          if (-not (Test-Path $setup)) { Write-Error "There is no $setup."; exit 1 }
+          # Silent install for this user, as the installer does by default.
+          Start-Process -FilePath $setup -ArgumentList '/S' -Wait
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Evora\Evora.exe'
+          if (-not (Test-Path $exe)) { Write-Error "The installer did not install $exe."; exit 1 }
+          $run = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\smoke.err"
+          Get-Content "$env:RUNNER_TEMP\smoke.out"
+          if ($run.ExitCode -ne 0) {
+            Get-Content "$env:RUNNER_TEMP\smoke.err" -Tail 40
+            Write-Error "The installed app failed its smoke test (exit code $($run.ExitCode))."
+            exit 1
+          }
+
+      - name: Smoke test - start the app from each disk image (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        timeout-minutes: 10
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          smoke() { # arch: x64 or arm64
+            local mnt status=0
+            mnt=$(mktemp -d)
+            hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "release/Evora-$VERSION-$1.dmg" > /dev/null
+            "$mnt/Evora.app/Contents/MacOS/Evora" --smoke-test || status=$?
+            hdiutil detach "$mnt" > /dev/null || hdiutil detach -force "$mnt" > /dev/null
+            return "$status"
+          }
+          if [ "$(uname -m)" = arm64 ]; then
+            smoke arm64
+            # The Intel build runs here through Rosetta, when the runner has it.
+            if arch -x86_64 /usr/bin/true 2> /dev/null; then
+              smoke x64
+            else
+              echo "::warning::This runner has no Rosetta, so the Intel build was not started."
+            fi
+          else
+            smoke x64
+            echo "::warning::This runner is an Intel Mac, so the Apple silicon build was not started."
+          fi
+
+      - name: Smoke test - install and start the app (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        timeout-minutes: 10
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if ! command -v xvfb-run > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq xvfb > /dev/null
+          fi
+          # The .deb, installed as a person installs it.
+          sudo apt-get install -y -qq "./release/evora_${VERSION}_amd64.deb" > /dev/null
+          exe=$(dpkg -L evora | grep -m1 -E '^/opt/[^/]+/[Ee]vora$')
+          xvfb-run -a "$exe" --smoke-test
+          # The AppImage. These runners have no FUSE to mount it, so it unpacks itself and runs.
+          appimage="release/Evora-$VERSION-x86_64.AppImage"
+          chmod +x "$appimage"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$appimage" --smoke-test
+
       # electron-builder will not upload into a release that is already
       # published, so builds added to an existing release go up with gh.
       - name: Add the installers to the existing release
@@ -376,9 +454,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Optional: only when deploy/Dockerfile exists, the run is for a tag, and
-      # the repository variable PUBLISH_CONTAINER_IMAGE is not "false".
-      - name: Build and push the container image
+      # Built whenever deploy/Dockerfile exists, and started to check that it
+      # answers at /api/health and serves the app, before it is pushed.
+      - name: Build the container image and start it
+        if: hashFiles('deploy/Dockerfile') != ''
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build -f deploy/Dockerfile \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            -t "$image:$VERSION" -t "$image:latest" .
+          docker run -d --name evora-smoke -p 127.0.0.1:8798:8787 "$image:$VERSION" > /dev/null
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8798/api/health && curl -fsS -o /dev/null http://127.0.0.1:8798/; then ok=1; break; fi
+            sleep 1
+          done
+          docker logs evora-smoke
+          docker rm -f evora-smoke > /dev/null
+          test "$ok" = 1
+
+      # Only when the run is for a tag, and the repository variable
+      # PUBLISH_CONTAINER_IMAGE is not "false".
+      - name: Push the container image
         if: needs.prepare.outputs.publish == 'true' && hashFiles('deploy/Dockerfile') != '' && vars.PUBLISH_CONTAINER_IMAGE != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -386,12 +486,6 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          docker build -f deploy/Dockerfile \
-            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.version=$VERSION" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --label "org.opencontainers.image.licenses=MIT" \
-            -t "$image:$VERSION" -t "$image:latest" .
           docker push "$image:$VERSION"
           docker push "$image:latest"
           docker logout ghcr.io
