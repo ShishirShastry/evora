@@ -82,10 +82,10 @@ A native app that works fully offline, opens and saves files on disk, recovers y
 
 | Your system | Download |
 |---|---|
-| **Windows** 10 and 11 (64-bit) | [Installer (.exe)](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-Setup-0.2.0.exe) · [Portable, no install (.exe)](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-portable.exe) |
-| **macOS** 13 or later, Apple silicon (M1 and later) | [Disk image (.dmg)](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-arm64.dmg) · [.zip](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-mac-arm64.zip) |
-| **macOS** 13 or later, Intel | [Disk image (.dmg)](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-x64.dmg) · [.zip](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-mac-x64.zip) |
-| **Linux** (64-bit, x86-64) | [AppImage, any distribution](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/Evora-0.2.0-x86_64.AppImage) · [Debian and Ubuntu (.deb)](https://github.com/ShishirShastry/evora/releases/download/v0.2.0/evora_0.2.0_amd64.deb) |
+| **Windows** 10 and 11 (64-bit) | [Installer (.exe)](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-Setup-0.2.1.exe) · [Portable, no install (.exe)](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-0.2.1-portable.exe) |
+| **macOS** 13 or later, Apple silicon (M1 and later) | [Disk image (.dmg)](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-0.2.1-arm64.dmg) · [.zip](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-0.2.1-mac-arm64.zip) |
+| **macOS** 13 or later, Intel | [Disk image (.dmg)](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-0.2.1-x64.dmg) · [.zip](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-0.2.1-mac-x64.zip) |
+| **Linux** (64-bit, x86-64) | [AppImage, any distribution](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/Evora-0.2.1-x86_64.AppImage) · [Debian and Ubuntu (.deb)](https://github.com/ShishirShastry/evora/releases/download/v0.2.1/evora_0.2.1_amd64.deb) |
 
 Not sure which Mac you have? Apple menu → **About This Mac**: a **Chip** such as Apple M1–M4 means Apple silicon; an Intel **Processor** means Intel. Every version is on the **[Releases page](https://github.com/ShishirShastry/evora/releases/latest)**.
 
