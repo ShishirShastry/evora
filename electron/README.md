@@ -86,7 +86,7 @@ electron-updater, from the project's GitHub Releases (`publish` in `package.json
 Without signing:
 
 - **Windows (NSIS):** works. electron-updater checks a signature only when the installed app was signed; unsigned to unsigned installs. SmartScreen may warn when the installer runs.
-- **macOS:** does **not** work. Squirrel.Mac, which installs the update, requires the app to be signed (and the update signed by the same identity). An unsigned app finds and downloads the update, then fails to install it; the app says so and offers the releases page.
+- **macOS:** does **not** install. Squirrel.Mac, which installs the update, requires the app to be signed with a Developer ID (and the update signed by the same identity). So a Mac copy checks its signature with `codesign` first (once per run); without a Developer ID (the ad-hoc builds) it looks for a new version without downloading it and offers that version's disk image for this Mac in a dialog, once per version when the app starts (remembered in `update-notice.json` in the data folder) and every time from the menu (`electron/updateNotice.ts`). A Mac copy signed with a Developer ID updates itself like the others.
 - **Linux:** the AppImage updates itself (no signing involved). A `.deb` is updated through the system's package tool (`pkexec` asks for the password).
 
 None of this has been tried end to end: it needs a published release with a newer version.
